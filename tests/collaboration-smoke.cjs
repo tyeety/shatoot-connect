@@ -1,0 +1,70 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+module.exports = async ({ phase, host, viewer, states, wait, createWindow, log, artifacts }) => {
+  const run = (win, code) => win.webContents.executeJavaScript(code);
+  const identity = win => states.get(win.webContents.id).identity.deviceId;
+  const json = JSON.stringify;
+  const a = identity(host), b = identity(viewer);
+  if (phase === 'id') {
+    const id = await run(host, 'internetId.replace(/\\s/g,"")');
+    await run(viewer, `collaboration.connect({type:'id',address:${json(id)}}).then(()=>true)`);
+    await run(viewer, `collaboration.send('p:${a}','ID chat while desktop is active').then(()=>true)`);
+    await wait(host, `api.collaboration('history',{conversation:'p:${b}'}).then(rows=>rows.some(m=>m.text==='ID chat while desktop is active'))`);
+    if (!states.get(host.webContents.id).captureAllowed) throw new Error('Chat interrupted an approved desktop session');
+    await run(viewer, `collaboration.close(collaboration.peer('${a}'));true`);
+    if (!states.get(host.webContents.id).captureAllowed) throw new Error('Chat disconnect revoked an unrelated desktop session');
+    log('Independent ID chat over real RTC passed without affecting the desktop session'); return;
+  }
+  const third = createWindow();
+  try {
+    await wait(third, '!!window.shatootconnectReady && !!window.shatootconnectDirect'); third.hide();
+    const c = identity(third), cPort = states.get(third.webContents.id).directInfo.port, bPort = states.get(viewer.webContents.id).directInfo.port;
+    await run(host, `collaboration.connect({type:'lan',address:'127.0.0.1:${bPort}',deviceId:'${b}',name:'B'}).then(()=>true)`);
+    await run(host, `collaboration.connect({type:'lan',address:'127.0.0.1:${cPort}',deviceId:'${c}',name:'C'}).then(()=>true)`);
+    await run(host, `collaboration.createGroup('گروه آزمایش',['${b}','${c}']).then(group=>{window.smokeChatGroup=group.id;return true})`);
+    const group = await run(host, 'window.smokeChatGroup');
+    await run(host, `collaboration.send('g:${group}','Hello group / سلام گروه').then(()=>true)`);
+    for (const win of [viewer, third]) await wait(win, `api.collaboration('history',{conversation:'g:${group}'}).then(rows=>rows.some(m=>m.text==='Hello group / سلام گروه'))`);
+    await run(viewer, `collaboration.send('g:${group}','Reply through the group owner').then(()=>true)`);
+    await wait(third, `api.collaboration('history',{conversation:'g:${group}'}).then(rows=>rows.some(m=>m.text==='Reply through the group owner'))`);
+    await run(third, `collaboration.close(collaboration.peer('${a}'));true`);
+    await wait(host, `!collaboration.peer('${c}')`);
+    await run(viewer, `collaboration.send('g:${group}','Persisted relay for an offline group member').then(()=>true)`);
+    await wait(host, `api.collaboration('pending',{peer:'${c}'}).then(rows=>rows.some(m=>m.text==='Persisted relay for an offline group member'))`);
+    // Reopen the real DPAPI file through a new store instance, not just a cached renderer array.
+    const hostState = states.get(host.webContents.id), encryptedFile = hostState.chatStore.file;
+    if (fs.readFileSync(encryptedFile).includes(Buffer.from('Persisted relay'))) throw new Error('History was written in plaintext');
+    hostState.chatStore = null;
+    await run(host, `collaboration.connect({type:'lan',address:'127.0.0.1:${cPort}',deviceId:'${c}',name:'C'}).then(()=>true)`);
+    await wait(third, `api.collaboration('history',{conversation:'g:${group}'}).then(rows=>rows.filter(m=>m.text==='Persisted relay for an offline group member').length===1)`);
+    log('Three-peer serverless group chat, owner relay, encrypted restart and offline outbox delivery passed');
+    const file = path.join(artifacts, 'chat-فایل.bin'), bytes = crypto.randomBytes(180123); fs.writeFileSync(file, bytes);
+    await run(host, `collaboration.sendFiles('p:${b}','sources',${json([file])}).then(()=>true)`);
+    await wait(viewer, `api.collaboration('history',{conversation:'p:${a}'}).then(rows=>rows.some(m=>m.kind==='file'&&m.attachment))`);
+    const received = states.get(viewer.webContents.id).chatStore.history({ conversation: `p:${a}` }).find(m => m.kind === 'file' && m.attachment);
+    if (!fs.readFileSync(states.get(viewer.webContents.id).chatStore.files(received.attachment)[0]).equals(bytes)) throw new Error('Standalone chat file bytes mismatch');
+    await run(viewer, `collaboration.sendFiles('p:${a}','sources',${json([file])}).then(()=>true)`);
+    await wait(host, `api.collaboration('history',{conversation:'p:${b}'}).then(rows=>rows.some(m=>m.kind==='file'&&m.attachment))`);
+    await run(viewer, `collaboration.sendFiles('g:${group}','sources',${json([file])}).then(()=>true)`);
+    await wait(third, `api.collaboration('history',{conversation:'g:${group}'}).then(rows=>rows.some(m=>m.kind==='file'&&m.attachment))`);
+    const groupFile = states.get(third.webContents.id).chatStore.history({ conversation: `g:${group}` }).find(m => m.kind === 'file' && m.attachment);
+    if (!fs.readFileSync(states.get(third.webContents.id).chatStore.files(groupFile.attachment)[0]).equals(bytes)) throw new Error('Group forwarded file bytes mismatch');
+    if ([host, viewer, third].some(win => states.get(win.webContents.id).captureAllowed)) throw new Error('Standalone chat acquired screen permission');
+    if (!await run(viewer, `collaboration.rpc(collaboration.peer('${a}'),'clipboard-write',{text:'forged'}).then(()=>false,e=>e.message==='Unknown chat request.')`)) throw new Error('Chat escalated to clipboard permission');
+    log('Standalone bidirectional file transfer and three-peer group file forwarding passed with no screen/control grant');
+    await run(host, `messenger.open();messenger.select('g:${group}').then(()=>true)`);
+    host.show(); host.focus();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const screenshot = async name => { let last; for (let attempt = 0; attempt < 3; attempt++) { try { fs.writeFileSync(path.join(artifacts, name), (await host.webContents.capturePage()).toPNG()); return; } catch (error) { last = error; await new Promise(resolve => setTimeout(resolve, 250)); } } throw last; };
+    const fit = "[...document.querySelectorAll('#messenger-dialog input,#messenger-dialog textarea,#messenger-dialog button')].filter(e=>e.getClientRects().length).every(e=>{const r=e.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})";
+    if (!await run(host, fit)) throw new Error('Messenger controls do not fit at 1000x720');
+    await screenshot('messenger-en.png');
+    await run(host, "window.i18n.setLanguage('fa');true");
+    if (!await run(host, fit)) throw new Error('Persian messenger controls do not fit');
+    await new Promise(resolve => setTimeout(resolve, 300)); await screenshot('messenger-fa.png');
+    await run(host, "document.querySelector('#messenger-dialog').close();window.i18n.setLanguage('en');true");
+    for (const win of [host, viewer, third]) await run(win, 'for(const s of [...collaboration.sessions.values()])collaboration.close(s);true');
+  } finally { if (!third.isDestroyed()) third.destroy(); }
+};

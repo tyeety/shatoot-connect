@@ -1,0 +1,28 @@
+name: Windows checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - run: npm ci
+      - run: npm run check:release
+      - run: npm test
+      - run: npm run build:native
+      - run: ./native/publish/ShatootConnect.Input.exe --self-test
+      - run: npm run build:server-manager
+      # Screen capture needs an interactive, unlocked desktop. Run test:smoke
+      # locally; a Windows service runner cannot establish desktop acceptance.

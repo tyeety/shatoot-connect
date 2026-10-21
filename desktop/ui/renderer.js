@@ -1,0 +1,680 @@
+'use strict';
+const $ = id => document.getElementById(id);
+const api = window.shatootconnect;
+const tr = value => window.i18n.translate(value);
+let config, socket, connectPromise, role = 'idle', stream, pc, sender, controlChannel, pointerChannel;
+let iceServers = [], candidates = [], peerGeneration = 0, allowedControl = false, statsTimer, joinTimer, previousStats;
+let profileName = 'speed', pointerFrame = 0, latestPointer, toastTimer, currentStats = {};
+let requestPending = false, messageQueue = Promise.resolve();
+let registered = false, incomingEnabled = true, registrationWanted = true, internetId = '', reconnectTimer, reconnectAttempts = 0, forceRelay = false, requestSerial = 0;
+const iceErrors = [];
+let directSocket, sessionRoute = 'server', serverIce = [], serverRelay = false;
+let exchange, keyboardGrabActive = false, layoutSync, hostCursor, hostPasswordValue = '', hostPasswordShown = false, lastLocalCursor;
+let supportsFixedPassword = false, guestKeyboardLayout = '', keyboardTimer, keyboardQueue = Promise.resolve(), keyboardEpoch = 0, peerKeyboardSync = false;
+function signalReady() { return sessionRoute === 'lan-host' || (sessionRoute === 'lan-viewer' ? directSocket : socket)?.readyState === WebSocket.OPEN; }
+
+function status(message, error = false) { if(error && role==='viewer' && $('file-transfer-status')){$('file-transfer-status').hidden=false;$('file-transfer-status').textContent=tr(message);} if ($('settings-status')) { $('settings-status').textContent = tr(message); $('settings-status').classList.toggle('error', error); } $('session-status').textContent = tr(message); $('session-status').classList.toggle('error', error); }
+function toast(message) { $('toast').textContent = tr(message); $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 6500); }
+function serverState(online, text) { $('server-status').dataset.state = online ? 'online' : 'offline'; $('server-status').querySelector('span').textContent = tr(text); }
+function send(message) {
+  if (sessionRoute === 'lan-host') { api.directSend(JSON.parse(JSON.stringify(message))); return; }
+  const transport = sessionRoute === 'lan-viewer' ? directSocket : socket;
+  if (transport?.readyState !== WebSocket.OPEN) throw new Error('اتصال به سرور برقرار نیست.');
+  transport.send(JSON.stringify(message));
+}
+async function dispatch(message, source = 'server') {
+  if (message.type?.startsWith('collab-')) { window.collaboration?.receive(message, source === 'lan-host' ? { send: data => api.directSend(data), type: 'incoming-lan' } : { send: data => socket?.send(JSON.stringify(data)), type: 'id', endpoint: config.endpoint }); return; }
+  if (message.type === 'join-request') {
+    if (role !== 'idle' || requestPending || !incomingEnabled) {
+      if (source === 'lan-host') api.directSend({ type: 'reject' });
+      else socket?.send(JSON.stringify({ type: 'reject' }));
+      return;
+    }
+    sessionRoute = source;
+    iceServers = source === 'server' ? serverIce : []; forceRelay = source === 'server' && serverRelay;
+  }
+  if (source !== sessionRoute && message.type !== 'registered') return;
+  if (message.type === 'ice' && source === 'server') { serverIce = message.iceServers || []; serverRelay = message.forceRelay === true; }
+  await onMessage(message);
+}
+api.onDirect(message => {
+  messageQueue = messageQueue.then(() => dispatch(message, 'lan-host')).catch(e => { stopSession(true); status(e.message, true); });
+});
+function guarded(fn) { return async (...args) => { try { await fn(...args); } catch (e) { status(e.message || String(e), true); toast(e.message || String(e)); } }; }
+function updateControls() {
+  const hosting = incomingEnabled && (registered || !!window.shatootconnectDirect);
+  renderHostCredentials();
+  $('host-start').hidden = hosting; $('host-stop').hidden = !hosting;
+  $('host-start').disabled = role !== 'idle'; $('screen-select').disabled = role !== 'idle';
+  $('join').disabled = role !== 'idle'; $('join-label').textContent = tr(role === 'joining' ? 'در انتظار تأیید میزبان…' : 'اتصال به دستگاه');
+  $('shared-cursor').disabled = role !== 'idle';
+  $('unattended').disabled = role !== 'idle' || requestPending || !config?.fixedPassword; $('fixed-password').disabled = role !== 'idle' || requestPending; $('save-fixed-password').disabled = role !== 'idle' || requestPending;
+  for (const button of document.querySelectorAll('.favorite-connect')) button.disabled = role !== 'idle' || requestPending;
+  $('remote-id').disabled = role !== 'idle'; $('remote-password').disabled = role !== 'idle';
+  $('server-url').disabled = role !== 'idle'; $('connect-server').disabled = role !== 'idle'; $('local-server').disabled = role !== 'idle';
+  $('copy-id').disabled = !hosting; $('copy-password').disabled = !hosting;
+}
+function register() {
+  if (!registrationWanted || socket?.readyState !== WebSocket.OPEN) return;
+  if (config.fixedPassword && !supportsFixedPassword) { status('Fixed password is saved for LAN. Update the Internet server for Internet access.', true); return; }
+  socket.send(JSON.stringify({ type: 'register', deviceId: config.deviceId, deviceSecret: config.deviceSecret, name: config.name, password: config.fixedPassword || '' }));
+  status('دریافت شناسه از سرور…');
+}
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  if (!registrationWanted || config?.internetEnabled === false) return;
+  const delay = Math.min(15000, 700 * 2 ** Math.min(reconnectAttempts++, 5)) + Math.random() * 500;
+  reconnectTimer = setTimeout(() => { if (role === 'idle' && !window.shatootconnectDirect) status('در حال تلاش مجدد برای اتصال به سرور…'); connect().catch(e => { if (!window.shatootconnectDirect && role === 'idle') status(e.message, true); scheduleReconnect(); }); }, delay);
+}
+async function connect() {
+  if (config?.internetEnabled === false) throw new Error(tr('Internet server is disabled. Enter a LAN IP or enable it in Settings.'));
+  if (connectPromise) return connectPromise;
+  if (socket?.readyState === WebSocket.OPEN) return;
+  const endpoint = await api.validateEndpoint($('server-url').value.trim());
+  $('server-url').value = endpoint;
+  serverState(false, 'در حال اتصال…');
+  connectPromise = new Promise((resolve, reject) => {
+    const ws = new WebSocket(endpoint); socket = ws;
+    let connectionError = '';
+    const timeout = setTimeout(() => { ws.close(); reject(new Error('سرور پاسخ نداد. نشانی و دسترسی شبکه را بررسی کنید.')); }, 20000);
+    ws.onmessage = event => {
+      if (socket !== ws) return;
+      let message; try { message = JSON.parse(event.data); } catch { return; }
+      if (message.type === 'error' && !registered) { connectionError = tr(message.message); reject(new Error(connectionError)); }
+      if (message.type === 'hello' && message.service === 'ShatootConnect' && message.protocol === 2) {
+        ws.send(JSON.stringify({ type: 'authenticate', serverKey: $('server-key').value.trim() })); return;
+      }
+      if (message.type === 'ready') {
+        if (message.service !== 'ShatootConnect' || message.protocol !== 2) {
+          clearTimeout(timeout); ws.close(); reject(new Error(tr('پیکربندی سرور با این نسخه سازگار نیست. سرور را به نسخهٔ جدید ارتقا دهید.'))); return;
+        }
+        supportsFixedPassword = message.features?.includes('fixed-password') === true;
+        window.collaborationServerReady = message.features?.includes('collaboration-v1') === true;
+        clearTimeout(timeout); serverIce = Array.isArray(message.iceServers) ? message.iceServers : []; serverRelay = message.forceRelay === true;
+        if (sessionRoute === 'server') { iceServers = serverIce; forceRelay = serverRelay; }
+        api.saveEndpoint(endpoint, $('server-key').value.trim()).then(() => {
+          if (socket !== ws) return;
+          config.endpoint = endpoint;
+          reconnectAttempts = 0; clearTimeout(reconnectTimer); serverState(true, 'سرور آمادهٔ اتصال'); register(); resolve();
+        }).catch(reject); return;
+      }
+      messageQueue = messageQueue.then(() => dispatch(message)).catch(e => {
+        status(e.message, true); toast(e.message);
+        if (pc) stopSession(true);
+      });
+    };
+    ws.onerror = () => { clearTimeout(timeout); reject(new Error('اتصال به سرور ناموفق بود. IP، پورت و گواهی TLS را بررسی کنید.')); };
+    ws.onclose = () => {
+      clearTimeout(timeout); reject(new Error('اتصال سرور بسته شد.'));
+      if (socket !== ws) return;
+      serverState(false, 'ارتباط سرور قطع شد'); socket = null;
+      registered = false; internetId = ''; renderHostCredentials();
+      if (sessionRoute === 'server' && (role !== 'idle' || requestPending)) { stopSession(false); status(connectionError || 'اتصال سرور بسته شد.', true); }
+      updateControls();
+      scheduleReconnect();
+    };
+  }).finally(() => { connectPromise = null; });
+  return connectPromise;
+}
+async function onMessage(m) {
+  if (m.type === 'ice') {
+    iceServers = Array.isArray(m.iceServers) ? m.iceServers : []; forceRelay = m.forceRelay === true;
+  } else if (m.type === 'registered') {
+    registered = true;
+    window.collaboration?.notify();
+    internetId = m.id.match(/.{1,3}/g).join(' '); $('host-id').textContent = internetId; hostPasswordValue = m.password; $('host-password').textContent = hostPasswordShown ? hostPasswordValue : '••••••••';
+    updateControls(); status('شناسه آماده است. برای اتصال، شناسه و رمز را با فرد مورد اعتماد به اشتراک بگذارید.');
+    verifyNetwork();
+  } else if (m.type === 'waiting') {
+    status('درخواست ارسال شد؛ منتظر تأیید میزبان هستیم.');
+  } else if (m.type === 'join-request' && (registered || sessionRoute === 'lan-host')) {
+    if (role !== 'idle' || requestPending) { send({ type: 'reject' }); return; }
+    requestPending = true; const generation = peerGeneration;
+    const serial = ++requestSerial;
+    status(window.i18n.language === 'fa' ? `${m.name} منتظر تأیید شماست.` : `${m.name} is waiting for your approval.`);
+    // Do not block the message queue with a native consent dialog; a guest can leave meanwhile.
+    (async () => { await api.selectSource($('screen-select').value); return api.approve(m.name, m.fixedPassword === true); })().then(async result => {
+      if (!requestPending || role !== 'idle' || generation !== peerGeneration || serial !== requestSerial) { await api.revoke(); return; }
+      if (result.accepted) {
+        await api.capture();
+        if (!requestPending || generation !== peerGeneration || serial !== requestSerial) { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; await api.revoke(); return; }
+        role = 'host';
+        updateControls();
+      }
+      requestPending = false;
+      allowedControl = result.control; send({ type: result.accepted ? 'accept' : 'reject', control: result.control });
+      if (!result.accepted) { stopSession(false); status('درخواست رد شد؛ میزبان آمادهٔ اتصال بعدی است.'); }
+    }).catch(e => {
+      requestPending = false; api.revokeControl();
+      if (signalReady()) send({ type: 'reject' });
+      stopSession(false); status(e.message, true);
+    });
+  } else if (m.type === 'accepted' && role === 'joining') {
+    allowedControl = m.control === true; role = 'viewer';
+    if (allowedControl) await api.exchange('viewer-start');
+    createPeer(); showSession(); status('در حال برقراری اتصال مستقیم…'); updateControls();
+  } else if (m.type === 'peer-ready' && role === 'host') {
+    createPeer(); showSession();
+    sender = pc.addTrack(stream.getVideoTracks()[0], stream);
+    preferCodec();
+    controlChannel = pc.createDataChannel('control', { ordered: true }); bindChannel(controlChannel);
+    pointerChannel = pc.createDataChannel('pointer', { ordered: false, maxRetransmits: 0 }); bindChannel(pointerChannel);
+    if (allowedControl) bindExchange(pc.createDataChannel('exchange', { ordered: true, priority: 'very-low' }));
+    await pc.setLocalDescription(await pc.createOffer()); send({ type: 'signal', data: { description: pc.localDescription } });
+    await applyProfile(profileName);
+  } else if (m.type === 'signal' && pc) {
+    const active = pc;
+    if (m.data.description) {
+      await active.setRemoteDescription(m.data.description);
+      for (const candidate of candidates.splice(0)) await active.addIceCandidate(candidate);
+      if (m.data.description.type === 'offer') {
+        preferCodec(); await active.setLocalDescription(await active.createAnswer());
+        send({ type: 'signal', data: { description: active.localDescription } });
+      }
+    } else if (m.data.candidate) {
+      if (active.remoteDescription) await active.addIceCandidate(m.data.candidate);
+      else candidates.push(m.data.candidate);
+    }
+  } else if (m.type === 'peer-left') {
+    stopSession(false); status('مهمان قطع شد؛ آمادهٔ پذیرش اتصال بعدی.');
+  } else if (m.type === 'ended') {
+    stopSession(false); status(m.reason || 'اتصال پایان یافت.');
+  } else if (m.type === 'error') {
+    if (role === 'joining') stopSession(false);
+    status(m.message, true); toast(m.message);
+  }
+}
+function preferCodec() {
+  const capabilities = RTCRtpReceiver.getCapabilities('video');
+  if (!capabilities) return;
+  const preferred = profileName === 'quality' ? 'video/VP9' : 'video/H264';
+  const codecs = [...capabilities.codecs].sort((a, b) => Number(b.mimeType === preferred) - Number(a.mimeType === preferred));
+  for (const transceiver of pc.getTransceivers()) if (transceiver.receiver.track.kind === 'video') transceiver.setCodecPreferences(codecs);
+}
+function createPeer() {
+  layoutSync = new window.LayoutSync(role === 'host');
+  const active = new RTCPeerConnection({ iceServers, iceTransportPolicy: forceRelay ? 'relay' : 'all', bundlePolicy: 'max-bundle' }); pc = active;
+  const generation = peerGeneration;
+  active.onicecandidate = event => { if (event.candidate && signalReady() && pc === active) send({ type: 'signal', data: { candidate: event.candidate.toJSON() } }); };
+  active.onicecandidateerror = event => { iceErrors.push({ code: event.errorCode, text: event.errorText, url: event.url }); };
+  active.ondatachannel = event => {
+    if (event.channel.label === 'control') controlChannel = event.channel;
+    else if (event.channel.label === 'pointer') pointerChannel = event.channel;
+    else if (event.channel.label === 'exchange' && allowedControl) { bindExchange(event.channel); return; }
+    else { event.channel.close(); return; }
+    bindChannel(event.channel);
+  };
+  active.ontrack = event => {
+    try { if ('jitterBufferTarget' in event.receiver) event.receiver.jitterBufferTarget = 0; if ('playoutDelayHint' in event.receiver) event.receiver.playoutDelayHint = 0; } catch {}
+    $('remote-video').srcObject = event.streams[0] || new MediaStream([event.track]);
+    $('remote-video').play().catch(() => {});
+  };
+  active.onconnectionstatechange = () => {
+    if (pc !== active || generation !== peerGeneration) return;
+    if (active.connectionState === 'connected') {
+      clearTimeout(joinTimer);
+      status(role === 'host' ? 'مهمان متصل است. برای قطع فوری Ctrl + Shift + F12 را بزنید.' : 'متصل شد؛ برای ارسال موس و کیبورد، روی تصویر کلیک کنید.');
+      startStats();
+    } else if (active.connectionState === 'failed') {
+      stopSession(true); status('مسیر تصویر برقرار نشد. در شبکه‌های محدود، سرور TURN را تنظیم کنید.', true);
+    } else if (active.connectionState === 'disconnected') {
+      api.releaseKeys(); status('مسیر ارتباط مختل شده؛ در حال تلاش برای بازیابی…', true);
+    }
+  };
+}
+function bindExchange(channel) { if (exchange) { channel.close(); return; } exchange = new window.SessionExchange(channel, (message,error,detail) => { const text=tr(message)+(detail?.percent!==undefined?' '+detail.percent+'%':'');status(text,error); $('file-transfer-status').hidden=false; $('file-transfer-status').textContent=text; if (detail?.received) { $('open-received').hidden = false; toast(message); } }); }
+function bindChannel(channel) {
+  const generation = peerGeneration;
+  let opened = false;
+  channel.onopen = () => {
+    if (opened || generation !== peerGeneration) return; opened = true;
+    if (channel.label === 'pointer' && role === 'host' && lastLocalCursor) channel.send(JSON.stringify({ ...lastLocalCursor, visible: config.showHostCursor && lastLocalCursor.visible }));
+    if (channel.label === 'control') api.watchKeyboard(true).catch(e => status(e.message, true));
+    if (role === 'viewer' && channel.label === 'control') {
+      channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true }));
+      channel.send(JSON.stringify({ type: 'profile', name: $('quality').value }));
+      if (allowedControl) { api.exchange('viewer-start').catch(e => status(e.message, true)); api.watchKeyboard(true).catch(e => status(e.message, true));  }
+    }
+  };
+  if (channel.readyState === 'open') queueMicrotask(() => channel.onopen());
+  channel.onmessage = event => {
+    if (generation !== peerGeneration) return;
+    if (typeof event.data !== 'string' || event.data.length > 2048) return;
+    let data; try { data = JSON.parse(event.data); } catch { return; }
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'features' && channel.label === 'control') {
+      if (role === 'host' && data.keyboardSync === true) channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true }));
+      if (role === 'viewer') { peerKeyboardSync = data.keyboardSync === true && data.bidirectionalLayout === true; layoutSync.ready = peerKeyboardSync; if (allowedControl) { layoutSync.observed = ''; const initial = layoutSync.observe(guestKeyboardLayout); if (initial) controlChannel.send(JSON.stringify(initial)); } } else layoutSync.ready = data.bidirectionalLayout === true;
+      return;
+    }
+    if (role === 'viewer' && channel.label === 'control' && data.type === 'layout-status') {
+      $('keyboard-status').textContent = tr(data.ok ? 'Keyboard synchronized' : 'Keyboard sync failed; typing paused');
+      $('keyboard-status').dataset.state = data.ok ? 'ok' : 'error'; return;
+    }
+    if (data.type === 'guest-cursor' && role === 'host') { api.guestCursor(data); return; }
+    if (data.type === 'host-cursor' && role === 'viewer') { hostCursor = data; renderHostCursor(); return; }
+    if (data.type === 'layout-sync' && channel.label === 'control' && allowedControl) { if (layoutSync.receive(data)) { guestKeyboardLayout = data.layout; api.applyKeyboard(data.layout).catch(e => status(e.message, true)); } return; }
+    if (role !== 'host') return;
+    if (data.type === 'profile' && channel.label === 'control' && config.profiles[data.name]) {
+      applyProfile(data.name).catch(e => status(`تنظیم کیفیت ناموفق بود: ${e.message}`, true));
+    } else if (allowedControl) api.input(data);
+  };
+}
+function sendKeyboardLayout() {
+  if (!allowedControl || !layoutSync || controlChannel?.readyState !== 'open') return;
+  const message = layoutSync.observe(guestKeyboardLayout); if (message) controlChannel.send(JSON.stringify(message));
+}
+api.onKeyboardLayout(layout => { if (layoutSync?.expected && layoutSync.expected !== layout && Date.now() < layoutSync.deadline) return; guestKeyboardLayout = layout; sendKeyboardLayout(); });
+api.onHostCursor(data => { lastLocalCursor = data; if (role === 'host' && pointerChannel?.readyState === 'open' && pointerChannel.bufferedAmount < 4096) pointerChannel.send(JSON.stringify({ ...data, visible: config.showHostCursor && data.visible })); });
+function renderHostCursor() {
+  const marker = $('host-cursor'), video = $('remote-video'), stage = $('video-stage');
+  if (!config?.showHostCursor || role !== 'viewer' || !hostCursor?.visible || hostCursor.x < 0 || hostCursor.x > 1 || hostCursor.y < 0 || hostCursor.y > 1 || !video.videoWidth) { marker.hidden = true; return; }
+  const width = stage.clientWidth, height = stage.clientHeight, scale = Math.min(width / video.videoWidth, height / video.videoHeight), w = video.videoWidth * scale, h = video.videoHeight * scale;
+  marker.style.left = ((width-w)/2+hostCursor.x*w)+'px'; marker.style.top = ((height-h)/2+hostCursor.y*h)+'px'; marker.hidden = false;
+}
+new ResizeObserver(renderHostCursor).observe($('video-stage'));
+api.onKeyboardApplied(data => { if (role === 'host' && controlChannel?.readyState === 'open') controlChannel.send(JSON.stringify(data)); if (!data.ok && allowedControl) { input({ type: 'release' }); status(tr('Keyboard sync failed; typing paused'), true); if (layoutSync) layoutSync.expected = ''; api.currentKeyboard().then(layout => { guestKeyboardLayout = layout; sendKeyboardLayout(); }).catch(e => status(e.message, true)); } });
+async function applyProfile(name) {
+  if (!config.profiles[name] || !stream) return;
+  profileName = name; const p = config.profiles[name];
+  const track = stream.getVideoTracks()[0];
+  track.contentHint = name === 'quality' ? 'detail' : 'motion';
+  await track.applyConstraints({ width: { max: p.width }, height: { max: p.height }, frameRate: { ideal: p.fps, max: p.fps } });
+  const currentSender = sender;
+  if (currentSender) {
+    const params = currentSender.getParameters();
+    if (!params.encodings?.length) params.encodings = [{}];
+    params.encodings[0].priority = 'high'; params.encodings[0].networkPriority = 'high'; params.encodings[0].maxBitrate = p.bitrate; params.encodings[0].maxFramerate = p.fps;
+    params.degradationPreference = name === 'quality' ? 'maintain-resolution' : 'maintain-framerate';
+    await currentSender.setParameters(params);
+  }
+}
+function showSession() {
+  $('session-panel').hidden = false; $('open-received').hidden = true; $('file-transfer-status').hidden=true;
+  $('session-title').textContent = role === 'host' ? 'صفحهٔ شما در حال اشتراک‌گذاری است' : 'میز کار از راه دور';
+  $('control-label').textContent = allowedControl ? 'موس و کیبورد فعال' : 'فقط مشاهده';
+  $('live-quality').value = $('quality').value;
+  $('live-quality').hidden = role !== 'viewer';
+  $('video-stage').hidden = role === 'host';
+  document.body.classList.toggle('viewing', role === 'viewer');
+  $('fullscreen').hidden = role !== 'viewer'; $('send-files').hidden = !allowedControl;
+}
+async function exitVideoFullscreen() {
+  try { if (document.fullscreenElement) await document.exitFullscreen(); }
+  finally { await api.exitFullscreen().catch(() => {}); }
+}
+function closePeer() {
+  guestCursorPosition=null; keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); exchange?.close(); exchange = null;
+  keyboardEpoch++; guestKeyboardLayout = ''; layoutSync = null; hostCursor = null; $('host-cursor').hidden = true;
+  peerKeyboardSync = false;
+  exitVideoFullscreen().catch(() => {});
+  peerGeneration++; requestSerial++; requestPending = false; allowedControl = false;
+  api.revokeControl().catch(() => {});
+  clearInterval(keyboardTimer); api.watchKeyboard(false).catch(() => {}); $('keyboard-status').textContent = '';
+  clearInterval(statsTimer); clearTimeout(joinTimer); statsTimer = null; previousStats = null;
+  controlChannel?.close(); pointerChannel?.close(); pc?.close(); pc = null; sender = null;
+  controlChannel = null; pointerChannel = null; candidates = [];
+  $('remote-video').srcObject = null; $('video-placeholder').hidden = false;
+  $('session-panel').hidden = true; document.body.classList.remove('viewing');
+  for (const id of ['stat-rtt','stat-fps','stat-size','stat-bitrate','stat-codec','stat-route']) $(id).textContent = '—';
+}
+function stopSession(notify = true) {
+  if (notify && signalReady() && (role !== 'idle' || requestPending)) send({ type: 'end-session' });
+  closePeer();
+  if (stream) { for (const track of stream.getTracks()) { track.onended = null; track.stop(); } stream = null; }
+  api.revoke().catch(() => {}); role = 'idle';
+  const previousDirect = directSocket; directSocket = null; previousDirect?.close();
+  sessionRoute = 'server'; iceServers = serverIce; forceRelay = serverRelay;
+  updateControls();
+}
+function startStats() {
+  clearInterval(statsTimer);
+  let polling = false;
+  statsTimer = setInterval(async () => {
+    if (!pc || polling) return;
+    polling = true;
+    try {
+      const active = pc, report = await active.getStats();
+      if (active !== pc) return;
+      let video, transport, pair;
+      for (const s of report.values()) {
+        if (s.type === (role === 'host' ? 'outbound-rtp' : 'inbound-rtp') && s.kind === 'video' && !s.isRemote) video = s;
+        if (s.type === 'transport' && s.selectedCandidatePairId) transport = s;
+      }
+      if (transport) pair = report.get(transport.selectedCandidatePairId);
+      if (!video) return;
+      const bytes = role === 'host' ? video.bytesSent : video.bytesReceived;
+      const bitrate = previousStats && video.timestamp > previousStats.timestamp ? (bytes - previousStats.bytes) * 8 / (video.timestamp - previousStats.timestamp) / 1000 : 0;
+      previousStats = { bytes, timestamp: video.timestamp };
+      const codec = report.get(video.codecId)?.mimeType?.replace('video/', '') || '—';
+      const relay = pair && [report.get(pair.localCandidateId), report.get(pair.remoteCandidateId)].some(c => c?.candidateType === 'relay');
+      currentStats = { connection: active.connectionState, width: video.frameWidth || 0, height: video.frameHeight || 0,
+        fps: video.framesPerSecond || 0, mbps: Number(bitrate.toFixed(2)), rttMs: pair?.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) : null,
+        codec, route: pair ? relay ? 'TURN' : 'direct' : 'unknown', framesDecoded: video.framesDecoded || 0,
+        framesDropped: video.framesDropped || 0, limitation: video.qualityLimitationReason || null };
+      $('stat-rtt').textContent = currentStats.rttMs === null ? '—' : `${currentStats.rttMs} ms`;
+      $('stat-fps').textContent = `${Math.round(currentStats.fps)} fps`;
+      $('stat-size').textContent = `${currentStats.width} × ${currentStats.height}`;
+      $('stat-bitrate').textContent = `${currentStats.mbps} Mbps`;
+      $('stat-codec').textContent = codec; $('stat-route').textContent = pair ? relay ? 'مسیر TURN' : 'مسیر مستقیم' : 'در حال بررسی مسیر';
+    } catch {} finally { polling = false; }
+  }, 1000);
+}
+
+// Normalize against the displayed video, excluding the letterbox margins.
+function position(event) {
+  const video = $('remote-video'), r = video.getBoundingClientRect();
+  if (!video.videoWidth || !r.width || !r.height) return null;
+  const scale = Math.min(r.width / video.videoWidth, r.height / video.videoHeight);
+  const w = video.videoWidth * scale, h = video.videoHeight * scale;
+  const x = (event.clientX - r.left - (r.width - w) / 2) / w;
+  const y = (event.clientY - r.top - (r.height - h) / 2) / h;
+  return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
+}
+function input(data, pointer = false) {
+  if (data.type === 'release') keyboardEpoch++;
+  if (role !== 'viewer' || !allowedControl) return;
+  const channel = pointer ? pointerChannel : controlChannel;
+  if (channel?.readyState === 'open' && channel.bufferedAmount < 32768) channel.send(JSON.stringify(data));
+  else if (!pointer && channel?.readyState === 'open') stopSession(true); // Never silently lose a key-up.
+}
+const stage = $('video-stage');
+const activeGuestPointers = new Set(); let guestCursorPosition;
+function sendGuestCursor(position) { if (role === 'viewer' && pointerChannel?.readyState === 'open' && pointerChannel.bufferedAmount < 4096) pointerChannel.send(JSON.stringify({type:'guest-cursor', ...position})); }
+setInterval(()=>{ if (guestCursorPosition && role === 'viewer') sendGuestCursor(guestCursorPosition); },1000);
+stage.addEventListener('pointerleave',()=>{guestCursorPosition=null;sendGuestCursor({visible:false});});
+stage.addEventListener('pointermove', event => {
+  const p = position(event); if (!p) return;
+  guestCursorPosition = { ...p, visible:true }; latestPointer = p; if (pointerFrame) return;
+  pointerFrame = setTimeout(() => { pointerFrame = 0; if (guestCursorPosition) sendGuestCursor(guestCursorPosition); if (latestPointer) input({ type: 'move', ...latestPointer }, true); }, 8);
+});
+stage.addEventListener('pointerdown', event => {
+  if (!allowedControl) return; const p = position(event); if (!p) return;
+  event.preventDefault(); stage.focus(); stage.setPointerCapture(event.pointerId);
+  activeGuestPointers.add(event.pointerId);
+  if (role === 'viewer' && peerKeyboardSync) api.keyboardGrab(true).catch(e => status(e.message, true));
+  latestPointer = p; guestCursorPosition={...p,visible:true};sendGuestCursor(guestCursorPosition);
+  input({ type: 'button', button: event.button, down: true, ...p });
+});
+stage.addEventListener('pointerup', event => {
+  activeGuestPointers.delete(event.pointerId);
+  const p = position(event) || latestPointer;
+  if (p) input({ type: 'button', button: event.button, down: false, ...p });
+  if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+});
+stage.addEventListener('pointercancel', () => { activeGuestPointers.clear(); input({ type: 'release' }); });
+stage.addEventListener('lostpointercapture', event => { if (activeGuestPointers.delete(event.pointerId)) input({ type: 'release' }); });
+stage.addEventListener('contextmenu', e => e.preventDefault());
+stage.addEventListener('wheel', e => {
+  if (!allowedControl) return; e.preventDefault();
+  const factor = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
+  input({ type: 'wheel', dx: Math.round(e.deltaX * factor), dy: Math.round(e.deltaY * factor), ...(position(e) || latestPointer || {}) });
+}, { passive: false });
+async function sendGuestKey(data, paste = false) {
+  const generation = peerGeneration, epoch = keyboardEpoch;
+  keyboardQueue = keyboardQueue.then(async () => {
+    if (generation !== peerGeneration || epoch !== keyboardEpoch || role !== 'viewer' || !allowedControl) return;
+    if (paste && exchange) await exchange.flushClipboard();
+    const layout = layoutSync?.expected || guestKeyboardLayout || await api.currentKeyboard();
+    if (generation !== peerGeneration || epoch !== keyboardEpoch || role !== 'viewer' || !allowedControl) return;
+    guestKeyboardLayout = layout; input({ ...data, layout });
+  }).catch(e => { if (generation === peerGeneration && epoch === keyboardEpoch) { input({ type: 'release' }); status(e.message, true); } });
+}
+api.onGrabbedKey(data => {
+  if (data.ready) { keyboardGrabActive = true; return; }
+  if (data.error || data.stopped) { keyboardGrabActive = false; input({ type: 'release' }); if (data.error) status(data.error, true); return; }
+  if (role !== 'viewer' || !allowedControl || document.activeElement !== stage) return;
+  if (data.release) { input({ type: 'release' }); if (data.layoutSwitch) keyboardQueue = keyboardQueue.then(async () => { guestKeyboardLayout = await api.currentKeyboard(); sendKeyboardLayout(); }).catch(e => status(e.message, true)); return; }
+  if (!peerKeyboardSync) return;
+  sendGuestKey({ type: 'physical-key', vk: data.vk, scan: data.scan, extended: data.extended, down: data.down }, data.down && ((data.ctrl && data.vk === 86) || (data.shift && data.vk === 45)));
+});
+for (const type of ['keydown', 'keyup']) stage.addEventListener(type, e => {
+  if (!allowedControl) return;
+  if (e.code === 'F12' && e.ctrlKey && e.shiftKey) return;
+  if (keyboardGrabActive) { e.preventDefault(); return; }
+  if (!peerKeyboardSync) { e.preventDefault(); status(tr('Update both clients to synchronize the keyboard.'), true); return; }
+  const layoutShortcut = ((e.altKey || e.ctrlKey) && /^Shift/.test(e.code)) || (e.shiftKey && /^(Alt|Control)/.test(e.code)) || (e.metaKey && e.code === 'Space');
+  if (layoutShortcut) { input({ type: 'release' }); return; }
+  e.preventDefault();
+  sendGuestKey({ type: 'key', code: e.code, down: type === 'keydown' }, type === 'keydown' && ((e.ctrlKey && e.code === 'KeyV') || (e.shiftKey && e.code === 'Insert')));
+});
+stage.addEventListener('focus', () => { if (role === 'viewer' && allowedControl && peerKeyboardSync) api.keyboardGrab(true).catch(e => status(e.message, true)); });
+function releaseGuestKeyboard() { guestCursorPosition=null; sendGuestCursor({visible:false}); activeGuestPointers.clear(); keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); input({ type: 'release' }); }
+stage.addEventListener('blur', releaseGuestKeyboard);
+window.addEventListener('blur', releaseGuestKeyboard);
+window.addEventListener('focus', () => { if (document.activeElement === stage && role === 'viewer' && allowedControl && peerKeyboardSync) api.keyboardGrab(true).catch(e => status(e.message, true)); });
+$('open-received').onclick = guarded(() => api.exchange('open-received'));
+$('send-files').onclick = guarded(async () => { if (!allowedControl) throw new Error(tr('File transfer requires View, control and files permission.')); if(!exchange || exchange.channel.readyState!=='open')throw new Error(tr('File channel is not ready. Update both clients and reconnect.')); await exchange.sendFiles('pick'); });
+stage.addEventListener('dragover', event => { if (allowedControl && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } });
+stage.addEventListener('drop', event => {
+  event.preventDefault();
+  if(!event.dataTransfer.files.length)return; if(!allowedControl){status('File transfer requires View, control and files permission.',true);return;} if(!exchange || exchange.channel.readyState!=='open'){status('File channel is not ready. Update both clients and reconnect.',true);return;}
+  const files = [...event.dataTransfer.files], p = position(event), generation = peerGeneration;
+  guarded(async () => {
+    const result = await exchange.sendFiles('drop', files);
+    if (result?.clipboardReady === false) { status('Files arrived in Downloads. Open received files on the other computer.', true); return; }
+    if (generation !== peerGeneration || !p) return;
+    input({ type: 'release' }); input({ type: 'button', button: 0, down: true, ...p }); input({ type: 'button', button: 0, down: false, ...p });
+    const layout = await api.currentKeyboard();
+    for (const [code, down] of [['ControlLeft', true], ['KeyV', true], ['KeyV', false], ['ControlLeft', false]]) input({ type: 'key', code, down, layout });
+  })();
+});
+window.addEventListener('beforeunload', () => stopSession(true));
+$('remote-video').addEventListener('loadeddata', () => { $('video-placeholder').hidden = true; });
+
+$('connect-server').onclick = guarded(async () => {
+  config.internetEnabled = await api.internetEnabled(true); $('internet-enabled').checked = true;
+  clearTimeout(reconnectTimer); registrationWanted = true;
+  stopSession(false); registered = false;
+  $('host-id').textContent = '— — —'; $('host-password').textContent = '—';
+  if (socket) { const old = socket; socket = null; old.close(); }
+  if (connectPromise) await connectPromise.catch(() => {});
+  await connect();
+});
+$('local-server').onclick = guarded(async () => {
+  config.internetEnabled = await api.internetEnabled(true); $('internet-enabled').checked = true;
+  const result = await api.localServer($('server-url').value.trim());
+  $('server-url').value = `ws://127.0.0.1:${result.port}`;
+  if (socket) { const old = socket; socket = null; old.close(); }
+  registrationWanted = true; registered = false;
+  if (connectPromise) await connectPromise.catch(() => {});
+  await connect();
+  $('server-help').textContent = window.i18n.language === 'fa' ? `سرور محلی فعال است. نشانی دستگاه دیگر: ${result.addresses.join('  یا  ')} — TCP ${result.port}` : `LAN server ready. On the other computer use: ${result.addresses.join(' or ')} — allow TCP ${result.port}.`;
+});
+$('host-start').onclick = guarded(async () => {
+  if (role !== 'idle') return;
+  incomingEnabled = true; registrationWanted = config.internetEnabled !== false; updateControls();
+  if (!registrationWanted) { await api.directListener(); status('LAN is ready. No Internet server is required.'); return; }
+  if (socket?.readyState === WebSocket.OPEN) register(); else await connect();
+});
+$('host-stop').onclick = () => {
+  stopSession(true); incomingEnabled = false; registrationWanted = false; clearTimeout(reconnectTimer);
+  if (socket?.readyState === WebSocket.OPEN) send({ type: 'unregister' });
+  registered = false; internetId = ''; renderHostCredentials(); updateControls(); status('اتصال ورودی متوقف شد.');
+};
+async function joinTarget() {
+  if (role !== 'idle') return;
+  const id = $('remote-id').value.replace(/\s/g, ''), password = $('remote-password').value;
+  if (id.includes('.') || id.includes(':')) {
+    if (!password) throw new Error(tr('Enter the host LAN password.'));
+    const endpoint = await api.directEndpoint(id);
+    role = 'joining'; sessionRoute = 'lan-viewer'; iceServers = []; forceRelay = false; updateControls();
+    try {
+      await new Promise((resolve, reject) => {
+        const ws = new window.LANSocket(endpoint); directSocket = ws;
+        joinTimer = setTimeout(() => { reject(new Error(tr('LAN connection timed out. Check the IP address and Windows firewall.'))); stopSession(true); }, 60000);
+        ws.onerror = () => reject(new Error(tr('Cannot reach the LAN host. Check its IP and allow TCP 8788 in Windows firewall.')));
+        ws.onclose = () => { if (directSocket === ws) { reject(new Error(tr('LAN connection closed.'))); stopSession(false); } };
+        ws.onmessage = event => {
+          if (directSocket !== ws) return;
+          let message; try { message = JSON.parse(event.data); } catch { return; }
+          if (message.type === 'ready') {
+            if (!message.direct || message.service !== 'ShatootConnect' || message.protocol !== 2) { reject(new Error(tr('This address is not a direct LAN listener.'))); ws.close(); return; }
+            ws.send(JSON.stringify({ type: 'join', id: 'direct', password, name: config.name })); resolve(); return;
+          }
+          messageQueue = messageQueue.then(() => dispatch(message, 'lan-viewer')).catch(e => { stopSession(true); status(e.message, true); });
+        };
+      });
+      status('درخواست ارسال شد؛ منتظر تأیید میزبان هستیم.');
+    } catch (e) { stopSession(false); throw e; }
+    return;
+  }
+  if (!/^\d{9}$/.test(id) || !password) throw new Error('شناسهٔ ۹ رقمی و رمز میزبان را وارد کنید.');
+  role = 'joining'; updateControls();
+  try {
+    await connect(); send({ type: 'join', id, password, name: config.name });
+    $('session-panel').hidden = false; $('video-stage').hidden = true;
+    $('session-title').textContent = 'در انتظار تأیید میزبان'; $('control-label').textContent = '';
+    joinTimer = setTimeout(() => { stopSession(true); status('زمان انتظار اتصال تمام شد؛ تأیید میزبان و تنظیمات شبکه را بررسی کنید.', true); }, 60000);
+  } catch (e) { stopSession(false); throw e; }
+}
+$('join').onclick = guarded(joinTarget);
+function renderFavorites(records) {
+  config.favorites = records;
+  const list = $('favorites-list'); list.replaceChildren();
+  $('favorites-empty').hidden = records.length > 0;
+  for (const record of records) {
+    const row = document.createElement('div'); row.className = 'favorite-row';
+    const connectButton = document.createElement('button'); connectButton.className = 'favorite-connect'; connectButton.disabled = role !== 'idle';
+    const name = document.createElement('b'); name.textContent = record.name;
+    const address = document.createElement('small'); address.textContent = record.address; address.dir = 'ltr';
+    connectButton.append(name, address); connectButton.onclick = guarded(() => connectFavorite(record.id));
+    const actions = document.createElement('div'); actions.className = 'favorite-actions';
+    for (const [icon, title, action] of [['desktop_windows', 'Create desktop shortcut', async () => { await api.favoriteShortcut(record.id); toast('Desktop shortcut created.'); }], ['close', 'Delete saved connection', async () => renderFavorites(await api.favoriteDelete(record.id))]]) {
+      const button = document.createElement('button'); button.className = 'icon-button'; button.title = tr(title); button.setAttribute('aria-label', tr(title));
+      const image = document.createElement('span'); image.className = `mi ${icon}`; image.setAttribute('aria-hidden', 'true'); button.append(image); button.onclick = guarded(action); actions.append(button);
+    }
+    row.append(connectButton, actions); list.append(row);
+  }
+}
+async function connectFavorite(id) {
+  if (role !== 'idle' || requestPending) throw new Error(tr('End the current session first.'));
+  const record = await api.favoriteGet(id);
+  if (record.endpoint && (record.endpoint !== $('server-url').value || record.serverKey !== $('server-key').value)) {
+    clearTimeout(reconnectTimer);
+    if (socket) { const old = socket; socket = null; old.close(); }
+    registered = false;
+    if (connectPromise) await connectPromise.catch(() => {});
+    $('server-url').value = record.endpoint; $('server-key').value = record.serverKey; registrationWanted = true;
+    await connect();
+  }
+  $('remote-id').value = record.address; $('remote-password').value = record.password; $('favorite-name').value = record.name;
+  await joinTarget();
+}
+$('save-favorite').onclick = guarded(async () => {
+  renderFavorites(await api.favoriteSave({ name: $('favorite-name').value, address: $('remote-id').value, password: $('remote-password').value, endpoint: $('server-url').value, serverKey: $('server-key').value }));
+  toast('Connection saved securely.');
+});
+$('save-fixed-password').onclick = guarded(async () => {
+  if (role !== 'idle' || requestPending) return;
+  config.fixedPassword = await api.fixedPassword($('fixed-password').value); if (!config.fixedPassword) { config.unattended = false; $('unattended').checked = false; } updateControls();
+  $('password-label').textContent = tr(config.fixedPassword ? 'Host password' : 'رمز موقت');
+  if (socket?.readyState === WebSocket.OPEN && registered) register();
+  status('Host password settings saved.'); toast('Host password settings saved.');
+});
+function renderHostCredentials() {
+  if (!config) return; const direct = window.shatootconnectDirect;
+  $('host-id').classList.toggle('lan-address',!registered); $('host-id-label').textContent = tr(registered ? 'شناسهٔ شما' : 'LAN address');
+  $('host-id').textContent = registered ? internetId || '— — —' : direct?.addresses[0] || '— — —';
+  if (!registered) hostPasswordValue = config.fixedPassword || direct?.password || '';
+  $('host-password').textContent = hostPasswordValue ? (hostPasswordShown ? hostPasswordValue : '••••••••') : '—';
+}
+function renderDirectInfo(info) { window.shatootconnectDirect = info; $('direct-password').textContent = '••••••••'; $('direct-addresses').textContent = info.addresses.join(' / ') || `127.0.0.1:${info.port}`; updateControls(); if(role==='idle'&&!registered)status('LAN is ready. No Internet server is required.'); }
+api.onDirectInfo(renderDirectInfo);
+api.onConnectFavorite(id => guarded(() => connectFavorite(id))());
+function selectSettingsTab(name, focus = false) {
+  for (const button of document.querySelectorAll('[data-settings-tab]')) {
+    const selected = button.dataset.settingsTab === name;
+    button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1;
+    $(button.getAttribute('aria-controls')).hidden = !selected; if (selected && focus) button.focus();
+  }
+}
+for (const button of document.querySelectorAll('[data-settings-tab]')) {
+  button.onclick = () => selectSettingsTab(button.dataset.settingsTab);
+  button.onkeydown = event => { const tabs = [...document.querySelectorAll('[data-settings-tab]')], index = tabs.indexOf(button); let next;
+    if (event.key === 'Home') next=0; else if (event.key === 'End') next=tabs.length-1; else if (['ArrowLeft','ArrowRight'].includes(event.key)) next=(index+(event.key === 'ArrowRight' ? 1 : tabs.length-1))%tabs.length;
+    if (next !== undefined) { event.preventDefault(); selectSettingsTab(tabs[next].dataset.settingsTab, true); }
+  };
+}
+$('internet-enabled').onchange = guarded(async () => {
+  config.internetEnabled = await api.internetEnabled($('internet-enabled').checked); registrationWanted = config.internetEnabled;
+  clearTimeout(reconnectTimer);
+  if (!config.internetEnabled) { const previous=socket; socket=null; previous?.close(); registered=false; internetId=''; serverState(false,'Internet server disabled; LAN ready'); if (sessionRoute==='server' && role!=='idle') stopSession(false); updateControls(); status('LAN is ready. No Internet server is required.'); }
+  else connect().catch(e=>{status(e.message,true);scheduleReconnect();});
+});
+$('show-guest-cursor').onchange = guarded(async () => { config.showGuestCursor = await api.showGuestCursor($('show-guest-cursor').checked); });
+for (const id of ['open-settings','session-settings']) $(id).onclick = () => { $('settings-dialog').showModal(); };
+$('show-host-cursor').onchange = guarded(async () => { config.showHostCursor = await api.showHostCursor($('show-host-cursor').checked); renderHostCursor(); if (role === 'host' && lastLocalCursor && pointerChannel?.readyState === 'open') pointerChannel.send(JSON.stringify({ ...lastLocalCursor, visible: config.showHostCursor && lastLocalCursor.visible })); });
+for (const button of document.querySelectorAll('[data-password]')) button.onclick = () => { const field = $(button.dataset.password), reveal = field.type === 'password'; field.type = reveal ? 'text' : 'password'; button.setAttribute('aria-pressed', String(reveal)); };
+$('show-lan-password').onclick = () => { const field = $('direct-password'), reveal = field.textContent === '••••••••'; field.textContent = reveal ? window.shatootconnectDirect?.password || '' : '••••••••'; };
+$('show-host-password').onclick = () => { hostPasswordShown = !hostPasswordShown; $('host-password').textContent = hostPasswordShown ? hostPasswordValue : '••••••••'; $('show-host-password').setAttribute('aria-pressed', String(hostPasswordShown)); };
+$('disconnect').onclick = () => { stopSession(true); status('اتصال قطع شد.'); };
+$('fullscreen').onclick = guarded(async () => {
+  if (document.fullscreenElement) { await exitVideoFullscreen(); return; }
+  if (role !== 'viewer' || !pc) return;
+  await $('session-panel').requestFullscreen();
+  if (role !== 'viewer' || !pc) await exitVideoFullscreen();
+});
+document.addEventListener('fullscreenchange', () => {
+  const full = !!document.fullscreenElement;
+  $('fullscreen-icon').className = `mi ${full ? 'fullscreen_exit' : 'fullscreen'}`;
+  $('fullscreen-label').textContent = tr(full ? 'Exit full screen' : 'Full screen');
+});
+document.addEventListener('keydown', e => {
+  if (e.code === 'Escape' && document.fullscreenElement && document.activeElement !== stage) { e.preventDefault(); e.stopImmediatePropagation(); exitVideoFullscreen().catch(() => {}); }
+}, true);
+$('unattended').onchange = guarded(async () => { try { config.unattended = await api.unattended($('unattended').checked); } finally { $('unattended').checked = config.unattended === true; } });
+$('shared-cursor').onchange = guarded(async () => { $('shared-cursor').checked = await api.sharedCursor($('shared-cursor').checked); });
+$('quality').onchange = () => {
+  profileName = $('quality').value; api.qualityProfile(profileName).catch(e => status(e.message, true));
+  if (role === 'viewer' && controlChannel?.readyState === 'open') controlChannel.send(JSON.stringify({ type: 'profile', name: profileName }));
+};
+$('live-quality').onchange = () => { $('quality').value = $('live-quality').value; $('quality').onchange(); };
+for (const [button, field] of [['copy-id','host-id'], ['copy-password','host-password']]) $(button).onclick = guarded(async () => {
+  await api.copyText(field === 'host-id' ? $(field).textContent.replace(/\s/g, '') : hostPasswordValue || config.fixedPassword || $(field).textContent); toast('کپی شد.');
+});
+api.onEmergency(() => { stopSession(true); status('اتصال با میان‌بر اضطراری قطع شد.'); toast('اشتراک‌گذاری و کنترل متوقف شدند.'); });
+api.onHostDisconnect(() => { stopSession(true); status('اتصال قطع شد.'); });
+api.onInputError(() => status(tr('Windows blocked input. Some apps require shared cursor mode; elevated windows and UAC are unsupported.'), true));
+window.shatootconnectDiagnostics = () => ({ ...currentStats, sessionRoute, videoWidth: $('remote-video').videoWidth, videoHeight: $('remote-video').videoHeight, registered, role, language: window.i18n.language, capturing: !!stream?.getVideoTracks().some(t => t.readyState === 'live'), iceConnectionState: pc?.iceConnectionState, iceGatheringState: pc?.iceGatheringState, iceErrors, networkProbe: $('network-status').textContent, forceRelay, iceUrls: iceServers.map(s => s.urls), localCandidates: pc?.localDescription?.sdp.split('\r\n').filter(l => l.startsWith('a=candidate')) });
+let networkBusy = false;
+async function verifyNetwork() {
+  if (networkBusy) return;
+  if (!serverIce.some(s => (Array.isArray(s.urls) ? s.urls : [s.urls]).some(u => /^turns?:/.test(u)))) {
+    $('network-status').dataset.result = 'direct'; $('network-status').textContent = tr('Direct P2P mode. Video bypasses the server. Some internet networks require TURN.'); return;
+  }
+  networkBusy = true; $('network-test').disabled = true; $('network-status').textContent = tr('Testing the TURN relay…');
+  try {
+    const result = await window.testTurnRelay(iceServers);
+    $('network-status').dataset.result = 'pass';
+    $('network-status').textContent = window.i18n.language === 'fa' ? `تست واقعی TURN موفق بود: ${result.rttMs} ms. تست دو شبکهٔ مجزا هنوز لازم است.` : `TURN probe passed: ${result.rttMs} ms. Two-network acceptance is still required.`;
+  } catch (e) { $('network-status').dataset.result = 'fail'; $('network-status').textContent = tr(e.message); }
+  finally { networkBusy = false; $('network-test').disabled = false; }
+}
+$('network-test').onclick = verifyNetwork;
+window.shatootconnectCapture = async () => {
+  const p = config.profiles[profileName] || config.profiles.speed;
+  stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never', frameRate: { ideal: p.fps, max: p.fps }, width: { max: p.width }, height: { max: p.height } }, audio: false });
+  stream.getVideoTracks()[0].contentHint = profileName === 'quality' ? 'detail' : 'motion';
+  stream.getVideoTracks()[0].onended = () => { stopSession(true); status('اتصال پایان یافت.'); };
+};
+$('language').onchange = guarded(async () => { window.i18n.setLanguage(await api.language($('language').value)); renderFavorites(config.favorites || []); });
+(async () => {
+  config = await api.config(); registrationWanted = config.internetEnabled !== false; $('internet-enabled').checked = registrationWanted; $('show-guest-cursor').checked = config.showGuestCursor; $('quality').value = config.qualityProfile; profileName = config.qualityProfile; window.i18n.setLanguage(config.language); $('language').value = config.language;
+  window.messenger = window.installMessenger({ api, self: { deviceId: config.deviceId, name: config.name }, internet: () => ({ registered, supported: window.collaborationServerReady, endpoint: config.endpoint, send: data => { if (socket?.readyState !== WebSocket.OPEN) throw new Error('Not connected to the server.'); socket.send(JSON.stringify(data)); } }), ensureInternet: connect, remote: address => { $('remote-id').value = address; $('remote-password').focus(); } });
+  $('shared-cursor').checked = config.sharedCursor === true; $('show-host-cursor').checked = config.showHostCursor;
+  $('unattended').checked = config.unattended === true; $('fixed-password').value = config.fixedPassword || ''; $('password-label').textContent = tr(config.fixedPassword ? 'Host password' : 'رمز موقت'); renderFavorites(config.favorites || []);
+  $('server-url').value = config.endpoint; $('server-key').value = config.serverKey || ''; $('app-version').textContent = `Shatoot Connect ${config.version} · Windows x64`;
+  const sources = await api.sources(); $('screen-select').replaceChildren();
+  for (const source of sources) { const option = document.createElement('option'); option.value = source.id; option.textContent = source.name; $('screen-select').append(option); }
+  if (!sources.length) status('نمایشگری شناسایی نشد.', true);
+  updateControls(); window.shatootconnectReady = true;
+  api.directListener().then(info => {
+    renderDirectInfo(info);
+  }).catch(e => { $('direct-addresses').textContent = tr('LAN listener unavailable: ') + e.message; });
+  if (config.pendingFavorite) {
+    const record = await api.favoriteGet(config.pendingFavorite);
+    if (!record.endpoint && config.internetEnabled !== false) connect().catch(e => { if (!window.shatootconnectDirect && role === 'idle') status(e.message, true); scheduleReconnect(); });
+    await connectFavorite(config.pendingFavorite);
+  } else if (config.internetEnabled !== false) connect().catch(e => { if (!window.shatootconnectDirect && role === 'idle') status(e.message, true); scheduleReconnect(); });
+})().catch(e => status(e.message, true));

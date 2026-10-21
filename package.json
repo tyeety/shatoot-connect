@@ -1,0 +1,78 @@
+{
+  "name": "shatoot-connect",
+  "version": "0.10.0",
+  "description": "Windows remote desktop, LAN discovery, peer-to-peer chat, groups and file transfer",
+  "main": "desktop/main.cjs",
+  "private": true,
+  "author": "ShatootSoft",
+  "repository": { "type": "git", "url": "https://github.com/tyeety/shatoot-connect.git" },
+  "homepage": "https://github.com/tyeety/shatoot-connect#readme",
+  "bugs": { "url": "https://github.com/tyeety/shatoot-connect/issues" },
+  "scripts": {
+    "start": "electron .",
+    "server": "node server/standalone.cjs server/server.config.example.json",
+    "dist:server": "npm run build:server-manager && node build/package-server.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "test:smoke": "electron . --smoke-test",
+    "check:release": "node build/release-notes.cjs",
+    "build:native": "dotnet publish native/ShatootConnect.Input.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native/publish",
+    "dist": "npm run build:native && electron-builder --win nsis portable --x64",
+    "test:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File build/test-installer.ps1",
+    "build:server-manager": "dotnet publish server-manager/ShatootConnect.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o server-manager/publish"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.shatootsoft.connect",
+    "productName": "Shatoot Connect",
+    "asar": true,
+    "files": [
+      "desktop/**/*",
+      "shared/**/*",
+      "server/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "native/publish",
+        "to": "input",
+        "filter": [
+          "ShatootConnect.Input.exe"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": ["nsis", "portable"],
+      "artifactName": "ShatootConnect-${version}-win-x64.exe"
+    },
+    "nsis": {
+      "artifactName": "ShatootConnect-Setup-${version}-win-x64.exe",
+      "oneClick": false,
+      "perMachine": false,
+      "selectPerMachineByDefault": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["en_US"],
+      "language": "1033",
+      "displayLanguageSelector": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Shatoot Connect",
+      "uninstallDisplayName": "Shatoot Connect",
+      "include": "build/installer.nsh",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "differentialPackage": false,
+      "useZip": true
+    },
+    "directories": {
+      "output": "release"
+    }
+  }
+}

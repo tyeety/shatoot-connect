@@ -1,0 +1,9 @@
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+  "publicUrl": "wss://connect.shatootsoft.com",
+  "language": "en",
+  "tls": { "enabled": false, "certPath": "", "keyPath": "" },
+  "forceRelay": false,
+  "iceServers": [{ "urls": "stun:stun.cloudflare.com:3478" }]
+}

@@ -1,0 +1,130 @@
+'use strict';
+window.i18n = (() => {
+  let language = 'en';
+  const entries = [
+['چت و فایل‌ها','Chats and files'],['کامپیوترهای نزدیک','Nearby computers'],['در حال شناسایی روی همهٔ رابط‌های شبکه…','Discovering on all network interfaces…'],['رابط شبکه','network interfaces'],['تازه‌سازی','Refresh'],['دستگاه‌های دارای Shatoot Connect به‌صورت خودکار اینجا نمایش داده می‌شوند.','Computers running Shatoot Connect appear here automatically.'],['شناسایی محدود شده؛ فایروال یا دسترسی LAN در VPN را بررسی کنید.','Discovery is limited; check firewall or VPN LAN access.'],
+['شناسه یا IP شبکهٔ محلی','ID or LAN IP'],['شروع چت','Start chat'],['گروه جدید','New group'],['یک گفت‌وگو انتخاب کنید','Select a conversation'],['اتصال چت','Connect chat'],['قطع چت','Disconnect chat'],['جست‌وجو در تاریخچه','Search history'],['پیام‌ها','Messages'],['پیام‌های قدیمی‌تر','Load older messages'],['پیام','Message'],['پیام خود را بنویسید…','Write a message…'],['ارسال','Send'],['Enter برای ارسال · Shift+Enter برای سطر جدید','Enter to send · Shift+Enter for a new line'],['چت صفحهٔ شما را به اشتراک نمی‌گذارد. دریافت فایل به تأیید نیاز دارد.','Chat does not share your screen. File offers need approval.'],
+['نام گروه','Group name'],['ایجاد گروه','Create group'],['بین ۲ تا ۱۵ مخاطب متصل انتخاب کنید. هر مخاطب دعوت گروه را تأیید می‌کند.','Select 2 to 15 connected contacts. Each contact approves the group invitation.'],['برای ایجاد گروه ابتدا به دست‌کم دو مخاطب متصل شوید.','Connect at least two contacts before creating a group.'],['متصل','Connected'],['در LAN','On LAN'],['آفلاین','Offline'],['گروه','Group'],['سازندهٔ گروه آنلاین است','Group owner online'],['سازندهٔ گروه آفلاین است','Group owner offline'],['در صف ارسال','Queued'],['تحویل شد','Delivered'],['ارسال شد','Sent'],['به همهٔ گیرندگان تحویل نشد','Not delivered to all recipients'],
+['منتظر تأیید چت…','Waiting for chat approval…'],['برای اتصال مجدد، شناسه یا IP مخاطب را وارد کنید.','Enter the contact ID or LAN IP to reconnect.'],['برای چت با شناسه، سرور اینترنتی را ارتقا دهید و به آن متصل شوید.','Update and connect to the Internet server to chat by ID.'],['ابتدا در تنظیمات به سرور ذخیره‌شدهٔ این مخاطب وصل شوید.','Connect to this contact’s saved server in Settings first.'],['شناسهٔ ۹ رقمی یا IP شبکهٔ محلی وارد کنید.','Enter a 9-digit ID or a LAN IP.'],['برنامهٔ کامپیوتر مقابل را ارتقا دهید.','Update Shatoot Connect on the other computer.'],['اتصال LAN ناموفق بود. نشانی، فایروال و دسترسی LAN در VPN را بررسی کنید.','LAN connection failed. Check the address, firewall and VPN LAN access.'],['تعداد اتصال‌های چت به حد مجاز رسیده است.','Chat connection limit reached.'],['مهلت تأیید چت پایان یافت.','Chat invitation timed out.'],['دعوت چت رد شد.','Chat invitation declined.'],['اتصال چت بسته شد.','Chat connection closed.'],['اتصال چت ناموفق بود؛ شبکه‌های محدود ممکن است به TURN نیاز داشته باشند.','Chat connection failed. Restricted networks may require TURN.'],['مهلت عملیات چت پایان یافت.','Chat operation timed out.'],['پیامی با حداکثر ۸۰۰۰ نویسه بنویسید.','Enter a message of up to 8000 characters.'],['بین ۲ تا ۱۵ مخاطب متصل انتخاب کنید.','Select 2 to 15 connected contacts.'],['نام گروه را با حداکثر ۶۰ نویسه وارد کنید.','Enter a group name of up to 60 characters.'],['هیچ مخاطبی دعوت گروه را نپذیرفت.','No contact accepted the group invitation.'],
+['در حال دریافت فایل‌ها…','Receiving files…'],['فایل‌ها دریافت شدند؛ برای دیدنشان پیوست را باز کنید.','Files received. Open the attachment to find them.'],['فایل‌ها ارسال شدند.','Files sent.'],['همهٔ گیرندگان فایل باید متصل باشند. ابتدا آن‌ها را متصل کنید و دوباره تلاش کنید.','All file recipients must be connected. Connect them and try again.'],['ابتدا به یک مخاطب متصل شوید.','Connect to a contact first.'],['درخواست دریافت فایل رد شد.','File offer declined.'],['فایل دریافتی جابه‌جا یا حذف شده است.','The received file was moved or deleted.'],['این پیوست در دسترس نیست.','This attachment is unavailable.'],['گیرنده‌ای از گروه آفلاین است. فایل در تاریخچهٔ سازندهٔ گروه باقی می‌ماند.','A group file recipient is offline. The file remains in the group owner’s history.'],['تاریخچهٔ چت قابل خواندن نیست. فایل قبلی حفظ شده است.','Chat history cannot be read. The existing history file has been kept.'],['فضای تاریخچهٔ چت پر شده است. تاریخچهٔ قبلی حفظ شده است.','Chat history storage is full. Existing history has been kept.'],
+["اتصال LAN به سرور اینترنتی نیاز ندارد.","LAN connection does not require an Internet server."],
+["نمایش و زبان", "Display and language"],
+["سرور اینترنتی", "Internet server"],
+["نشانی LAN", "LAN address"],
+["این رمز در LAN بدون سرور اینترنتی هم کار می‌کند.", "This password works on LAN without an Internet server."],
+["نشانگر میهمان روی دسکتاپ من نمایش داده شود", "Show the guest pointer on my desktop"],
+["مجوز مشاهده و کنترل، اجازهٔ انتقال فایل و کلیپ‌بورد را هم می‌دهد.", "View and control permission also allows clipboard and file transfer."],
+["از IP میزبان و رمز LAN استفاده کنید. سرور اینترنتی لازم نیست.", "Use the host IP and LAN password. No Internet server is required."],
+["برای استفادهٔ دوباره از اتصال‌های LAN ذخیره‌شده، در تب میزبان رمز ثابت بگذارید.", "Set a fixed password in Host and access to reuse saved LAN connections."],
+["نشانی و رمز فعلی مقصد به‌صورت رمزنگاری‌شده ذخیره می‌شوند. اتصال LAN به سرور نیاز ندارد.", "The current remote address and password are saved securely. LAN connections do not require a server."],
+["اتصال خودکار به سرور اینترنتی", "Connect to Internet server automatically"],
+["برای استفاده فقط در LAN خاموش کنید. اتصال مستقیم LAN متوقف نمی‌شود.", "Turn this off for LAN-only use. It does not stop direct LAN connections."],
+["نشانی سرور", "Server address"],
+["سرور اینترنتی خاموش است؛ LAN آماده است", "Internet server disabled; LAN ready"],
+["LAN آماده است و به سرور اینترنتی نیاز ندارد.", "LAN is ready. No Internet server is required."],
+["سرور اینترنتی خاموش است. IP شبکهٔ محلی را وارد کنید یا آن را در تنظیمات فعال کنید.", "Internet server is disabled. Enter a LAN IP or enable it in Settings."],
+["رمز ثابت برای LAN ذخیره شد. برای استفادهٔ اینترنتی سرور را ارتقا دهید.", "Fixed password is saved for LAN. Update the Internet server for Internet access."],
+["بازکردن فایل‌های دریافتی", "Open received files"],
+["فایل‌ها در Downloads دریافت شدند؛ آمادهٔ جای‌گذاری‌اند.", "Files received in Downloads. Ready to paste."],
+["فایل‌ها در Downloads دریافت شدند؛ کلیپ‌بورد در دسترس نیست.", "Files received in Downloads. Clipboard is unavailable."],
+["فایل‌ها به Downloads ارسال شدند؛ در مقصد جای‌گذاری کنید.", "Files sent to Downloads. Paste them on the destination."],
+["فایل‌ها در Downloads مقصد هستند. آن‌طرف دکمهٔ فایل‌های دریافتی را بزنید.", "Files arrived in Downloads. Open received files on the other computer."],
+["انتقال فایل به مجوز مشاهده، کنترل و فایل نیاز دارد.", "File transfer requires View, control and files permission."],
+["کانال فایل آماده نیست. هر دو کلاینت را ارتقا دهید و دوباره متصل شوید.", "File channel is not ready. Update both clients and reconnect."],
+["تنظیمات", "Settings"],
+["میزبان و دسترسی", "Host and access"],
+["تنظیمات اتصال", "Connection preferences"],
+["زبان", "Language"],
+["نمایش نشانگر مجزای موس میزبان", "Show separate host cursor indicator"],
+["نمایش رمز", "Show password"],
+["بستن", "Close"],
+    ["برای جای‌گذاری، متن یا فایل کپی کنید.","Copy text or files to paste."],
+    ["اجازهٔ اتصال بدون تأیید با رمز ثابت", "Allow unattended access with fixed password"],
+    ["پیش از فعال‌کردن دسترسی بدون تأیید، رمز ثابت را ذخیره کنید.", "Save a fixed password before enabling unattended access."],
+    ["برای تنظیم دسترسی، ابتدا اتصال فعلی را قطع کنید.", "End the session before changing access settings."],
+    ["ارسال فایل", "Send files"],
+    ["در حال انتقال فایل‌ها…", "Transferring files…"],
+    ["فایل‌ها دریافت شدند؛ آمادهٔ جای‌گذاری هستند.", "Files received. Ready to paste."],
+    ["فایل‌ها ارسال شدند؛ در مقصد جای‌گذاری کنید.", "Files sent. Paste them on the destination."],
+    ["یک انتقال فایل در حال انجام است.", "A file transfer is already in progress."],
+    ["شروع ضبط کیبورد ممکن نشد.", "Keyboard capture could not start."],
+    ["تأیید میزبان لازم است؛ مگر دسترسی بدون تأیید فعال باشد.", "Host approval is required unless unattended access is enabled."],
+    ["می‌توانید اتصال با رمز ثابت را بدون تأیید میزبان مجاز کنید.", "Fixed password access can be allowed without approval."],
+    ["تأیید میزبان یا فعال‌بودن دسترسی بدون تأیید لازم است.", "Host approval or enabled unattended access is required."],
+    ['برای هماهنگی کیبورد، هر دو کلاینت را ارتقا دهید.','Update both clients to synchronize the keyboard.'],
+    ['خواندن چیدمان کیبورد ممکن نشد.','Keyboard layout could not be read.'],
+    ['سیستم‌های ذخیره‌شده','Saved computers'],['با وارد کردن نام، نشانی و رمز اتصال، سیستم را ذخیره کنید.','Save a connection using its name, address and password.'],
+    ['رمز ثابت میزبان','Fixed host password'],['خالی = رمز تصادفی','Empty = random password'],['ذخیره','Save'],['رمز میزبان','Host password'],
+    ['نام سیستم برای ذخیره','Save this computer as'],['نام کامپیوتر','Computer name'],['ذخیرهٔ اتصال','Save connection'],
+    ['ساخت میان‌بر دسکتاپ','Create desktop shortcut'],['حذف اتصال ذخیره‌شده','Delete saved connection'],['میان‌بر دسکتاپ ساخته شد.','Desktop shortcut created.'],
+    ['اتصال با رمزنگاری ذخیره شد.','Connection saved securely.'],['تنظیمات رمز میزبان ذخیره شد.','Host password settings saved.'],
+    ['برای رمز ثابت، سرور را به نسخهٔ جدید ارتقا دهید.','Upgrade the server to use a fixed password.'],
+    ['زبان کیبورد هماهنگ است','Keyboard synchronized'],['هماهنگی کیبورد ناموفق؛ تایپ متوقف شد','Keyboard sync failed; typing paused'],['در انتظار زبان کیبورد میهمان…','Waiting for the guest keyboard layout…'],
+    ['نام، نشانی صحیح مقصد و رمز را وارد کنید.','Enter a name, valid remote address and password.'],
+    ['رمز باید ۸ تا ۱۲۸ کاراکتر باشد؛ برای رمز تصادفی خالی بگذارید.','Use 8 to 128 characters, or leave empty for random passwords.'],
+    ['تمام‌صفحهٔ تصویر','Full screen'],['خروج از تمام‌صفحه','Exit full screen'],
+    ['اجازهٔ جابه‌جایی موس من به میهمان','Allow guest to move my cursor'],
+    ['کلیک مستقل موس شما را جابه‌جا نمی‌کند. برخی برنامه‌ها به حالت موس مشترک نیاز دارند.','Independent clicks keep your cursor in place. Some apps need shared cursor mode.'],
+    ['ویندوز ورودی را نپذیرفت. برخی برنامه‌ها به حالت موس مشترک نیاز دارند؛ پنجره‌های Administrator و UAC پشتیبانی نمی‌شوند.','Windows blocked input. Some apps require shared cursor mode; elevated windows and UAC are unsupported.'],
+    ['شناسه و رمز مقصد، یا IP و رمز شبکهٔ محلی را وارد کنید.','Enter a remote ID and password, or a LAN IP and LAN password.'],
+    ['شناسهٔ مقصد یا IP شبکهٔ محلی','Remote ID or LAN IP'],
+    ['اتصال مستقیم شبکهٔ محلی','Direct LAN connection'],['رمز شبکهٔ محلی','LAN password'],
+    ['در حال آماده‌سازی اتصال محلی…','Starting LAN listener…'],
+    ['در دستگاه دیگر این IP و رمز شبکهٔ محلی را وارد کنید. به سرور مرکزی و اینترنت نیازی نیست. در شبکهٔ خصوصی TCP 8788 را در فایروال مجاز کنید.','Enter this IP and LAN password on the other device. No central server or internet required. Allow TCP 8788 on private networks.'],
+    ['بررسی حالت اتصال','Check connection mode'],['حالت اتصال بررسی نشده است.','Connection mode not checked.'],
+    ['حالت مستقیم P2P؛ تصویر از سرور عبور نمی‌کند. برخی شبکه‌های اینترنت به TURN نیاز دارند.','Direct P2P mode. Video bypasses the server. Some internet networks require TURN.'],
+    ['رمز شبکهٔ محلی میزبان را وارد کنید.','Enter the host LAN password.'],
+    ['زمان اتصال محلی تمام شد. IP و فایروال ویندوز را بررسی کنید.','LAN connection timed out. Check the IP address and Windows firewall.'],
+    ['دسترسی به میزبان محلی ممکن نیست. IP را بررسی و TCP 8788 را در فایروال ویندوز مجاز کنید.','Cannot reach the LAN host. Check its IP and allow TCP 8788 in Windows firewall.'],
+    ['اتصال محلی بسته شد.','LAN connection closed.'],['این نشانی مربوط به اتصال مستقیم محلی نیست.','This address is not a direct LAN listener.'],
+    ['اتصال محلی در دسترس نیست: ','LAN listener unavailable: '],
+    ['کلید اتصال سرور','Server connection key'],['از مدیر سرور (در صورت نیاز)','From Server Manager (if required)'],
+    ['کلید اتصال سرور نادرست است. فایل اتصال کلاینت را از مدیر سرور دریافت کنید.','The server connection key is incorrect. Import the client connection file from Server Manager.'],
+    ['بررسی مسیر اینترنت','Test internet relay'],['مسیر اینترنت هنوز بررسی نشده است.','Internet relay not checked.'],['در حال بررسی واقعی مسیر TURN…','Testing the TURN relay…'],
+    ['سرور TURN تنظیم نشده است. از مدیر سرور بخواهید مسیر اینترنت را تنظیم کند.','No TURN server configured. Ask the server administrator to configure internet relay.'],
+    ['زمان تست TURN تمام شد. رمز، فایروال، TLS و پورت‌های relay را بررسی کنید.','TURN relay probe timed out. Check TURN credentials, firewall, TLS and relay ports.'],
+    ['اتصال تست TURN ناموفق بود.','TURN relay connection failed.'],
+    ['فضای کار','Workspace'],['اتصال از راه دور','Remote desktop'],['کنترل با اجازهٔ شما','You are in control'],
+    ['هر اتصال با تأیید میزبان آغاز می‌شود و هر لحظه قابل قطع است.','Every connection requires your approval. Disconnect at any time.'],
+    ['سرور متصل نیست','Server offline'],['فاصله، کمتر از همیشه','Closer than ever'],['یک اتصال. یک میز کار.','One connection. Your desktop.'],
+    ['صفحه را به اشتراک بگذارید یا به کامپیوتری دیگر متصل شوید.','Share your screen or connect to another computer.'],['تصویر زنده','Live video'],['انتقال مستقیم با WebRTC','Direct WebRTC streaming'],
+    ['این دستگاه','This device'],['اشتراک‌گذاری صفحه','Share your screen'],['شناسه و رمز را فقط برای فرد مورد اعتماد بفرستید.','Share your ID and password only with someone you trust.'],
+    ['نمایشگر','Display'],['در حال شناسایی نمایشگرها…','Detecting displays…'],['شناسهٔ شما','Your ID'],['کپی شناسه','Copy ID'],['رمز موقت','Session password'],['کپی رمز','Copy password'],
+    ['شروع اشتراک‌گذاری','Get ID'],['توقف اشتراک‌گذاری','Pause incoming connections'],['نمایش تصویر پس از تأیید درخواست شروع می‌شود.','Your ID is assigned automatically. Screen sharing starts only after approval.'],
+    ['دستگاه مقصد','Remote device'],['اتصال به کامپیوتر','Connect to a computer'],['شناسه و رمز میزبان را وارد کنید.','Enter the remote computer’s ID and password.'],['شناسهٔ مقصد','Remote ID'],['رمز اتصال','Password'],['رمز موقت میزبان','Remote session password'],['کیفیت اتصال','Connection quality'],
+    ['متعادل · 1080p / 60fps','Balanced · 1080p / 60fps'],['بیشترین کیفیت · تا 4K / 60fps','Best quality · up to 4K / 60fps'],['کمترین تأخیر · 1080p / 60fps','Low latency · 1080p / 60fps'],['اینترنت ضعیف · 720p / 30fps','Low bandwidth · 720p / 30fps'],
+    ['اتصال به دستگاه','Connect'],['اتصال به دستگاه ←','Connect →'],['میزبان باید درخواست اتصال شما را تأیید کند.','The remote user must approve your connection.'],['اتصال زنده','Live connection'],['فقط مشاهده','View only'],['کیفیت تصویر','Video quality'],
+    ['متعادل · 1080p60','Balanced · 1080p60'],['کیفیت · 4K60','Quality · 4K60'],['سرعت · 1080p60','Speed · 1080p60'],['اقتصادی · 720p30','Economy · 720p30'],['تمام صفحه ⛶','Full screen ⛶'],['قطع اتصال','Disconnect'],
+    ['تصویر دستگاه مقصد؛ برای کنترل کلیک کنید','Remote desktop. Click to control.'],['در حال برقراری مسیر تصویر…','Establishing video connection…'],['تأخیر مسیر','Network RTT'],['نرخ تصویر','Frame rate'],['وضوح','Resolution'],['دریافت','Bitrate'],['کدک','Codec'],
+    ['آماده برای اتصال؛ ابتدا سرور را تنظیم کنید.','Connecting to your last server…'],['سرور هماهنگ‌کننده','Connection server'],['هر دو دستگاه باید به یک سرور متصل باشند.','Both devices must use the same server.'],['اتصال به سرور','Connect to server'],['اجرای سرور محلی','Start LAN server'],
+    ['برای شبکهٔ محلی، سرور را روی یک دستگاه اجرا و IP آن را در دستگاه دیگر وارد کنید. برای اینترنت از WSS و در صورت نیاز TURN استفاده کنید.','Internet: use the WSS address provided by your server administrator. LAN: start one LAN server and use its IP on both devices.'],
+    ['تأیید میزبان · تصویر رمزنگاری‌شدهٔ WebRTC','Host approval · Encrypted WebRTC video'],['قطع فوری میزبان','Emergency disconnect'],['در حال اتصال…','Connecting…'],['سرور آمادهٔ اتصال','Server connected'],['ارتباط سرور قطع شد','Server disconnected'],
+    ['در انتظار تأیید میزبان…','Waiting for approval…'],['در انتظار تأیید میزبان','Waiting for host approval'],['در حال برقراری اتصال مستقیم…','Establishing a connection…'],['میز کار از راه دور','Remote desktop'],['صفحهٔ شما در حال اشتراک‌گذاری است','Your screen is being shared'],['موس و کیبورد فعال','Mouse and keyboard enabled'],['مسیر TURN','TURN relay'],['مسیر مستقیم','Direct connection'],['در حال بررسی مسیر','Checking connection route'],['کپی شد.','Copied.'],
+    ['درخواست ارسال شد؛ منتظر تأیید میزبان هستیم.','Request sent. Waiting for host approval.'],['درخواست رد شد؛ میزبان آمادهٔ اتصال بعدی است.','Request rejected. Ready for another connection.'],['مهمان قطع شد؛ آمادهٔ پذیرش اتصال بعدی.','Viewer disconnected. Ready for another connection.'],['اتصال پایان یافت.','Session ended.'],['اتصال قطع شد.','Disconnected.'],
+    ['مهمان متصل است. برای قطع فوری Ctrl + Shift + F12 را بزنید.','Viewer connected. Emergency disconnect: Ctrl + Shift + F12.'],['متصل شد؛ برای ارسال موس و کیبورد، روی تصویر کلیک کنید.','Connected. Click the video to send mouse and keyboard input.'],
+    ['مسیر تصویر برقرار نشد. در شبکه‌های محدود، سرور TURN را تنظیم کنید.','Video connection failed. Check the server’s TURN configuration for restricted networks.'],['مسیر ارتباط مختل شده؛ در حال تلاش برای بازیابی…','Connection interrupted. Trying to recover…'],['شناسهٔ ۹ رقمی و رمز میزبان را وارد کنید.','Enter the 9-digit remote ID and session password.'],['نمایشگری شناسایی نشد.','No display was detected.'],['نمایشگری در دسترس نیست.','No display is available.'],['اتصال به سرور برقرار نیست.','Not connected to the server.'],
+    ['سرور پاسخ نداد. نشانی و دسترسی شبکه را بررسی کنید.','The server did not respond. Check its address and network access.'],['اتصال به سرور ناموفق بود. IP، پورت و گواهی TLS را بررسی کنید.','Cannot reach the server. Check the address, port and TLS certificate.'],['اتصال سرور بسته شد.','Server connection closed.'],
+    ['میزبان اشتراک‌گذاری را متوقف کرد.','The host ended the session.'],['ابتدا اتصال فعلی را ببندید.','End the current session first.'],['سرور پر است.','The server is full.'],['تلاش زیاد؛ یک دقیقه صبر کنید.','Too many attempts. Wait one minute.'],['شناسه یا رمز اتصال درست نیست.','Incorrect remote ID or password.'],['این میزبان در حال اتصال است.','The remote computer is busy.'],['میزبان درخواست را نپذیرفت.','The host rejected the request.'],['پیام نامعتبر است.','Invalid message.'],
+    ['اتصال با میان‌بر اضطراری قطع شد.','Disconnected with the emergency shortcut.'],['اشتراک‌گذاری و کنترل متوقف شدند.','Screen sharing and control stopped.'],['ویندوز ورودی را نپذیرفت؛ کنترل پنجره‌های Administrator و صفحهٔ UAC در این نسخه پشتیبانی نمی‌شود.','Windows blocked input. Elevated windows and the UAC screen are not supported.'],
+    ['شناسه آماده است. برای اتصال، شناسه و رمز را با فرد مورد اعتماد به اشتراک بگذارید.','Your ID is ready. Share your ID and password with someone you trust.'],['در حال تلاش مجدد برای اتصال به سرور…','Retrying the server connection…'],['دریافت شناسه از سرور…','Getting your ID from the server…'],['اتصال ورودی متوقف شد.','Incoming connections paused.'],['پیکربندی سرور با این نسخه سازگار نیست. سرور را به نسخهٔ جدید ارتقا دهید.','This server is incompatible. Upgrade the server to the current version.']
+  ];
+  const fa = new Map(entries), en = new Map(entries.map(([a,b]) => [b,a]));
+  function translate(value) {
+    if (typeof value !== 'string') return value;
+    return language === 'fa' ? en.get(value) || value : fa.get(value) || value;
+  }
+  function apply() {
+    document.documentElement.lang = language; document.documentElement.dir = language === 'fa' ? 'rtl' : 'ltr';
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) { const trimmed = node.textContent.trim(), next = translate(trimmed); if (next !== trimmed) node.textContent = node.textContent.replace(trimmed, next); }
+    for (const el of document.querySelectorAll('[placeholder],[title],[aria-label]')) for (const attribute of ['placeholder','title','aria-label']) {
+      if (el.hasAttribute(attribute)) el.setAttribute(attribute, translate(el.getAttribute(attribute)));
+    }
+  }
+  const observer = new MutationObserver(() => { observer.disconnect(); apply(); observer.observe(document.body, { childList: true, subtree: true }); });
+  observer.observe(document.body, { childList: true, subtree: true });
+  function setLanguage(value) { language = value === 'fa' ? 'fa' : 'en'; apply(); window.dispatchEvent(new CustomEvent('shatoot-language-change')); }
+  setLanguage('en');
+  return { translate, setLanguage, get language() { return language; } };
+})();
