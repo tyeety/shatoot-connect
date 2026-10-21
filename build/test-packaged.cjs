@@ -29,8 +29,11 @@ async function main() {
   if (!path.resolve(fixture).startsWith(root + path.sep)) throw new Error('Fixture outside workspace.');
   let child;
   const launch = (args, env) => {
-    child = spawn(executable, args, { windowsHide: true, stdio: 'ignore', env: { ...process.env, ...env } });
-    child.once('error', error => { child.launchError = error; });
+    const environment={...process.env,...env}; for(const name of Object.keys(environment))if(environment[name]===null)delete environment[name];
+    child = spawn(executable, args, { windowsHide: true, stdio: ['ignore','pipe','pipe'], env: environment });
+    const processChild=child; processChild.output='';
+    for(const stream of [processChild.stdout,processChild.stderr])stream.on('data',data=>{processChild.output=(processChild.output+data.toString()).slice(-8000)});
+    processChild.once('error', error => { processChild.launchError = error; });
     return child;
   };
   try {
@@ -45,9 +48,9 @@ async function main() {
     if (ui) {
       const profile = path.join(fixture, 'profile'); fs.mkdirSync(profile);
       fs.writeFileSync(path.join(profile, 'connection.json'), JSON.stringify({ internetEnabled: false, startupEnabled: false, language: 'en', profile: { name: 'Packaged launch test' } }));
-      launch([`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { ELECTRON_RUN_AS_NODE: '' });
+      launch([`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { ELECTRON_RUN_AS_NODE: null });
       const activePort = path.join(profile, 'DevToolsActivePort');
-      await until(() => { if (child.launchError) throw child.launchError; if (child.exitCode !== null) throw new Error('Packaged UI closed on startup.'); return fs.existsSync(activePort); }, 90000);
+      await until(() => { if (child.launchError) throw child.launchError; if (child.exitCode !== null) throw new Error(`Packaged UI closed on startup (${child.exitCode}): ${child.output}`); return fs.existsSync(activePort); }, 90000);
       const port = fs.readFileSync(activePort, 'utf8').split('\n')[0];
       let target;
       await until(async () => { const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then(r => r.json()); target = pages.find(p => p.url.endsWith('/ui/index.html')); return !!target; });
