@@ -1,4 +1,10 @@
 $ErrorActionPreference = 'Stop'
+function Get-Sha256([string]$File) {
+    $stream = [IO.File]::OpenRead($File)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-','').ToLowerInvariant() }
+    finally { $stream.Dispose(); $algorithm.Dispose() }
+}
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\') + '\'
 $testRoot = [IO.Path]::GetFullPath((Join-Path $workspaceRoot 'artifacts/updater-worker-test'))
 if (!$testRoot.StartsWith($workspaceRoot,[StringComparison]::OrdinalIgnoreCase) -or (Test-Path -LiteralPath $testRoot)) { throw 'Inspect the existing updater fixture before retrying.' }
@@ -14,8 +20,8 @@ try {
     $historyFile = Join-Path $testRoot 'chat-encrypted.dat'
     [IO.File]::WriteAllText($settingsFile,'settings-preserved')
     [IO.File]::WriteAllText($historyFile,'encrypted-history-preserved')
-    $digest = (Get-FileHash -LiteralPath $newExe -Algorithm SHA256).Hash.ToLowerInvariant()
-    $oldDigest = (Get-FileHash -LiteralPath $oldExe -Algorithm SHA256).Hash
+    $digest = Get-Sha256 $newExe
+    $oldDigest = Get-Sha256 $oldExe
     $worker = Join-Path $workspaceRoot 'desktop/update-worker.ps1'
     $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$worker`" -ParentId 2147483647 -Package `"$newExe`" -Target `"$target`" -Digest $digest -Portable"
     $process = Start-Process -FilePath powershell.exe -ArgumentList $arguments -WindowStyle Hidden -PassThru
@@ -23,8 +29,8 @@ try {
     $marker = [IO.Path]::ChangeExtension($target,'.started')
     for ($i=0; $i -lt 50 -and !(Test-Path -LiteralPath $marker); $i++) { Start-Sleep -Milliseconds 100 }
     if (!(Test-Path -LiteralPath $marker)) { throw 'Updated executable did not restart.' }
-    if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -ne $digest) { throw 'New executable mismatch.' }
-    if ((Get-FileHash -LiteralPath ($target+'.previous') -Algorithm SHA256).Hash -ne $oldDigest) { throw 'Rollback copy mismatch.' }
+    if ((Get-Sha256 $target) -ne $digest) { throw 'New executable mismatch.' }
+    if ((Get-Sha256 ($target+'.previous')) -ne $oldDigest) { throw 'Rollback copy mismatch.' }
     if ([IO.File]::ReadAllText($settingsFile) -ne 'settings-preserved' -or [IO.File]::ReadAllText($historyFile) -ne 'encrypted-history-preserved') { throw 'Update touched profile data.' }
     Write-Output 'Portable worker replaced the executable, retained the previous version, restarted successfully and preserved settings/history.'
 } finally {

@@ -1,7 +1,13 @@
 param([int]$ParentId, [string]$Package, [string]$Target, [string]$Digest, [switch]$Portable)
 $ErrorActionPreference = 'Stop'
+function Get-Sha256([string]$File) {
+    $stream = [IO.File]::OpenRead($File)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-','').ToLowerInvariant() }
+    finally { $stream.Dispose(); $algorithm.Dispose() }
+}
 try {
-    if ((Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Digest) { throw 'Update integrity check failed.' }
+    if ((Get-Sha256 $Package) -ne $Digest) { throw 'Update integrity check failed.' }
     $parentProcess = Get-Process -Id $ParentId -ErrorAction SilentlyContinue
     if ($parentProcess -and !$parentProcess.WaitForExit(30000)) { throw 'The application did not close. Please retry the update.' }
     Start-Sleep -Seconds 2

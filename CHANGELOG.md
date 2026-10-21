@@ -13,6 +13,12 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.11.1 — 2026-10-21
+
+### Fixed
+
+- The Windows update worker and its integration test compute SHA-256 through the built-in .NET stream API, avoiding dependency on PowerShell module discovery. Includes all 0.11.0 features; 0.11.0 packages were withheld after this compatibility issue was detected by CI.
+
 ## 0.11.0 — 2026-10-21
 
 ### Added
