@@ -647,6 +647,7 @@ document.addEventListener('fullscreenchange', () => {
   const full = !!document.fullscreenElement;
   $('fullscreen-icon').className = `mi ${full ? 'fullscreen_exit' : 'fullscreen'}`;
   $('fullscreen-label').textContent = tr(full ? 'Exit full screen' : 'Full screen');
+  $('fullscreen').title = $('fullscreen-label').textContent; $('fullscreen').setAttribute('aria-label', $('fullscreen-label').textContent);
 });
 document.addEventListener('keydown', e => {
   if (e.code === 'Escape' && document.fullscreenElement && document.activeElement !== stage) { e.preventDefault(); e.stopImmediatePropagation(); exitVideoFullscreen().catch(() => {}); }

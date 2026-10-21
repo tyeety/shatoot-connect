@@ -1,0 +1,97 @@
+'use strict';
+// Exercise the final portable launcher, not just win-unpacked or an updater fixture.
+// NSIS targets share an archive cache: ZIP for the installer can otherwise reach
+// the portable's 7z-only extractor when both targets are built in one invocation.
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { spawn, execFileSync } = require('node:child_process');
+const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+if (process.argv[2] === '--probe') {
+  const resources = path.join(path.dirname(process.execPath), 'resources');
+  if (!process.versions.electron || !process.env.PORTABLE_EXECUTABLE_FILE || !fs.existsSync(path.join(resources, 'input/ShatootConnect.Input.exe'))) throw new Error('Portable did not launch the packaged Electron/native payload.');
+  fs.writeFileSync(process.argv[3], JSON.stringify({ electron: process.versions.electron, archive: digest(path.join(resources, 'app.asar')) }));
+} else {
+  main().catch(error => { console.error(error); process.exitCode = 1; });
+}
+async function main() {
+  const root = path.resolve(__dirname, '..'), version = require('../package.json').version;
+  const fileArg = process.argv.indexOf('--file');
+  const executable = path.resolve(fileArg < 0 ? path.join(root, `release/ShatootConnect-${version}-win-x64.exe`) : process.argv[fileArg + 1]);
+  const ui = process.argv.includes('--ui');
+  if (ui && process.env.GITHUB_ACTIONS !== 'true') throw new Error('Packaged UI/startup integration requires the clean Windows GitHub runner; use test:smoke locally.');
+  if (!fs.existsSync(executable)) throw new Error('Build the portable executable first.');
+  const artifacts = path.join(root, 'artifacts'); fs.mkdirSync(artifacts, { recursive: true });
+  const fixture = fs.mkdtempSync(path.join(artifacts, 'package-launch-'));
+  if (!path.resolve(fixture).startsWith(root + path.sep)) throw new Error('Fixture outside workspace.');
+  let child;
+  const launch = (args, env) => {
+    child = spawn(executable, args, { windowsHide: true, stdio: 'ignore', env: { ...process.env, ...env } });
+    child.once('error', error => { child.launchError = error; });
+    return child;
+  };
+  try {
+    const marker = path.join(fixture, 'launched.json');
+    launch([__filename, '--probe', marker], { ELECTRON_RUN_AS_NODE: '1' });
+    await until(() => { if (child.launchError) throw child.launchError; return child.exitCode !== null; }, 90000);
+    if (child.exitCode !== 0 || !fs.existsSync(marker)) throw new Error(`Portable closed before running Electron (exit ${child.exitCode}); check embedded ZIP/7z format.`);
+    const probe = JSON.parse(fs.readFileSync(marker, 'utf8'));
+    const source = path.join(root, 'release/win-unpacked/resources/app.asar');
+    if (fs.existsSync(source) && probe.archive !== digest(source)) throw new Error('Extracted portable payload differs from win-unpacked.');
+    console.log(`Final portable extracted and executed Electron ${probe.electron}; packaged ASAR SHA-256 verified.`);
+    if (ui) {
+      const profile = path.join(fixture, 'profile'); fs.mkdirSync(profile);
+      fs.writeFileSync(path.join(profile, 'connection.json'), JSON.stringify({ internetEnabled: false, startupEnabled: false, language: 'en', profile: { name: 'Packaged launch test' } }));
+      launch([`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { ELECTRON_RUN_AS_NODE: '' });
+      const activePort = path.join(profile, 'DevToolsActivePort');
+      await until(() => { if (child.launchError) throw child.launchError; if (child.exitCode !== null) throw new Error('Packaged UI closed on startup.'); return fs.existsSync(activePort); }, 90000);
+      const port = fs.readFileSync(activePort, 'utf8').split('\n')[0];
+      let target;
+      await until(async () => { const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then(r => r.json()); target = pages.find(p => p.url.endsWith('/ui/index.html')); return !!target; });
+      const { WebSocket } = require('ws'), socket = new WebSocket(target.webSocketDebuggerUrl);
+      await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+      let sequence = 0; const pending = new Map();
+      socket.on('message', data => { const message = JSON.parse(data); if (pending.has(message.id)) { const { resolve, reject } = pending.get(message.id); pending.delete(message.id); message.error ? reject(new Error(message.error.message)) : resolve(message.result); } });
+      const evaluate = async expression => {
+        const id = ++sequence;
+        const result = await Promise.race([new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } })); }), new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Packaged renderer did not respond.')), 15000); timer.unref(); })]);
+        if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
+        return result.result.value;
+      };
+      try {
+        await until(() => evaluate('window.shatootconnectReady === true'));
+        if (!await evaluate(`window.shatootconnect.config().then(c => c.version === '${version}' && c.internetEnabled === false && c.startupEnabled === false && c.name === 'Packaged launch test')`)) throw new Error('Packaged UI did not load its isolated profile/version.');
+        for (const language of ['en', 'fa']) {
+          const errors = await evaluate(`(async()=>{
+            window.i18n.setLanguage('${language}'); document.body.classList.add('viewing'); document.querySelector('#session-panel').hidden=false;
+            for(const button of document.querySelectorAll('.session-toolbar button'))button.hidden=false;
+            await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+            const errors=[]; if(document.querySelectorAll('.session-toolbar button:not([hidden])').length!==5)errors.push('toolbar buttons missing');
+            for(const button of document.querySelectorAll('.session-toolbar button:not([hidden])')){
+              const icon=button.querySelector('.mi'),b=button.getBoundingClientRect(),i=icon.getBoundingClientRect();
+              if(Math.abs(b.x+b.width/2-i.x-i.width/2)>.75 || Math.abs(b.y+b.height/2-i.y-i.height/2)>.75 || i.width<20 || i.height<20)errors.push(button.id+' off-center/small');
+              if([...button.querySelectorAll('span:not(.mi)')].some(label=>label.getClientRects().length))errors.push(button.id+' hidden text occupies space');
+              const mask=getComputedStyle(icon).maskImage, match=mask.match(/url\\(['"]?(.+?)['"]?\\)/);
+              if(!match)errors.push(button.id+' missing mask');else{const image=new Image();image.src=match[1];try{await image.decode()}catch{errors.push(button.id+' SVG did not load')}}
+            }
+            return errors;
+          })()`);
+          if (errors.length) throw new Error(`${language} toolbar: ${errors.join(', ')}`);
+        }
+        console.log('Final portable UI opened with the correct version/profile; toolbar icon alignment and SVG loading passed in English and Persian.');
+        await evaluate("window.shatootconnect.lifecycle('quit')");
+        await until(() => child.exitCode !== null, 20000);
+        if (child.exitCode !== 0) throw new Error('Packaged app did not exit cleanly.');
+      } finally { socket.close(); }
+    }
+  } finally {
+    if (child?.pid && child.exitCode === null) try { execFileSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' }); } catch {}
+    await until(() => !child?.pid || child.exitCode !== null, 10000).catch(() => {});
+    fs.rmSync(fixture, { recursive: true, force: true, maxRetries: 8, retryDelay: 300 });
+  }
+}
+async function until(check, timeout = 30000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 150)); }
+  throw new Error('Packaged launch test timed out.');
+}

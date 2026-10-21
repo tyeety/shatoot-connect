@@ -4,6 +4,13 @@ const path = require('node:path');
 module.exports = async ({ host, viewer, states, wait, createWindow, log, artifacts, phase = 'multi' }) => {
   const run = (win, code) => win.webContents.executeJavaScript(code);
   if (phase === 'multi') {
+    for(const language of ['en','fa']) {
+      const errors=await run(viewer,`(()=>{window.i18n.setLanguage('${language}');return [...document.querySelectorAll('.session-toolbar button:not([hidden])')].flatMap(button=>{const icon=button.querySelector('.mi'),b=button.getBoundingClientRect(),i=icon.getBoundingClientRect();return Math.abs(b.x+b.width/2-i.x-i.width/2)>.75||Math.abs(b.y+b.height/2-i.y-i.height/2)>.75||i.width<20||i.height<20||[...button.querySelectorAll('span:not(.mi)')].some(label=>label.getClientRects().length)?[button.id]:[]})})()`);
+      if(errors.length)throw new Error(`${language} live toolbar icons are not centered: ${errors.join(', ')}`);
+      fs.writeFileSync(path.join(artifacts,`toolbar-${language}.png`),(await viewer.webContents.capturePage()).toPNG());
+    }
+    await run(viewer,"window.i18n.setLanguage('en');true");
+    log('Live viewer toolbar icons are centered and readable in English and Persian, without invisible label spacing');
     const second = createWindow();
     try {
       await wait(second,'!!window.shatootconnectReady && registered');

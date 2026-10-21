@@ -38,6 +38,7 @@ jobs:
       - run: npm test
       - run: npm run test:updater
       - run: npm run dist -- --publish never
+      - run: npm run test:packaged -- --ui
       - run: npm run test:installer
       - run: npm run dist:server
       - name: Publish packages and exact changelog entry

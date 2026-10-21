@@ -9,6 +9,8 @@ jobs:
   check:
     runs-on: windows-latest
     timeout-minutes: 25
+    env:
+      ELECTRON_BUILDER_COMPRESSION_LEVEL: '5'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -22,7 +24,8 @@ jobs:
       - run: npm run check:release
       - run: npm test
       - run: npm run test:updater
-      - run: npm run build:native
+      - run: npm run dist -- --publish never
+      - run: npm run test:packaged -- --ui
       - run: ./native/publish/ShatootConnect.Input.exe --self-test
       - run: npm run build:server-manager
       # Screen capture needs an interactive, unlocked desktop. Run test:smoke

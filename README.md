@@ -147,6 +147,7 @@ npm test
 npm run test:smoke
 npm run check:release
 npm run dist
+npm run test:packaged
 npm run test:installer
 npm run test:updater
 npm run dist:server
@@ -157,6 +158,8 @@ npm run dist:server
 `test:installer` requires `release/win-unpacked` and an account with no existing installation/app shortcuts. A guarded fixture tests invalid/occupied/unwritable destinations, running-app refusal, fresh install, downgrade refusal, locked upgrade/removal, repair, uninstall and personal-data preservation, then cleans up. CI runs protocol/store/network tests and builds native components. A service-based CI runner does not establish interactive desktop-capture acceptance.
 
 `test:updater` exercises portable executable replacement, rollback-copy preservation and actual restart with an isolated Windows fixture. For an optional real GitHub metadata/download/hash check without installation, run `node_modules/.bin/electron.cmd tests/update-network.cjs --download`. Windows update checks use Electron networking so system proxy settings apply.
+
+`test:packaged` executes the final portable launcher in Electron's Node mode and verifies its extracted payload hash, without opening the personal profile. Release CI also passes `--ui` on a clean Windows runner to open the packaged renderer with an isolated profile and check both language layouts and SVG loading. Keep `nsis.useZip` disabled: installer and portable builds share an archive cache, while the default portable extractor expects 7z.
 
 Source: `desktop/main.cjs` owns trusted Windows/IPC operations; `desktop/ui/` is sandboxed UI/WebRTC; `discovery.cjs`, `chat-store.cjs` and `collaboration-host.cjs` implement local discovery, encrypted history and file grants. `server/` handles signaling, `shared/` protocol/network helpers, `native/` Windows input/keyboard/clipboard, `server-manager/` service management, and `build/`/`tests/` packaging and verification.
 
