@@ -19,6 +19,7 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 - The portable launcher now receives a 7z payload matching its extractor. Both NSIS targets use 7z so electron-builder's shared architecture cache cannot reuse the installer's ZIP payload for the portable build.
 - Live session buttons use centered 22-pixel Material icons and consistent square hit targets. Hidden button labels no longer occupy flex spacing; full-screen and disconnect controls retain translated accessible labels/tooltips.
+- Shared Material icon definitions are available in every window, including the host panel's previously missing hide/eye icon.
 - Release validation executes the final portable binary, checks the extracted ASAR against the packaged source, and opens its actual packaged renderer to verify SVG loading and icon alignment in English and Persian before publication.
 
 ## 0.12.0 — 2026-10-21
