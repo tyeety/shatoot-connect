@@ -5,11 +5,12 @@ const { WebSocketServer, WebSocket } = require('ws');
 const { validSignal } = require('../shared/protocol.cjs');
 const { IdentityStore } = require('./identity-store.cjs');
 
-function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [], tls, identityFile, forceRelay = false, enrollmentKey, directHostToken, presence } = {}) {
+function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [], tls, identityFile, forceRelay = false, enrollmentKey, directHostToken, presence, deviceProfile } = {}) {
   const identities = new IdentityStore(identityFile);
   const rooms = new Map(), attempts = new Map(), connections = new Map();
   const handler = (req, res) => {
     if (req.url === '/presence' && directHostToken && presence) { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(presence())); return; }
+    if (req.url === '/profile' && directHostToken && deviceProfile) { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(deviceProfile())); return; }
     res.writeHead(req.url === '/health' ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(req.url === '/health' ? { ok: true, service: 'ShatootConnect signaling' } : { error: 'Not found' }));
   };
@@ -20,6 +21,7 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
   wss.on('error', () => {});
   const send = (ws, data) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data)); };
   const collaboration = require('./collaboration.cjs').collaborationBroker({ rooms, send, ice, direct: !!directHostToken });
+  const desktops = require('./desktop-sessions.cjs').desktopSessions({ rooms, send, ice, direct: !!directHostToken });
   function detach(ws, keepRegistration = false) {
     const room = rooms.get(ws.roomId);
     if (!room) {
@@ -72,10 +74,13 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         return;
       }
       if (await collaboration.handle(ws, m)) return;
+      if (await desktops.handle(ws,m)) return;
+      if (m.type === 'hosting-busy') { if (ws.registrationId && typeof m.busy === 'boolean') ws.desktopBusy = m.busy; return; }
+      if (m.type === 'profile') { if (ws.deviceId) { ws.deviceProfile = require('../shared/profile.cjs').profile(m); ws.deviceName = ws.deviceProfile.name || ws.deviceName; } return; }
       if (m.type === 'register') {
         if (directHostToken && (m.hostToken !== directHostToken || !localProxy)) return fail('Direct listeners only register their local host.');
         if (m.password != null && (typeof m.password !== 'string' || (m.password.length > 0 && m.password.length < 8) || m.password.length > 128)) return fail('A fixed password must be 8 to 128 characters.');
-        if (ws.roomId) return fail('Finish the active session before registering.');
+        if (ws.roomId || ws.desktopSession) return fail('Finish the active session before registering.');
         if (ws.deviceId && ws.deviceId !== m.deviceId) return fail('A connection cannot change its device identity.');
         if (rooms.size >= 1000 && !ws.registrationId) return fail('Server capacity reached.');
         let id;
@@ -87,10 +92,12 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         ws.registrationId = id;
         ws.deviceId = m.deviceId;
         ws.deviceName = typeof m.name === 'string' ? m.name.slice(0, 60) : 'Computer';
+        ws.deviceProfile = require('../shared/profile.cjs').profile(m);
+        ws.multiDesktop = m.multiDesktop === true;
         send(ws, { type: 'registered', id, password, fixedPassword: !!m.password });
       } else if (m.type === 'host') {
         if (directHostToken) return fail('Direct listeners only host their local device.');
-        if (ws.roomId) return fail('ابتدا اتصال فعلی را ببندید.');
+        if (ws.roomId || ws.desktopSession) return fail('ابتدا اتصال فعلی را ببندید.');
         if (rooms.size >= 1000) return fail('سرور پر است.');
         let id; do { id = String(crypto.randomInt(100000000, 1000000000)); } while (rooms.has(id));
         const password = crypto.randomBytes(6).toString('base64url');
@@ -99,7 +106,7 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         ws.roomId = id;
         send(ws, { type: 'hosted', id, password });
       } else if (m.type === 'join') {
-        if (ws.roomId) return fail('ابتدا اتصال فعلی را ببندید.');
+        if (ws.roomId || ws.desktopSession) return fail('ابتدا اتصال فعلی را ببندید.');
         const now = Date.now();
         const attemptKey = localProxy ? ws : ip;
         let a = attempts.get(attemptKey);
@@ -108,7 +115,8 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         const room = directHostToken && m.id === 'direct' ? [...rooms.values()][0] : rooms.get(String(m.id));
         const hash = crypto.createHash('sha256').update(typeof m.password === 'string' ? m.password.slice(0, 128) : '').digest();
         if (!room || !crypto.timingSafeEqual(room.hash, hash)) return fail('شناسه یا رمز اتصال درست نیست.');
-        if (room.host === ws || room.guest || (room.host.registrationId && room.host.roomId)) return fail('این میزبان در حال اتصال است.');
+        if (room.host === ws) return fail('این میزبان در حال اتصال است.');
+        if (room.guest || room.host.desktopBusy || (room.host.registrationId && room.host.roomId)) { if (!room.host.multiDesktop) return fail('این میزبان در حال اتصال است.'); await desktops.join(ws,m,room); return; }
         room.guest = ws; ws.roomId = room.id;
         if (room.host.registrationId) room.host.roomId = room.id;
         send(ws, { type: 'waiting' });
@@ -138,10 +146,10 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         if (!room?.approved || !validSignal(m.data)) return;
         send(room.host === ws ? room.guest : room.host, { type: 'signal', data: m.data });
       } else if (m.type === 'end-session') detach(ws, true);
-      else if (m.type === 'leave' || m.type === 'unregister') detach(ws);
+      else if (m.type === 'leave' || m.type === 'unregister') { desktops.detach(ws); detach(ws); }
     });
     ws.on('error', () => {});
-    ws.on('close', () => { collaboration.detach(ws); clearTimeout(handshakeTimeout); attempts.delete(ws); connections.set(ip, Math.max(0, (connections.get(ip) || 1) - 1)); detach(ws); });
+    ws.on('close', () => { desktops.detach(ws); collaboration.detach(ws); clearTimeout(handshakeTimeout); attempts.delete(ws); connections.set(ip, Math.max(0, (connections.get(ip) || 1) - 1)); detach(ws); });
   });
   const timer = setInterval(() => {
     for (const ws of wss.clients) {
@@ -156,7 +164,7 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
   return {
     server, rooms,
     listen: () => new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, () => { server.removeListener('error', reject); resolve(server.address()); }); }),
-    close: () => new Promise(resolve => { collaboration.close(); clearInterval(timer); for (const ws of wss.clients) ws.terminate(); wss.close(() => server.close(resolve)); })
+    close: () => new Promise(resolve => { desktops.close(); collaboration.close(); clearInterval(timer); for (const ws of wss.clients) ws.terminate(); wss.close(() => server.close(resolve)); })
   };
 }
 if (require.main === module) {

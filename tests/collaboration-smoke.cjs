@@ -65,6 +65,7 @@ module.exports = async ({ phase, host, viewer, states, wait, createWindow, log, 
     if (!await run(host, fit)) throw new Error('Persian messenger controls do not fit');
     await new Promise(resolve => setTimeout(resolve, 300)); await screenshot('messenger-fa.png');
     await run(host, "document.querySelector('#messenger-dialog').close();window.i18n.setLanguage('en');true");
+    await require('./new-features-smoke.cjs')({ phase: 'chat-window', host, viewer, states, wait, createWindow, log, artifacts });
     for (const win of [host, viewer, third]) await run(win, 'for(const s of [...collaboration.sessions.values()])collaboration.close(s);true');
   } finally { if (!third.isDestroyed()) third.destroy(); }
 };

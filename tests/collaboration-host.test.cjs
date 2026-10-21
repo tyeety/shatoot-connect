@@ -1,0 +1,20 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { installCollaboration } = require('../desktop/collaboration-host.cjs');
+test('ordinary chat defaults to no prompt, optional approval is enforced, and automatic files retain validation', async t => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'shatoot-chat-permission-')); t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const handlers=new Map(), s={identity:{deviceId:crypto.randomUUID()},language:'en',win:{}}, prefs={}; let prompts=0;
+  const host=installCollaboration({ipcMain:{handle:(name,fn)=>handlers.set(name,fn)},state:()=>s,app:{getPath:()=>root},safeStorage:{isEncryptionAvailable:()=>true,encryptString:text=>Buffer.from(text),decryptString:bytes=>bytes.toString()},dialog:{showMessageBox:async()=>{prompts++;return{response:0}}},shell:{},smoke:false,settings:()=>prefs}); t.after(()=>host.close(s));
+  const peer={deviceId:crypto.randomUUID(),name:'Guest'}, session=crypto.randomUUID(), call=(op,value)=>handlers.get('collaboration')({},op,value);
+  assert.equal(await call('approve',{session,peer}),true); assert.equal(prompts,0); assert.equal(s.captureAllowed,undefined); assert.equal(s.control,undefined);
+  prefs.requireChatApproval=true; assert.equal(await call('approve',{session:crypto.randomUUID(),peer}),false); assert.equal(prompts,1);
+  const files=(op,value)=>handlers.get('collaboration-files')({},session,op,value);
+  const value={entries:[{name:'safe.txt',size:0}],message:{id:crypto.randomUUID(),kind:'file',conversation:`p:${peer.deviceId}`,sender:peer.deviceId}};
+  await assert.rejects(files('begin',value),/declined/); assert.equal(prompts,2);
+  prefs.autoAcceptFiles=true; assert.equal(await files('begin',value),true); assert.equal(prompts,2); await files('cancel');
+  await assert.rejects(files('begin',{...value,entries:[{name:'../outside.txt',size:0}]}),/file name/); assert.equal(prompts,2);
+});

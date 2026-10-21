@@ -131,6 +131,20 @@ test('unrelated client cannot relay into an approved session; second guest is re
   guest.send({ type: 'signal', data: { description: { type: 'offer', sdp: 42 } } });
   await new Promise(r => setTimeout(r, 50)); assert.equal(host.queue.some(m => m.type === 'signal'), false);
 });
+
+test('additional viewers have isolated consent and signaling; first viewer departure preserves the others', async t => {
+  const crypto = require('node:crypto'), { client } = await fixture(t,{iceServers:[]});
+  const host=await client(); host.send({type:'register',deviceId:crypto.randomUUID(),deviceSecret:crypto.randomBytes(32).toString('base64url'),multiDesktop:true}); const credentials=await host.next('registered');
+  const first=await client(), second=await client(), stranger=await client();
+  first.send({...credentials,type:'join'}); await host.next('join-request'); host.send({type:'accept',control:false}); await first.next('accepted'); await host.next('peer-ready');
+  second.send({...credentials,type:'join'}); const invite=await host.next('desktop-invite'); assert.match(invite.session,/^[a-f0-9-]{36}$/);
+  const data={description:{type:'offer',sdp:'second-viewer-offer'}};
+  stranger.send({type:'desktop-accept',session:invite.session,control:true}); second.send({type:'signal',data}); await new Promise(r=>setTimeout(r,30)); assert.equal(host.queue.some(m=>m.type==='desktop-signal'),false);
+  host.send({type:'desktop-accept',session:invite.session,control:true}); assert.equal((await second.next('accepted')).control,true); await host.next('desktop-ready');
+  second.send({type:'signal',data}); assert.equal((await host.next('desktop-signal')).session,invite.session); assert.equal(first.queue.some(m=>m.type==='signal'),false);
+  first.send({type:'end-session'}); await host.next('peer-left'); host.send({type:'desktop-signal',session:invite.session,data}); assert.equal((await second.next('signal')).data.description.sdp,data.description.sdp);
+  host.send({type:'desktop-end',session:invite.session}); await second.next('ended');
+});
 test('occupied port rejects cleanly instead of raising an unhandled WebSocketServer error', async t => {
   const { service } = await fixture(t);
   const second = createSignalingServer({ port: service.server.address().port, host: '127.0.0.1' });

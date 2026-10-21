@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell, nativeImage, Tray, Menu } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
@@ -17,7 +17,10 @@ if (smoke) {
   process.on('unhandledRejection', error => { smokeLog(`unhandled: ${error?.stack || error}`); app.exit(1); });
 }
 const states = new Map();
-let localServer;
+let localServer, tray, quitting = false;
+const profile = () => ({ ...require('../shared/profile.cjs').profile(settings().profile), name: settings().profile?.name || require('node:os').hostname() });
+const update = new (require('./updater.cjs').Updater)({ version: app.getVersion(), directory: path.join(app.getPath('userData'), 'updates'), portable: !!process.env.PORTABLE_EXECUTABLE_FILE, request: require('./updater.cjs').electronResponse,
+  changed: value => { for (const s of states.values()) { if (!s.win.isDestroyed()) s.win.webContents.send('update-status', value); } } });
 function settings() {
   try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'connection.json'), 'utf8')); }
   catch {
@@ -114,7 +117,8 @@ function showHostOverlay(s) {
   hideHostOverlay(s);
   const display = screen.getAllDisplays().find(d => String(d.id) === s.source?.display_id) || screen.getPrimaryDisplay();
   const area = display.workArea;
-  const overlay = new BrowserWindow({ width: 292, height: 66, x: area.x + area.width - 304, y: area.y + area.height - 78,
+  const ordinal = [...states.values()].filter(other => other !== s && other.overlay && !other.overlay.isDestroyed()).length;
+  const overlay = new BrowserWindow({ width: 292, height: 66, x: area.x + area.width - 304, y: area.y + area.height - 78 - ordinal * 72,
     frame: false, resizable: false, maximizable: false, minimizable: false, fullscreenable: false,
     alwaysOnTop: true, skipTaskbar: true, focusable: false, show: false, transparent: true, backgroundColor: '#00000000',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
@@ -141,11 +145,80 @@ function helper(s) {
   return s.helper;
 }
 function state(event) {
-  const s = states.get(event.sender.id);
+  const s = states.get(event.sender.id) || [...states.values()].find(s => s.chatWindow?.webContents === event.sender);
   if (!s || event.senderFrame !== event.sender.mainFrame) throw new Error('Unauthorized IPC');
   return s;
 }
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke });
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings });
+function hostReply(s, message) {
+  if (!s.owner || s.owner.win.isDestroyed()) return;
+  const data = { ...message, session: s.invitation.session };
+  if (s.hostRoute === 'lan-host') { if (s.owner.directSocket?.readyState === 1) s.owner.directSocket.send(JSON.stringify(data)); }
+  else s.owner.win.webContents.send('host-signal-out', data);
+}
+function closeExtraHost(s) { if (!s.owner || s.win.isDestroyed()) return; hostReply(s, { type: 'desktop-end' }); s.win.destroy(); }
+ipcMain.handle('host-session', async (e, message, route, sourceId) => {
+  const owner = state(e); if (owner.owner || !require('./discovery.cjs').UUID.test(message?.session) || !['server','lan-host'].includes(route)) throw new Error('Invalid desktop session.');
+  let s = [...states.values()].find(s => s.owner === owner && s.invitation.session === message.session && s.hostRoute === route);
+  if (message.type === 'desktop-invite') {
+    if (s) return;
+    if ([...states.values()].filter(s => s.owner === owner).length >= 7) { hostReply({ owner, hostRoute: route, invitation: message },{type:'desktop-reject'}); return; }
+    const win = new BrowserWindow({ show: false, width: 320, height: 180, skipTaskbar: true, webPreferences: { preload: path.join(__dirname,'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
+    s = { win, owner, invitation: message, sourceId, hostRoute: route, language: owner.language, sharedCursor: owner.sharedCursor, showGuestCursor: owner.showGuestCursor, identity: owner.identity, captureAllowed: false, control: false };
+    const workerContentsId = win.webContents.id; states.set(workerContentsId,s); win.webContents.setWebRTCIPHandlingPolicy('default'); win.webContents.setWindowOpenHandler(() => ({action:'deny'})); win.webContents.on('will-navigate', event => event.preventDefault());
+    win.on('closed', () => { hostReply(s,{type:'desktop-end'}); hideHostOverlay(s); release(s); s.keyboardMonitor?.stdin.end(); s.helper?.stdin.end(); states.delete(workerContentsId); });
+    win.loadFile(path.join(__dirname,'ui/extra-host.html')); return;
+  }
+  if (!s) return;
+  if (message.type === 'desktop-ended') { closeExtraHost(s); return; }
+  if (['desktop-ready','desktop-signal'].includes(message.type)) s.win.webContents.send('host-signal', message);
+});
+ipcMain.handle('host-init', e => { const s = state(e); if (!s.owner) throw new Error('Invalid desktop worker.'); return { invitation: s.invitation, source: s.sourceId, lan: s.hostRoute === 'lan-host', profiles: PROFILES, profile: settings().qualityProfile || 'speed' }; });
+ipcMain.on('host-send', (e, message) => { const s = state(e); if (!s.owner || !message || !['desktop-accept','desktop-reject','desktop-signal','desktop-end'].includes(message.type) || JSON.stringify(message).length > 110000) return; if (['desktop-accept','desktop-signal'].includes(message.type) && !s.captureAllowed) return; hostReply(s,message); if (['desktop-reject','desktop-end'].includes(message.type)) closeExtraHost(s); });
+ipcMain.handle('host-sessions-stop', e => { const owner = state(e); for (const s of states.values()) if (s.owner === owner) closeExtraHost(s); });
+const chatPending = new Map();
+function showMain(s) { if (s.win.isDestroyed()) return; s.win.show(); if (s.win.isMinimized()) s.win.restore(); s.win.focus(); }
+function openChat(s) {
+  if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show(); s.chatWindow.focus(); return; }
+  const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor: '#0a0e17', title: 'Shatoot Connect · Chats', autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  s.chatWindow = win; win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
+  win.on('closed', () => { s.chatWindow = null; if (!s.win.isDestroyed() && !s.win.isVisible() && !quitting) showMain(s); });
+  win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
+}
+ipcMain.handle('chat-open', e => openChat(state(e)));
+ipcMain.handle('show-main', e => showMain(state(e)));
+ipcMain.handle('chat-close', e => state(e).chatWindow?.close());
+ipcMain.handle('chat-call', (e, operation, args = []) => {
+  const s = state(e);
+  if (s.chatWindow?.webContents !== e.sender || !['snapshot','connect','send','sendFiles','close','createGroup'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
+  const id = crypto.randomUUID();
+  return new Promise((resolve,reject) => { const timer = setTimeout(() => { chatPending.delete(id); reject(new Error('Chat operation timed out.')); }, operation === 'sendFiles' ? 1800000 : 75000); chatPending.set(id, { s, resolve, reject, timer }); s.win.webContents.send('chat-command', { id, operation, args }); });
+});
+ipcMain.on('chat-result', (e, data) => { const pending = chatPending.get(data?.id); if (!pending || pending.s.win.webContents !== e.sender || e.senderFrame !== e.sender.mainFrame) return; clearTimeout(pending.timer); chatPending.delete(data.id); data.error ? pending.reject(new Error(data.error)) : pending.resolve(data.value); });
+ipcMain.on('chat-publish', (e, value) => { const s = state(e); if (s.win.webContents !== e.sender) return; if (s.chatWindow && !s.chatWindow.isDestroyed()) s.chatWindow.webContents.send('chat-snapshot', value); });
+ipcMain.handle('update', async (e, operation) => {
+  state(e);
+  if (operation === 'status') return update.status;
+  if (operation === 'check') return update.check();
+  if (operation !== 'install' || !app.isPackaged) throw new Error('Updates can only be installed in a packaged application.');
+  if (update.status.state !== 'ready') await update.download();
+  const worker = path.join(update.directory, 'update-worker.ps1');
+  fs.writeFileSync(worker, fs.readFileSync(path.join(__dirname, 'update-worker.ps1')));
+  const executable = process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe');
+  if (process.env.PORTABLE_EXECUTABLE_FILE) fs.accessSync(path.dirname(executable), fs.constants.W_OK);
+  const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const proc = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', worker, '-ParentId', String(process.pid), '-Package', update.file, '-Target', executable, '-Digest', update.asset.digest, ...(process.env.PORTABLE_EXECUTABLE_FILE ? ['-Portable'] : [])], { detached: true, windowsHide: true, stdio: 'ignore' });
+  await new Promise((resolve, reject) => { proc.once('spawn', resolve); proc.once('error', reject); }); proc.unref();
+  quitting = true; setTimeout(() => app.quit(), 300); return { state: 'installing' };
+});
+ipcMain.handle('firewall-repair', async e => { state(e); if (smoke) return true; return require('./firewall.cjs').repairFirewall(app.getPath('exe')); });
+ipcMain.handle('chat-preferences', (e, value) => { state(e); if (!value || typeof value.autoAcceptFiles !== 'boolean' || typeof value.requireChatApproval !== 'boolean') throw new Error('Invalid chat settings.'); saveSettings({ autoAcceptFiles: value.autoAcceptFiles, requireChatApproval: value.requireChatApproval }); return value; });
+ipcMain.handle('profile-save', (e, value) => { const s = state(e); if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !require('../shared/profile.cjs').STATUSES.includes(value.status)) throw new Error('Enter a profile name and status.'); const next = { ...profile(), name: value.name.trim(), status: value.status }; saveSettings({ profile: next }); if (s.discovery) { s.discovery.name = next.name; s.discovery.status = next.status; s.discovery.refresh(); } s.directSocket?.send(JSON.stringify({ type: 'profile', ...next })); return next; });
+ipcMain.handle('profile-photo', async (e, remove) => {
+  const s = state(e); let avatar = '';
+  if (!remove) { const chosen = await dialog.showOpenDialog(s.win, { filters: [{ name: 'Profile photo', extensions: ['png', 'jpg', 'jpeg', 'webp'] }], properties: ['openFile'] }); if (chosen.canceled) return profile(); if (fs.statSync(chosen.filePaths[0]).size > 10 * 1024 ** 2) throw new Error('Choose a profile photo smaller than 10 MB.'); const input = nativeImage.createFromPath(chosen.filePaths[0]); if (input.isEmpty()) throw new Error('This photo could not be opened.'); const size = input.getSize(), side = Math.min(size.width, size.height); let image = input.crop({ x: Math.floor((size.width-side)/2), y: Math.floor((size.height-side)/2), width: side, height: side }).resize({ width: 64, height: 64 }); avatar = image.toDataURL(); if (avatar.length > 24000) { image = image.resize({ width: 48, height: 48 }); avatar = image.toDataURL(); } if (avatar.length > 24000) throw new Error('Choose a smaller profile photo.'); }
+  const next = { ...profile(), avatar }; saveSettings({ profile: next }); return next;
+});
 ipcMain.handle('lan-open', (event, id, endpoint) => {
   const s = state(event);
   if (!require('./discovery.cjs').UUID.test(id) || typeof endpoint !== 'string') throw new Error('Invalid LAN transport.');
@@ -182,7 +255,8 @@ function createWindow() {
   win.webContents.setWebRTCIPHandlingPolicy('default');
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
-  win.on('closed', () => { collaborationHost.close(s); s.discovery?.close(); for (const ws of s.lanSockets?.values() || []) ws.terminate(); hideHostOverlay(s); release(s); s.keyboardMonitor?.stdin.end(); s.helper?.stdin.end(); s.directSocket?.close(); s.directService?.close(); states.delete(contentsId); });
+  win.on('close', event => { if (!quitting && s.chatWindow && !s.chatWindow.isDestroyed()) { event.preventDefault(); win.hide(); } });
+  win.on('closed', () => { for (const child of states.values()) if (child.owner === s) closeExtraHost(child); s.chatWindow?.destroy(); collaborationHost.close(s); s.discovery?.close(); for (const ws of s.lanSockets?.values() || []) ws.terminate(); hideHostOverlay(s); release(s); s.keyboardMonitor?.stdin.end(); s.helper?.stdin.end(); s.directSocket?.close(); s.directService?.close(); states.delete(contentsId); });
   win.loadFile(path.join(__dirname, 'ui/index.html'));
   return win;
 }
@@ -197,7 +271,7 @@ ipcMain.handle('config', e => {
   try { if (saved.serverKeys?.[endpoint]) serverKey = safeStorage.decryptString(Buffer.from(saved.serverKeys[endpoint], 'base64')); } catch {}
   s.sharedCursor = saved.sharedCursor === true; s.showGuestCursor = saved.showGuestCursor !== false;
   const pendingFavorite = launchFavorite; launchFavorite = null;
-  return { endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, name: require('node:os').hostname(), profiles: PROFILES, version: app.getVersion() };
+  return { smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles === true, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
 });
 ipcMain.handle('internet-enabled', (e,value)=>{state(e);if(typeof value!=='boolean')throw new Error('Invalid connection mode.');saveSettings({internetEnabled:value});return value;});
 ipcMain.handle('show-guest-cursor', (e,value)=>{const s=state(e);if(typeof value!=='boolean')throw new Error('Invalid cursor setting.');saveSettings({showGuestCursor:value});s.showGuestCursor=value;if(!value)hideGuestCursor(s);return value;});
@@ -208,7 +282,7 @@ ipcMain.handle('unattended', (e, enabled) => { const s = state(e); if (s.capture
 ipcMain.handle('fixed-password', (e, value) => {
   const s = state(e); if (s.captureAllowed) throw new Error('End the current session before changing the password.');
   const password = preferences.setFixedPassword(value);
-  if (s.directSocket?.readyState === 1) s.directSocket.send(JSON.stringify({ type: 'register', hostToken: s.directHostToken, ...s.identity, password }));
+  if (s.directSocket?.readyState === 1) s.directSocket.send(JSON.stringify({ type: 'register', hostToken: s.directHostToken, ...s.identity, ...profile(), multiDesktop: true, password }));
   return password;
 });
 ipcMain.handle('favorite-save', (e, value) => { state(e); preferences.save(value); return preferences.list(); });
@@ -266,8 +340,8 @@ ipcMain.handle('direct-listener', async e => {
   s.directStarting = (async () => {
     const hostToken = crypto.randomBytes(32).toString('hex');
     s.directHostToken = hostToken;
-    const presence = () => ({ service: 'ShatootConnect', version: 1, kind: 'presence', deviceId: s.identity.deviceId, name: require('node:os').hostname(), port: service.server.address()?.port, capabilities: ['desktop', 'chat', 'files', 'groups'] });
-    const service = createSignalingServer({ port: smoke ? 0 : 8788, directHostToken: hostToken, presence });
+    const presence = () => ({ service: 'ShatootConnect', version: 1, kind: 'presence', deviceId: s.identity.deviceId, name: profile().name, status: profile().status, port: service.server.address()?.port, capabilities: ['desktop', 'chat', 'files', 'groups'] });
+    const service = createSignalingServer({ port: smoke ? 0 : 8788, directHostToken: hostToken, presence, deviceProfile: () => ({ ...profile(), deviceId: s.identity.deviceId }) });
     try {
       await service.listen(); s.directService = service;
       const port = service.server.address().port;
@@ -279,14 +353,14 @@ ipcMain.handle('direct-listener', async e => {
         ws.on('message', raw => {
           const message = JSON.parse(raw);
           smokeLog(`direct host received ${message.type}`);
-          if (message.type === 'ready') ws.send(JSON.stringify({ type: 'register', hostToken, deviceId: s.identity.deviceId, deviceSecret: s.identity.deviceSecret, name: require('node:os').hostname(), password: preferences.fixedPassword() }));
+          if (message.type === 'ready') ws.send(JSON.stringify({ type: 'register', hostToken, deviceId: s.identity.deviceId, deviceSecret: s.identity.deviceSecret, ...profile(), multiDesktop: true, password: preferences.fixedPassword() }));
           else if (message.type === 'registered') { clearTimeout(timer); if (s.directInfo) { s.directInfo.password = message.password; s.directInfo.fixedPassword = message.fixedPassword; if (!s.win.isDestroyed()) s.win.webContents.send('direct-info', s.directInfo); } resolve(message); }
           else if (!s.win.isDestroyed()) s.win.webContents.send('direct-message', message);
         });
         ws.on('close', () => { clearTimeout(timer); reject(new Error('LAN listener closed.')); if (!s.win.isDestroyed()) s.win.webContents.send('direct-message', { type: 'ended', reason: 'LAN listener closed.' }); });
       });
       const addresses = Object.values(require('node:os').networkInterfaces()).flat().filter(n => n.family === 'IPv4' && !n.internal).map(n => `${n.address}:${port}`);
-      s.discovery = new (require('./discovery.cjs').Discovery)({ identity: s.identity, name: require('node:os').hostname(), port, ...(smoke ? { discoveryPort: 0, networkInterfaces: () => ({}), neighbors: false } : {}) });
+      s.discovery = new (require('./discovery.cjs').Discovery)({ identity: s.identity, name: profile().name, port, ...(smoke ? { discoveryPort: 0, networkInterfaces: () => ({}), neighbors: false } : {}) }); s.discovery.status = profile().status;
       s.discovery.on('change', value => { if (!s.win.isDestroyed()) s.win.webContents.send('discovery', value); });
       s.discovery.start().catch(() => {});
       return s.directInfo = { addresses, port, password: credentials.password, fixedPassword: credentials.fixedPassword };
@@ -297,7 +371,7 @@ ipcMain.handle('direct-listener', async e => {
 ipcMain.on('direct-send', (e, message) => {
   const s = state(e);
   smokeLog(`direct host sending ${message?.type}`);
-  if (!message || !['accept', 'reject', 'signal', 'end-session', 'collab-accept', 'collab-reject', 'collab-signal', 'collab-leave'].includes(message.type) || JSON.stringify(message).length > 110000) return;
+  if (!message || !['accept', 'reject', 'signal', 'end-session', 'hosting-busy', 'desktop-reject', 'collab-accept', 'collab-reject', 'collab-signal', 'collab-leave'].includes(message.type) || JSON.stringify(message).length > 110000) return;
   if (message.type === 'accept' && !s.captureAllowed) return;
   if (s.directSocket?.readyState === 1) s.directSocket.send(JSON.stringify(message));
 });
@@ -344,7 +418,7 @@ ipcMain.handle('approve', async (e, name, fixedPassword) => {
   s.viewerName = String(name).slice(0, 60);
   if (smoke) { s.captureAllowed = true; s.control = true; return { accepted: true, control: true }; }
   const fa = s.language === 'fa';
-  const result = preferences.canAutoApprove(fixedPassword) ? { response: 2 } : await dialog.showMessageBox(s.win, { type: 'question', title: fa ? 'درخواست اتصال ShatootConnect' : 'ShatootConnect connection request',
+  const result = preferences.canAutoApprove(fixedPassword) ? { response: 2 } : await dialog.showMessageBox(s.owner?.win || s.win, { type: 'question', title: fa ? 'درخواست اتصال ShatootConnect' : 'ShatootConnect connection request',
     message: fa ? `${String(name).slice(0, 60)} درخواست مشاهدهٔ صفحهٔ شما را دارد.` : `${String(name).slice(0, 60)} wants to view your screen.`,
     detail: fa ? 'فقط به فرد مورد اعتماد اجازه دهید. برای قطع فوری: Ctrl + Shift + F12' : 'Only allow someone you trust. Emergency disconnect: Ctrl + Shift + F12',
     buttons: fa ? ['رد درخواست', 'فقط مشاهده', 'مشاهده، کنترل و فایل'] : ['Reject', 'View only', 'View, control and files'], defaultId: 0, cancelId: 0, noLink: true });
@@ -455,6 +529,11 @@ app.whenReady().then(async () => {
     for (const s of states.values()) { release(s); s.source = null; s.captureAllowed = false; hideHostOverlay(s); s.win.webContents.send('emergency-stop'); }
   });
   const win = createWindow();
+  if (!smoke) {
+    tray = new Tray(path.join(__dirname, 'ui/assets/app-icon.png')); tray.setToolTip('Shatoot Connect');
+    tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Shatoot Connect', click: () => showMain(states.get(win.webContents.id)) }, { label: 'Chats and files', click: () => openChat(states.get(win.webContents.id)) }, { type: 'separator' }, { label: 'Quit', click: () => { quitting = true; app.quit(); } }])); tray.on('double-click', () => showMain(states.get(win.webContents.id)));
+    setTimeout(() => update.check(), 10000).unref(); setInterval(() => update.check(), 6 * 3600000).unref();
+  }
   if (!smoke) for (const record of preferences.list()) if (record.shortcut && fs.existsSync(path.join(app.getPath('desktop'), preferences.shortcutName(record.id)))) { try { createFavoriteShortcut(record.id); } catch {} }
   if (smoke) {
     setTimeout(() => { smokeLog('Watchdog timeout'); app.exit(1); }, 240000).unref();
@@ -462,6 +541,7 @@ app.whenReady().then(async () => {
   }
 });
 app.on('window-all-closed', () => app.quit());
+app.on('before-quit', () => { quitting = true; });
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   for (const s of states.values()) { release(s); s.helper?.stdin.end(); }
@@ -480,9 +560,9 @@ async function runSmoke(host) {
   const wait = async (win, expr, timeout = 30000) => {
     const start = Date.now();
     while (Date.now() - start < timeout) { if (await win.webContents.executeJavaScript(expr)) return; await delay(200); }
-    smokeLog(await win.webContents.executeJavaScript("document.querySelector('#session-status').textContent"));
-    smokeLog(await win.webContents.executeJavaScript('JSON.stringify(window.shatootconnectDiagnostics())'));
-    for (const other of states.values()) if (other.win !== win && !other.win.isDestroyed()) smokeLog('other window: ' + await other.win.webContents.executeJavaScript('JSON.stringify(window.shatootconnectDiagnostics())'));
+    smokeLog(await win.webContents.executeJavaScript("document.querySelector('#session-status')?.textContent || document.body.textContent"));
+    smokeLog(await win.webContents.executeJavaScript('JSON.stringify(window.shatootconnectDiagnostics?.())'));
+    for (const other of states.values()) if (other.win !== win && !other.win.isDestroyed()) smokeLog('other window: ' + await other.win.webContents.executeJavaScript('JSON.stringify(window.shatootconnectDiagnostics?.())'));
     fs.writeFileSync(path.join(__dirname, '../artifacts/failure.png'), (await win.webContents.capturePage()).toPNG());
     throw new Error(`Smoke timeout: ${expr}`);
   };
@@ -588,6 +668,21 @@ async function runSmoke(host) {
   if (hostState.testAppliedLayout !== '00000409') throw new Error('Guest keyboard did not synchronize to host');
   smokeLog('Bidirectional layout protocol passed over actual RTC with isolated layout application');
   await require('../tests/collaboration-smoke.cjs')({ phase: 'id', host, viewer, states, wait, createWindow, log: smokeLog, artifacts: path.join(__dirname, '../artifacts') });
+  {
+    const previousDialog = dialog.showOpenDialog;
+    try {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path.join(__dirname,'ui/assets/app-icon.png')] });
+      await host.webContents.executeJavaScript("document.querySelector('#open-settings').click();selectSettingsTab('profile');document.querySelector('#profile-photo').click();true");
+      await wait(host,"config.avatar?.startsWith('data:image/png;base64,')");
+      await host.webContents.executeJavaScript("document.querySelector('#profile-name').value='Smoke Host';document.querySelector('#profile-status').value='busy';document.querySelector('#profile-save').click();true");
+      await wait(host,"config.name==='Smoke Host' && config.status==='busy'");
+      if (!await host.webContents.executeJavaScript("[...document.querySelectorAll('#settings-dialog input,#settings-dialog button,#settings-dialog select')].filter(e=>e.getClientRects().length).every(e=>{const r=e.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})")) throw new Error('New settings controls do not fit');
+      fs.writeFileSync(path.join(__dirname,'../artifacts/profile-settings.png'),(await host.webContents.capturePage()).toPNG());
+      await host.webContents.executeJavaScript("document.querySelector('#settings-dialog').close();true");
+      smokeLog('Native profile photo normalization, persisted name/status and compact new settings tabs passed');
+    } finally { dialog.showOpenDialog = previousDialog; }
+  }
+  await require('../tests/new-features-smoke.cjs')({ host, viewer, states, wait, createWindow, log: smokeLog, artifacts: path.join(__dirname, '../artifacts') });
   const queriesBeforeKeys = states.get(viewer.webContents.id).keyboardQueryCount || 0, inputsBeforeKeys = hostState.testInputPackets || 0;
   await viewer.webContents.executeJavaScript("(()=>{ for(let i=0;i<20;i++){sendGuestKey({type:'key',code:'KeyA',down:true});sendGuestKey({type:'key',code:'KeyA',down:false});} return keyboardQueue; })()");
   for (let i = 0; i < 30 && (hostState.testInputPackets || 0) < inputsBeforeKeys + 40; i++) await delay(50);
@@ -672,7 +767,7 @@ async function runSmoke(host) {
   let coveringPanel;
   try {
     await target.loadURL('data:text/html,' + encodeURIComponent('<!doctype html><style>body{margin:25px;background:#182431;color:white;font:16px sans-serif}button{padding:20px}</style><button onclick="window.clicks=(window.clicks||0)+1">Independent click test</button>'));
-    target.focus(); await delay(200);
+    target.show(); target.moveTop(); target.focus(); await delay(400);
     const point = await target.webContents.executeJavaScript('(()=>{const r=document.querySelector("button").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()');
     const content = target.getContentBounds();
     const physical = screen.dipToScreenPoint({ x: Math.round(content.x + point.x), y: Math.round(content.y + point.y) });
@@ -685,6 +780,7 @@ async function runSmoke(host) {
     let output = '', errors = ''; proc.stdout.on('data', b => output += b); proc.stderr.on('data', b => errors += b);
     proc.stdin.end([{ type: 'bounds', x: physical.x, y: physical.y, width: 1, height: 1, sharedCursor: false }, { type: 'exclude-window', handle: nativeHandle.readBigUInt64LE().toString(16) }, { type: 'move', x: 0, y: 0 }, { type: 'button', button: 0, down: true, x: 0, y: 0 }, { type: 'button', button: 0, down: false, x: 0, y: 0 }].map(m => JSON.stringify(m)).join('\n') + '\n');
     const exit = await new Promise((resolve, reject) => { proc.once('exit', resolve); proc.once('error', reject); });
+    smokeLog(`Cursor probe: ${JSON.stringify({ exit, output, errors })}`);
     await wait(target, 'window.clicks === 1', 5000);
     if (exit !== 0 || errors || JSON.parse(output).cursorMovedByHelper !== false) throw new Error('Independent Chromium click moved the cursor or was blocked');
     console.log('SHATOOTCONNECT_POINTER_SMOKE', output.trim());

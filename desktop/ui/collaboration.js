@@ -86,7 +86,7 @@
     }
     bind(s, channel) {
       s.channel = channel; channel.bufferedAmountLowThreshold = 131072;
-      channel.onopen = () => { clearTimeout(s.timer); s.resolve(s); this.notify(); this.flush(s).catch(e => this.error(e.message)); };
+      channel.onopen = () => { clearTimeout(s.timer); s.resolve(s); this.notify(); this.rpc(s, 'profile', this.self).catch(e => this.error(e.message)); this.flush(s).catch(e => this.error(e.message)); };
       channel.onclose = () => this.close(s, 'Chat connection closed.');
       channel.onmessage = event => {
         if (typeof event.data !== 'string' || event.data.length > 64000) return this.close(s, 'Invalid chat packet.');
@@ -136,6 +136,11 @@
       return result;
     }
     async request(s, op, value) {
+      if (op === 'profile') {
+        if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
+        Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status });
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return true;
+      }
       if (op === 'group') {
         if (value?.owner !== s.peer.deviceId) throw new Error('Only the group owner can invite members.');
         if (!this.group(value.id) && !await this.api.collaboration('approve-group', { session: s.id, group: value })) return false;

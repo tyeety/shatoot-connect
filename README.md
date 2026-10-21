@@ -4,13 +4,13 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)
 
-## Version 0.10.0
+## Version 0.11.0
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.10.0-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.10.0-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.10.0-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.11.0-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.11.0-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.11.0-win-x64.zip` | Coordinator, runtime and service manager |
 
 Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. Remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
@@ -32,9 +32,9 @@ Setup checks the OS/architecture, destination, write access, destination/TEMP di
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.10.0-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.10.0-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.10.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.11.0-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.11.0-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.11.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.
@@ -69,9 +69,9 @@ Keyboard layouts synchronize in both directions with versioned conflict resoluti
 
 ## Private chat and history
 
-Open **Chats and files**, enter an Internet ID/private LAN IP or click a nearby device's chat button. The recipient accepts an independent invitation. Chat needs no desktop password and grants no screen, mouse, keyboard or clipboard access. ID chat requires both devices on the same updated coordinator; LAN chat needs no coordinator/STUN/TURN.
+Open **Chats and files**, enter an Internet ID/private LAN IP or click a nearby device's chat button. Ordinary messages connect without a recipient approval prompt by default. Settings > Chat and files can restore explicit chat approval. Chat needs no desktop password and grants no screen, mouse, keyboard or clipboard access. ID chat requires both devices on the same updated coordinator; LAN chat needs no coordinator/STUN/TURN.
 
-A separate reliable WebRTC data connection carries messages/files. The coordinator sees invitation and ICE/SDP signaling, not their contents. Direct traffic bypasses the coordinator; optional TURN relays encrypted transport and consumes relay bandwidth. Closing the messenger dialog keeps chat connected; **Disconnect chat** does not end a desktop session.
+A separate reliable WebRTC data connection carries messages/files. The coordinator sees invitation and ICE/SDP signaling, not their contents. Direct traffic bypasses the coordinator; optional TURN relays encrypted transport and consumes relay bandwidth. The messenger runs in a separate window. Closing the main window while chat is open keeps the background engine alive; Show main window or the tray restores it. Closing the chat window retains connected sessions while the main window remains open; **Disconnect chat** does not end a desktop session.
 
 Contacts, groups, transcripts and queued text are atomically saved in a DPAPI-encrypted `%APPDATA%\shatoot-connect\chat-<device-id>.dat` file. Search and **Load older messages** operate locally. A delivery acknowledgement follows recipient persistence; it is not a human read receipt. Text to disconnected saved contacts queues until a new approved connection. There is no server-hosted offline mailbox. Limits are 50,000 messages / 32 MiB; full or unreadable history reports an error without silently overwriting the old transcript. Received file contents are ordinary Downloads files, not encrypted database blobs.
 
@@ -87,11 +87,23 @@ The owner is an intended group participant and can read/forward messages. This i
 
 ## Files and clipboard
 
-Use messenger **Send files** or drag local files onto a conversation. Every incoming batch requires separate recipient approval. Group-owner uploads fan out to members; member uploads go to the owner and then other online members, with separate approvals. All intended recipients must be connected for a new group upload. Offline file forwarding is not automatic; a received owner copy remains in history/Downloads for manual use later.
+Use messenger **Send files** or drag local files onto a conversation. By default incoming batches ask for approval. Enable Settings > Chat and files > Accept incoming files automatically to save them without repeated prompts. Files never open automatically; path/size/hash checks still apply. Group-owner uploads fan out to members; member uploads go to the owner and then other online members, following each recipient's file-acceptance setting. All intended recipients must be connected for a new group upload. Offline file forwarding is not automatic; a received owner copy remains in history/Downloads for manual use later.
 
 Messenger transfer neither reads nor changes the system clipboard. An attachment's folder button reveals the received file instead of executing it. Unique folders under `Downloads\Shatoot Connect\Chat` preserve names and never overwrite prior batches. Relative paths, file order, length and SHA-256 hashes are validated. Partial receives are cleaned on error/disconnect. Limits are 1,000 entries / 10 GiB per batch; symbolic links and unsafe Windows paths are rejected. Chunks use bounded acknowledgement/backpressure and low-priority data channels. Incomplete file deliveries remain visibly undelivered; file selections are not silently retried after restart.
 
 Approved **desktop control** sessions have a separate clipboard channel for Unicode text and Explorer files/folders in both directions. A file drop on remote video transfers, clicks the target and pastes; it is not arbitrary OLE drop support. Clipboard failure after completed delivery does not discard received files. Rich text/image clipboard formats are not synchronized. Chat alone never grants this clipboard permission.
+
+## Updates, profile and availability
+
+Starting with 0.11.0, the packaged client checks the latest stable GitHub Release at startup and every six hours. Settings > Updates also provides a manual check. **Update and restart** downloads the matching installed/portable Windows x64 package, checks its exact length and GitHub asset SHA-256 digest, then runs the update worker after the old process exits. A failed/corrupt download leaves the running app untouched. Installed editions use the existing installer/installation folder; portable editions replace the original executable and keep one `.previous` backup. Updating never deletes the Windows user profile, encrypted passwords, favorites or chat database. Keep the same Windows account so DPAPI data remains readable. Updating restarts the client and ends active sessions/transfers. Source/dev launches cannot install updates. Version 0.10.0 needs one manual upgrade to acquire the updater. Server service upgrades still use the separate server package.
+
+Profile and status settings support a display name, cropped local PNG/JPEG/WebP photo, and Available, Busy, Away, Do not disturb or Appear offline. These are per-device identities, not centralized user accounts. Photos are stored as bounded PNG thumbnails; LAN neighbors retrieve the public profile locally and connected chat peers receive updates over WebRTC. The selected status is advisory; it does not disable hosting or disconnect peers. Display names/photos do not prove identity. Do not disturb does not revoke incoming-message permission.
+
+Settings > LAN > **Repair Windows Firewall access** requests Windows administrator permission and can be retried after cancellation or a missing initial firewall prompt. It repairs this executable's local inbound block rules and creates LAN/discovery/WebRTC allowances restricted to local subnets on Private/Domain profiles; it does not disable the firewall, bypass organization policies, change VPN routes or allow public Internet inbound access. On a Public-profile LAN, mark the trusted network Private or ask its administrator. Source/dev runs target their Electron executable; packaged runs target the installed/portable executable.
+
+Up to eight viewers can connect to one updated host, using LAN, ID, or both. Each needs the password and independent host approval (or configured unattended access), its own WebRTC connection and a separate disconnect panel. One guest disconnecting does not revoke the others. The viewers share one Windows desktop, cursor and keyboard layout; simultaneous control can conflict. Every connection adds capture/encoding/network load. Old servers/clients keep their single-viewer behavior; upgrade the coordinator and host for ID multi-viewer use.
+
+LAN IP connections automatically select **LAN · Ultra**, preserving available display resolution up to 8K at 60 fps with a 100 Mbit/s ceiling and resolution-prioritized adaptation. This is a cap, not a guaranteed frame rate or lossless format. The real display, GPU/encoder and network determine delivered quality. Change Live quality to reduce load. Internet ID connections keep their saved quality preference.
 
 ## Internet coordinator and Windows service
 
@@ -124,12 +136,15 @@ npm run test:smoke
 npm run check:release
 npm run dist
 npm run test:installer
+npm run test:updater
 npm run dist:server
 ```
 
 `test:smoke` requires an interactive, unlocked desktop. It uses isolated profiles/downloads and auto-approves prompts only in unpackaged development; native remote input injection stays disabled. It checks real WebRTC desktop video, standalone ID/LAN messaging, three-peer groups, offline queues, DPAPI persistence and bidirectional/group file contents. This does not prove acceptance on two physical PCs, a real VPN/Internet/CDN path or service logout/reboot.
 
 `test:installer` requires `release/win-unpacked` and an account with no existing installation/app shortcuts. A guarded fixture tests invalid/occupied/unwritable destinations, running-app refusal, fresh install, downgrade refusal, locked upgrade/removal, repair, uninstall and personal-data preservation, then cleans up. CI runs protocol/store/network tests and builds native components. A service-based CI runner does not establish interactive desktop-capture acceptance.
+
+`test:updater` exercises portable executable replacement, rollback-copy preservation and actual restart with an isolated Windows fixture. For an optional real GitHub metadata/download/hash check without installation, run `node_modules/.bin/electron.cmd tests/update-network.cjs --download`. Windows update checks use Electron networking so system proxy settings apply.
 
 Source: `desktop/main.cjs` owns trusted Windows/IPC operations; `desktop/ui/` is sandboxed UI/WebRTC; `discovery.cjs`, `chat-store.cjs` and `collaboration-host.cjs` implement local discovery, encrypted history and file grants. `server/` handles signaling, `shared/` protocol/network helpers, `native/` Windows input/keyboard/clipboard, `server-manager/` service management, and `build/`/`tests/` packaging and verification.
 

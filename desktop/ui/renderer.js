@@ -23,6 +23,7 @@ function send(message) {
   transport.send(JSON.stringify(message));
 }
 async function dispatch(message, source = 'server') {
+  if (message.type?.startsWith('desktop-')) { if (!incomingEnabled) { const m = { type: 'desktop-reject', session: message.session }; if (source === 'lan-host') api.directSend(m); else socket?.send(JSON.stringify(m)); return; } await api.hostSession(message, source, $('screen-select').value); return; }
   if (message.type?.startsWith('collab-')) { window.collaboration?.receive(message, source === 'lan-host' ? { send: data => api.directSend(data), type: 'incoming-lan' } : { send: data => socket?.send(JSON.stringify(data)), type: 'id', endpoint: config.endpoint }); return; }
   if (message.type === 'join-request') {
     if (role !== 'idle' || requestPending || !incomingEnabled) {
@@ -32,6 +33,7 @@ async function dispatch(message, source = 'server') {
     }
     sessionRoute = source;
     iceServers = source === 'server' ? serverIce : []; forceRelay = source === 'server' && serverRelay;
+    if (source === 'lan-host') profileName = 'lan';
   }
   if (source !== sessionRoute && message.type !== 'registered') return;
   if (message.type === 'ice' && source === 'server') { serverIce = message.iceServers || []; serverRelay = message.forceRelay === true; }
@@ -40,8 +42,10 @@ async function dispatch(message, source = 'server') {
 api.onDirect(message => {
   messageQueue = messageQueue.then(() => dispatch(message, 'lan-host')).catch(e => { stopSession(true); status(e.message, true); });
 });
+api.onHostSignalOut(message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); });
 function guarded(fn) { return async (...args) => { try { await fn(...args); } catch (e) { status(e.message || String(e), true); toast(e.message || String(e)); } }; }
 function updateControls() {
+  const busy = { type: 'hosting-busy', busy: role !== 'idle' || requestPending }; if (socket?.readyState === WebSocket.OPEN && registered) socket.send(JSON.stringify(busy)); if (window.shatootconnectDirect) api.directSend(busy);
   const hosting = incomingEnabled && (registered || !!window.shatootconnectDirect);
   renderHostCredentials();
   $('host-start').hidden = hosting; $('host-stop').hidden = !hosting;
@@ -57,7 +61,7 @@ function updateControls() {
 function register() {
   if (!registrationWanted || socket?.readyState !== WebSocket.OPEN) return;
   if (config.fixedPassword && !supportsFixedPassword) { status('Fixed password is saved for LAN. Update the Internet server for Internet access.', true); return; }
-  socket.send(JSON.stringify({ type: 'register', deviceId: config.deviceId, deviceSecret: config.deviceSecret, name: config.name, password: config.fixedPassword || '' }));
+  socket.send(JSON.stringify({ type: 'register', deviceId: config.deviceId, deviceSecret: config.deviceSecret, name: config.name, avatar: config.avatar, status: config.status, multiDesktop: true, password: config.fixedPassword || '' }));
   status('دریافت شناسه از سرور…');
 }
 function scheduleReconnect() {
@@ -130,6 +134,7 @@ async function onMessage(m) {
   } else if (m.type === 'join-request' && (registered || sessionRoute === 'lan-host')) {
     if (role !== 'idle' || requestPending) { send({ type: 'reject' }); return; }
     requestPending = true; const generation = peerGeneration;
+    updateControls();
     const serial = ++requestSerial;
     status(window.i18n.language === 'fa' ? `${m.name} منتظر تأیید شماست.` : `${m.name} is waiting for your approval.`);
     // Do not block the message queue with a native consent dialog; a guest can leave meanwhile.
@@ -278,14 +283,14 @@ async function applyProfile(name) {
   if (!config.profiles[name] || !stream) return;
   profileName = name; const p = config.profiles[name];
   const track = stream.getVideoTracks()[0];
-  track.contentHint = name === 'quality' ? 'detail' : 'motion';
+  track.contentHint = ['quality','lan'].includes(name) ? 'detail' : 'motion';
   await track.applyConstraints({ width: { max: p.width }, height: { max: p.height }, frameRate: { ideal: p.fps, max: p.fps } });
   const currentSender = sender;
   if (currentSender) {
     const params = currentSender.getParameters();
     if (!params.encodings?.length) params.encodings = [{}];
     params.encodings[0].priority = 'high'; params.encodings[0].networkPriority = 'high'; params.encodings[0].maxBitrate = p.bitrate; params.encodings[0].maxFramerate = p.fps;
-    params.degradationPreference = name === 'quality' ? 'maintain-resolution' : 'maintain-framerate';
+    params.degradationPreference = ['quality','lan'].includes(name) ? 'maintain-resolution' : 'maintain-framerate';
     await currentSender.setParameters(params);
   }
 }
@@ -459,7 +464,7 @@ stage.addEventListener('drop', event => {
     for (const [code, down] of [['ControlLeft', true], ['KeyV', true], ['KeyV', false], ['ControlLeft', false]]) input({ type: 'key', code, down, layout });
   })();
 });
-window.addEventListener('beforeunload', () => stopSession(true));
+window.addEventListener('beforeunload', () => { for (const track of stream?.getTracks() || []) { track.onended = null; track.stop(); } pc?.close(); socket?.close(); });
 $('remote-video').addEventListener('loadeddata', () => { $('video-placeholder').hidden = true; });
 
 $('connect-server').onclick = guarded(async () => {
@@ -488,6 +493,7 @@ $('host-start').onclick = guarded(async () => {
   if (socket?.readyState === WebSocket.OPEN) register(); else await connect();
 });
 $('host-stop').onclick = () => {
+  api.stopHostSessions().catch(e => status(e.message,true));
   stopSession(true); incomingEnabled = false; registrationWanted = false; clearTimeout(reconnectTimer);
   if (socket?.readyState === WebSocket.OPEN) send({ type: 'unregister' });
   registered = false; internetId = ''; renderHostCredentials(); updateControls(); status('اتصال ورودی متوقف شد.');
@@ -498,6 +504,7 @@ async function joinTarget() {
   if (id.includes('.') || id.includes(':')) {
     if (!password) throw new Error(tr('Enter the host LAN password.'));
     const endpoint = await api.directEndpoint(id);
+    $('quality').value = 'lan'; profileName = 'lan';
     role = 'joining'; sessionRoute = 'lan-viewer'; iceServers = []; forceRelay = false; updateControls();
     try {
       await new Promise((resolve, reject) => {
@@ -661,7 +668,9 @@ window.shatootconnectCapture = async () => {
 $('language').onchange = guarded(async () => { window.i18n.setLanguage(await api.language($('language').value)); renderFavorites(config.favorites || []); });
 (async () => {
   config = await api.config(); registrationWanted = config.internetEnabled !== false; $('internet-enabled').checked = registrationWanted; $('show-guest-cursor').checked = config.showGuestCursor; $('quality').value = config.qualityProfile; profileName = config.qualityProfile; window.i18n.setLanguage(config.language); $('language').value = config.language;
-  window.messenger = window.installMessenger({ api, self: { deviceId: config.deviceId, name: config.name }, internet: () => ({ registered, supported: window.collaborationServerReady, endpoint: config.endpoint, send: data => { if (socket?.readyState !== WebSocket.OPEN) throw new Error('Not connected to the server.'); socket.send(JSON.stringify(data)); } }), ensureInternet: connect, remote: address => { $('remote-id').value = address; $('remote-password').focus(); } });
+  window.shatootconnectSmoke = config.smoke;
+  window.messenger = window.installMessenger({ api, self: { deviceId: config.deviceId, name: config.name, avatar: config.avatar, status: config.status }, internet: () => ({ registered, supported: window.collaborationServerReady, endpoint: config.endpoint, send: data => { if (socket?.readyState !== WebSocket.OPEN) throw new Error('Not connected to the server.'); socket.send(JSON.stringify(data)); } }), ensureInternet: connect, remote: address => { $('remote-id').value = address; $('remote-password').focus(); } });
+  window.installClientSettings(config, async next => { Object.assign(window.collaboration.self, next); if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'profile', ...next })); for (const s of window.collaboration.sessions.values()) if (s.channel?.readyState === 'open') window.collaboration.rpc(s, 'profile', window.collaboration.self).catch(e => status(e.message,true)); window.collaboration.notify(); });
   $('shared-cursor').checked = config.sharedCursor === true; $('show-host-cursor').checked = config.showHostCursor;
   $('unattended').checked = config.unattended === true; $('fixed-password').value = config.fixedPassword || ''; $('password-label').textContent = tr(config.fixedPassword ? 'Host password' : 'رمز موقت'); renderFavorites(config.favorites || []);
   $('server-url').value = config.endpoint; $('server-key').value = config.serverKey || ''; $('app-version').textContent = `Shatoot Connect ${config.version} · Windows x64`;

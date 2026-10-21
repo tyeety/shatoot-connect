@@ -4,7 +4,7 @@ const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 function collaborationBroker({ rooms, send, ice, direct }) {
   const sessions = new Map();
   function end(id, reason) { const s = sessions.get(id); if (!s) return; clearTimeout(s.timer); sessions.delete(id); for (const ws of [s.from, s.to]) send(ws, { type: 'collab-ended', session: id, reason }); }
-  const identity = (ws, fallback) => ({ deviceId: ws.deviceId || fallback.deviceId, name: ws.deviceName || String(fallback.name || 'Computer').slice(0, 60), id: ws.registrationId || null });
+  const identity = (ws, fallback) => ({ ...require('../shared/profile.cjs').profile(ws.deviceProfile || fallback), deviceId: ws.deviceId || fallback.deviceId, name: ws.deviceName || String(fallback.name || 'Computer').slice(0, 60), id: ws.registrationId || null });
   async function handle(ws, m) {
     if (typeof m.type !== 'string' || !m.type.startsWith('collab-')) return false;
     if (!UUID.test(m.session)) return true;

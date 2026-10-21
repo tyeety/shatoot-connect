@@ -13,7 +13,7 @@ class Discovery extends EventEmitter {
     super(); Object.assign(this, { identity, name, port, discoveryPort, networkInterfaces, neighbors, ttl });
     this.peers = new Map(); this.senders = new Map(); this.errors = new Set(); this.closed = false; this.lastReply = new Map();
   }
-  presence() { return { service: 'ShatootConnect', version: 1, kind: 'presence', deviceId: this.identity.deviceId, name: String(this.name).slice(0, 60), port: this.port, capabilities: ['desktop', 'chat', 'files', 'groups'] }; }
+  presence() { return { service: 'ShatootConnect', version: 1, kind: 'presence', deviceId: this.identity.deviceId, name: String(this.name).slice(0, 60), status: this.status || 'available', port: this.port, capabilities: ['desktop', 'chat', 'files', 'groups'] }; }
   snapshot() { return { peers: [...this.peers.values()].map(p => ({ ...p, endpoints: [...p.endpoints.keys()] })), interfaces: interfaces(this.networkInterfaces?.()), errors: [...this.errors] }; }
   publish() { if (!this.closed) this.emit('change', this.snapshot()); }
   ingest(data, remote) {
@@ -22,9 +22,19 @@ class Discovery extends EventEmitter {
     if (value?.service !== 'ShatootConnect' || value.version !== 1 || !UUID.test(value.deviceId) || value.deviceId === this.identity.deviceId || !Number.isInteger(value.port) || value.port < 1 || value.port > 65535 || typeof value.name !== 'string' || value.name.length > 60) return;
     if (this.peers.size >= 256 && !this.peers.has(value.deviceId)) return;
     const peer = this.peers.get(value.deviceId) || { deviceId: value.deviceId, endpoints: new Map() };
-    peer.name = value.name; peer.lastSeen = Date.now(); peer.endpoints.set(`${remote}:${value.port}`, peer.lastSeen);
+    peer.name = value.name; peer.status = require('../shared/profile.cjs').profile(value).status; peer.lastSeen = Date.now(); peer.endpoints.set(`${remote}:${value.port}`, peer.lastSeen);
     for (const [endpoint, seen] of peer.endpoints) if (peer.lastSeen - seen > this.ttl || peer.endpoints.size > 8) peer.endpoints.delete(endpoint);
     this.peers.set(value.deviceId, peer); this.publish();
+    if (value.kind === 'presence' && (!peer.profileAt || Date.now() - peer.profileAt > 30000) && (this.profileRequests || 0) < 4) this.loadProfile(peer,remote,value.port);
+  }
+  loadProfile(peer, address, port) {
+    peer.profileAt = Date.now(); this.profileRequests = (this.profileRequests || 0) + 1;
+    const request = http.get({ hostname: address, port, path: '/profile', localAddress: sourceAddress(address,this.networkInterfaces?.()), agent: false, timeout: 1500 }, response => {
+      let bytes = ''; response.on('data', chunk => { bytes += chunk; if (bytes.length > 26000) request.destroy(); });
+      response.on('end', () => { try { const value = JSON.parse(bytes); if (response.statusCode === 200 && !this.closed && value.deviceId === peer.deviceId && this.peers.get(peer.deviceId) === peer) { Object.assign(peer,require('../shared/profile.cjs').profile(value)); this.publish(); } } catch {} });
+      response.on('error', () => {});
+    });
+    request.on('close', () => { this.profileRequests--; }); request.on('timeout', () => request.destroy()); request.on('error', () => {});
   }
   async start() {
     this.receiver = dgram.createSocket({ type: 'udp4', reuseAddr: true });

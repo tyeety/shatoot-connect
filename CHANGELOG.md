@@ -13,6 +13,24 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.11.0 — 2026-10-21
+
+### Added
+
+- Automatic stable GitHub release detection at startup/every six hours, manual checks and one-click verified update/restart for installed and portable Windows clients. Exact asset naming, HTTPS origin checks, bounded downloads, SHA-256/length validation, post-exit installation and portable rollback preserve the Windows profile and encrypted history.
+- An independent chat window backed by the existing engine; closing the main window keeps an open chat usable, with main-window restoration and tray access.
+- Optional automatic acceptance of incoming chat files, disabled by default; ordinary messages need no approval by default, with an opt-in approval setting. Group membership and desktop permissions remain separate.
+- Per-device profile photos, display names and availability statuses, propagated to LAN neighbors and connected chat peers.
+- A repeatable Windows Firewall repair action requesting native elevation and limiting inbound rules to private/domain local subnets.
+- Up to eight independently approved desktop viewers with isolated signaling, capture/control state and disconnect panels, over LAN or ID.
+- LAN Ultra quality: available display resolution up to 8K60, a 100 Mbit/s bitrate cap and resolution-prioritized encoding, selected automatically for direct LAN IP connections.
+
+### Fixed
+
+- File drops anywhere in the chat panel, including the composer, use actual OS file paths through preload and work in the detached window.
+- Material icon centering and chat message header height in both interface directions.
+- Additional guest disconnects do not revoke other desktop sessions; chat window closure restores an otherwise hidden main window.
+
 ## 0.10.0 — 2026-10-21
 
 ### Added

@@ -36,6 +36,7 @@ jobs:
           GITHUB_REF_TYPE: tag
           GITHUB_REF_NAME: ${{ env.RELEASE_TAG }}
       - run: npm test
+      - run: npm run test:updater
       - run: npm run dist -- --publish never
       - run: npm run test:installer
       - run: npm run dist:server

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { ChatStore } = require('./chat-store.cjs');
 const { Transfers } = require('./transfers.cjs');
 const { UUID } = require('./discovery.cjs');
-function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke }) {
+function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings }) {
   function store(s) {
     if (!s.identity) throw new Error('The device is not initialized.');
     return s.chatStore ||= new ChatStore({ file: path.join(app.getPath('userData'), `chat-${s.identity.deviceId}.dat`), self: s.identity.deviceId,
@@ -36,7 +36,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if (op === 'open-attachment') { const files = history.files(value.token); if (!fs.existsSync(files[0])) throw new Error('The received file was moved or deleted.'); shell.showItemInFolder(files[0]); return; }
     if (op === 'approve' || op === 'grant') {
       if (!UUID.test(value.session) || !UUID.test(value.peer?.deviceId) || typeof value.peer.name !== 'string' || value.peer.name.length > 60) throw new Error('Invalid chat request.');
-      if (op === 'approve') {
+      if (op === 'approve' && settings().requireChatApproval === true) {
         if (s.chatPrompt) return false;
         s.chatPrompt = true;
         try {
@@ -78,7 +78,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
         const count = value.entries.length, bytes = value.entries.reduce((total, file) => total + (Number.isSafeInteger(file.size) && file.size >= 0 ? file.size : 0), 0);
         if (bytes > 10 * 1024 ** 3) throw new Error('Transfer limit: 10 GB.');
         const fa = s.language === 'fa';
-        const result = smoke ? { response: 1 } : await dialog.showMessageBox(s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'دریافت فایل‌ها'] : ['Decline', 'Receive files'], defaultId: 0, cancelId: 0,
+        const result = smoke || settings().autoAcceptFiles === true ? { response: 1 } : await dialog.showMessageBox(s.chatWindow || s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'دریافت فایل‌ها'] : ['Decline', 'Receive files'], defaultId: 0, cancelId: 0,
           message: fa ? `دریافت ${count} فایل از ${g.peer.name}؟` : `Receive ${count} files from ${g.peer.name}?`,
           detail: `${Math.ceil(bytes / 1024)} KB\n${value.entries.slice(0, 6).map(e => typeof e.name === 'string' ? e.name.slice(0, 150) : '').join('\n')}\nDownloads / Shatoot Connect / Chat` });
         if (result.response !== 1) throw new Error('File offer declined.');

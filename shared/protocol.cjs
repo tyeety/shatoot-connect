@@ -1,4 +1,5 @@
 const PROFILES = Object.freeze({
+  lan: { label: 'LAN · Ultra', width: 7680, height: 4320, fps: 60, bitrate: 100000000 },
   balanced: { label: 'متعادل', width: 1920, height: 1080, fps: 60, bitrate: 12000000 },
   quality: { label: 'بیشترین کیفیت', width: 3840, height: 2160, fps: 60, bitrate: 40000000 },
   speed: { label: 'کمترین تأخیر', width: 1920, height: 1080, fps: 60, bitrate: 8000000 },

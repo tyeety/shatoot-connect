@@ -37,7 +37,7 @@ class ChatStore {
   }
   contact(peer, route) {
     if (!peer || !UUID.test(peer.deviceId) || typeof peer.name !== 'string' || peer.name.length > 60 || peer.deviceId === this.self) throw new Error('Invalid chat contact.');
-    return this.change(data => data.contacts[peer.deviceId] = { ...data.contacts[peer.deviceId], deviceId: peer.deviceId, name: peer.name, route: route || data.contacts[peer.deviceId]?.route || null });
+    return this.change(data => data.contacts[peer.deviceId] = { ...data.contacts[peer.deviceId], ...require('../shared/profile.cjs').profile(peer), deviceId: peer.deviceId, name: peer.name, route: route || data.contacts[peer.deviceId]?.route || null });
   }
   group(value) {
     if (!value || !UUID.test(value.id) || !UUID.test(value.owner) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !Array.isArray(value.members) || value.members.length < 2 || value.members.length > 16) throw new Error('Invalid chat group.');

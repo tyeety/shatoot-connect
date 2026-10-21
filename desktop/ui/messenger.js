@@ -1,12 +1,12 @@
 'use strict';
-window.installMessenger = ({ api, self, internet, ensureInternet, remote }) => {
+window.installMessenger = ({ api, self, internet, ensureInternet, remote, detached = false }) => {
   const $ = id => document.getElementById(id), tr = text => window.i18n.translate(text);
   let engine, selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
   const progress = new Map();
   const error = value => { $('chat-error').textContent = tr(value?.message || String(value)); };
   const run = fn => async event => { event?.preventDefault(); try { $('chat-error').textContent = ''; await fn(event); } catch (e) { error(e); } };
   function button(text, action, icon) { const b = document.createElement('button'); b.type = 'button'; b.className = icon ? 'icon-button' : 'small-button'; b.title = tr(text); b.setAttribute('aria-label', tr(text)); if (icon) { const i = document.createElement('span'); i.className = `mi ${icon}`; i.setAttribute('aria-hidden', 'true'); b.append(i); } else b.textContent = tr(text); b.onclick = run(action); return b; }
-  function open() { if (!$('messenger-dialog').open) $('messenger-dialog').showModal(); render(); }
+  function open() { if (!detached && !window.shatootconnectSmoke) { api.openChat(); return; } if (!$('messenger-dialog').open) $('messenger-dialog').showModal(); render(); }
   function contact(id) { return engine.catalog.contacts.find(c => c.deviceId === id); }
   function online(id) { return !!engine.peer(id); }
   function routeFor(id) { const nearby = discovery.peers.find(p => p.deviceId === id); if (nearby?.endpoints.length) return { type: 'lan', address: nearby.endpoints[0], deviceId: id, name: nearby.name }; const saved = contact(id); return saved?.route ? { ...saved.route, deviceId: id, name: saved.name } : null; }
@@ -14,7 +14,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote }) => {
     open(); $('chat-error').textContent = tr('Waiting for chat approval…');
     const s = await engine.connect(destination); $('chat-error').textContent = ''; await select(`p:${s.peer.deviceId}`); return s;
   }
-  async function select(id) { selected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await load(false); }
+  async function select(id) { selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await load(false); publish(); }
   async function load(older = false) {
     if (!selected) return;
     const version = selectionVersion, id = selected, search = $('chat-search').value.trim();
@@ -41,8 +41,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote }) => {
   function render(refreshHistory = false) {
     if (!engine) return;
     const list = $('chat-conversations'); list.replaceChildren();
-    const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, name: c.name, detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? 'Connected' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, name: g.name, status: 'Group' }))];
-    for (const item of items) { const b = document.createElement('button'); b.className = 'chat-conversation'; b.type = 'button'; b.setAttribute('aria-pressed', String(item.id === selected)); const name = document.createElement('b'), status = document.createElement('small'); name.textContent = item.name; status.textContent = tr(item.status) + (item.detail ? ' · ' + item.detail : ''); b.append(name, status); b.onclick = run(() => select(item.id)); list.append(b); }
+    const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar: c.avatar, name: c.name, detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, name: g.name, status: 'Group' }))];
+    for (const item of items) { const b = document.createElement('button'); b.className = 'chat-conversation'; b.type = 'button'; b.setAttribute('aria-pressed', String(item.id === selected)); const name = document.createElement('b'), status = document.createElement('small'); name.textContent = item.name; status.textContent = tr(item.status) + (item.detail ? ' · ' + item.detail : ''); if (item.avatar) { const image = document.createElement('img'); image.src = item.avatar; image.className = 'profile-avatar'; image.alt = ''; b.append(image); } b.append(name, status); b.onclick = run(() => select(item.id)); list.append(b); }
     const group = selected.startsWith('g:') && engine.group(selected.slice(2)), peer = selected.startsWith('p:') && contact(selected.slice(2));
     $('chat-title').textContent = group?.name || peer?.name || tr('Select a conversation');
     $('chat-peer-status').textContent = group ? `${tr(group.owner === self.deviceId || online(group.owner) ? 'Group owner online' : 'Group owner offline')} · ${group.members.map(m => m.name).join(', ')}` : peer ? tr(online(peer.deviceId) ? 'Connected' : 'Offline') : '';
@@ -58,12 +58,16 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote }) => {
     if (value.errors.length) { $('discovery-status').textContent += ' · ' + tr('Discovery is limited; check firewall or VPN LAN access.'); $('discovery-status').title = value.errors.join('\n'); }
     for (const peer of value.peers) {
       const card = document.createElement('div'); card.className = 'network-peer';
-      const info = document.createElement('div'); info.className = 'network-peer-info'; const name = document.createElement('b'), address = document.createElement('small'); name.textContent = peer.name; address.textContent = peer.endpoints.join(' / '); info.append(name, address);
+      if (peer.avatar) { const avatar = document.createElement('img'); avatar.className = 'profile-avatar'; avatar.src = peer.avatar; avatar.alt = ''; card.append(avatar); }
+      const info = document.createElement('div'); info.className = 'network-peer-info'; const name = document.createElement('b'), address = document.createElement('small'); name.textContent = peer.name; address.textContent = tr(peer.status || 'available') + ' · ' + peer.endpoints.join(' / '); info.append(name, address);
       card.append(info, button('Start chat', () => start({ type: 'lan', address: peer.endpoints[0], deviceId: peer.deviceId, name: peer.name }), 'chat'), button('Connect to a computer', () => remote(peer.endpoints[0]), 'desktop_windows')); list.append(card);
     }
     render();
   }
-  engine = new window.CollaborationClient({ api, self, internet, ensureInternet, changed: () => render(true), error, progress: value => { const text = tr(value.text) + (Number.isInteger(value.percent) ? ` ${value.percent}%` : ''); progress.set(value.conversation, text); if (selected === value.conversation) $('chat-progress').textContent = text; } });
+  function publish() { if (!detached && engine) api.chatPublish(snapshot()); }
+  function snapshot() { return { self, catalog: engine.catalog, connected: engine.connected(), language: window.i18n.language, discovery, selected, progress: [...progress] }; }
+  engine = new window.CollaborationClient({ api, self, internet, ensureInternet, changed: () => { render(true); publish(); }, error, progress: value => { const text = tr(value.text) + (Number.isInteger(value.percent) ? ` ${value.percent}%` : ''); progress.set(value.conversation, text); if (selected === value.conversation) $('chat-progress').textContent = text; publish(); } });
+  if (!detached) api.onChatCommand(async (operation, args) => { if (operation === 'snapshot') return snapshot(); if (operation === 'close') { engine.close(engine.peer(args[0])); return; } const result = await engine[operation](...args); return operation === 'connect' ? { peer: result.peer } : result; });
   window.collaboration = engine;
   $('open-messenger').onclick = open;
   $('refresh-discovery').onclick = run(async () => renderDiscovery(await api.discovery()));
@@ -77,8 +81,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote }) => {
   $('chat-text').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-compose').requestSubmit(); } };
   async function files(operation = 'pick', value) { if (busy) throw new Error('A file transfer is already in progress.'); busy = true; render(); try { await engine.sendFiles(selected, operation, value); } finally { busy = false; render(); } }
   $('chat-send-files').onclick = run(() => files());
-  $('chat-messages').ondragover = event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); };
-  $('chat-messages').ondrop = run(async event => { if (!selected || !event.dataTransfer.files.length) return; await files('drop', [...event.dataTransfer.files]); });
+  $('messenger-dialog').ondragover = event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = selected ? 'copy' : 'none'; } };
+  $('messenger-dialog').ondrop = run(async event => { if (!selected || !event.dataTransfer.files.length) return; await files('drop', [...event.dataTransfer.files]); });
   $('chat-new-group').onclick = run(() => {
     const list = $('chat-group-members'); list.replaceChildren(); $('chat-group-error').textContent = ''; $('chat-group-name').value = '';
     for (const peer of engine.connected()) { const label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span'); input.type = 'checkbox'; input.value = peer.deviceId; text.textContent = peer.name; label.append(input, text); list.append(label); }
@@ -88,5 +92,5 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote }) => {
   $('chat-group-form').onsubmit = async event => { event.preventDefault(); $('chat-create-group').disabled = true; try { const group = await engine.createGroup($('chat-group-name').value.trim(), [...document.querySelectorAll('#chat-group-members input:checked')].map(i => i.value)); $('chat-group-dialog').close(); await select(`g:${group.id}`); } catch (e) { $('chat-group-error').textContent = tr(e.message); } finally { $('chat-create-group').disabled = false; } };
   engine.ready.then(render).catch(error); api.discovery().then(renderDiscovery).catch(error);
   window.addEventListener('shatoot-language-change', () => { renderDiscovery(discovery); renderMessages(false); });
-  return { engine, open, select, start, renderDiscovery };
+  return { engine, open, select, start, renderDiscovery, snapshot };
 };
