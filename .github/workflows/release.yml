@@ -2,6 +2,12 @@ name: Windows release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -12,8 +18,11 @@ jobs:
       contents: write
     env:
       ELECTRON_BUILDER_COMPRESSION_LEVEL: '5'
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
@@ -23,8 +32,11 @@ jobs:
           dotnet-version: '10.0.x'
       - run: npm ci
       - run: npm run check:release
+        env:
+          GITHUB_REF_TYPE: tag
+          GITHUB_REF_NAME: ${{ env.RELEASE_TAG }}
       - run: npm test
-      - run: npm run dist
+      - run: npm run dist -- --publish never
       - run: npm run test:installer
       - run: npm run dist:server
       - name: Publish packages and exact changelog entry
@@ -36,5 +48,5 @@ jobs:
           $notes = Join-Path $env:RUNNER_TEMP 'shatoot-connect-release-notes.md'
           node build/release-notes.cjs | Out-File -LiteralPath $notes -Encoding utf8
           if ($LASTEXITCODE -ne 0) { throw 'Release notes validation failed.' }
-          gh release create "$env:GITHUB_REF_NAME" "release/ShatootConnect-Setup-$version-win-x64.exe" "release/ShatootConnect-$version-win-x64.exe" "release/ShatootConnect-Server-$version-win-x64.zip" --title "Shatoot Connect $version" --notes-file "$notes" --verify-tag
+          gh release create "$env:RELEASE_TAG" "release/ShatootConnect-Setup-$version-win-x64.exe" "release/ShatootConnect-$version-win-x64.exe" "release/ShatootConnect-Server-$version-win-x64.zip" --title "Shatoot Connect $version" --notes-file "$notes" --verify-tag
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }
