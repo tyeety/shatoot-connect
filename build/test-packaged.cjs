@@ -8,9 +8,12 @@ const crypto = require('node:crypto');
 const { spawn, execFileSync } = require('node:child_process');
 const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 if (process.argv[2] === '--probe') {
-  const resources = path.join(path.dirname(process.execPath), 'resources');
-  if (!process.versions.electron || !process.env.PORTABLE_EXECUTABLE_FILE || !fs.existsSync(path.join(resources, 'input/ShatootConnect.Input.exe'))) throw new Error('Portable did not launch the packaged Electron/native payload.');
-  fs.writeFileSync(process.argv[3], JSON.stringify({ electron: process.versions.electron, archive: digest(path.join(resources, 'app.asar')) }));
+  try {
+    process.noAsar = true; // Hash the archive bytes, not Electron's virtual directory.
+    const resources = path.join(path.dirname(process.execPath), 'resources');
+    if (!process.versions.electron || !process.env.PORTABLE_EXECUTABLE_FILE || !fs.existsSync(path.join(resources, 'input/ShatootConnect.Input.exe'))) throw new Error('Portable did not launch the packaged Electron/native payload.');
+    fs.writeFileSync(process.argv[3], JSON.stringify({ electron: process.versions.electron, archive: digest(path.join(resources, 'app.asar')) }));
+  } catch(error) { fs.writeFileSync(process.argv[3], JSON.stringify({error:error.stack})); process.exitCode=1; }
 } else {
   main().catch(error => { console.error(error); process.exitCode = 1; });
 }
@@ -34,7 +37,7 @@ async function main() {
     const marker = path.join(fixture, 'launched.json');
     launch([__filename, '--probe', marker], { ELECTRON_RUN_AS_NODE: '1' });
     await until(() => { if (child.launchError) throw child.launchError; return child.exitCode !== null; }, 90000);
-    if (child.exitCode !== 0 || !fs.existsSync(marker)) throw new Error(`Portable closed before running Electron (exit ${child.exitCode}); check embedded ZIP/7z format.`);
+    if (child.exitCode !== 0 || !fs.existsSync(marker)) throw new Error(`Portable launch failed (exit ${child.exitCode}): ${fs.existsSync(marker) ? fs.readFileSync(marker,'utf8') : 'Electron probe never started; check embedded ZIP/7z format.'}`);
     const probe = JSON.parse(fs.readFileSync(marker, 'utf8'));
     const source = path.join(root, 'release/win-unpacked/resources/app.asar');
     if (fs.existsSync(source) && probe.archive !== digest(source)) throw new Error('Extracted portable payload differs from win-unpacked.');
