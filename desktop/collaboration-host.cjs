@@ -27,7 +27,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
       const g = grant(s, value.session), group = value.group;
       if (!UUID.test(group?.id) || group.owner !== g.peer.deviceId || typeof group.name !== 'string' || group.name.length > 60 || !Array.isArray(group.members) || group.members.length > 16 || group.members.some(m => !UUID.test(m.deviceId) || typeof m.name !== 'string' || m.name.length > 60)) throw new Error('Invalid group invitation.');
       if (s.chatPrompt) return false; s.chatPrompt = true;
-      try { const fa = s.language === 'fa'; const result = smoke ? { response: 1 } : await dialog.showMessageBox(s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'پیوستن به گروه'] : ['Decline', 'Join group'], defaultId: 0, cancelId: 0,
+      try { const fa = s.language === 'fa'; const result = smoke ? { response: 1 } : await dialog.showMessageBox(s.chatWindow || s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'پیوستن به گروه'] : ['Decline', 'Join group'], defaultId: 0, cancelId: 0,
         message: fa ? `پیوستن به گروه ${group.name}؟` : `Join ${group.name}?`, detail: `${g.peer.name}\n${group.members.map(m => m.name).join(', ')}` }); return result.response === 1; }
       finally { s.chatPrompt = false; }
     }
@@ -41,7 +41,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
         s.chatPrompt = true;
         try {
           const fa = s.language === 'fa';
-          const result = smoke ? { response: 1 } : await dialog.showMessageBox(s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'پذیرش چت'] : ['Decline', 'Accept chat'], defaultId: 0, cancelId: 0,
+          const result = smoke ? { response: 1 } : await dialog.showMessageBox(s.chatWindow || s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'پذیرش چت'] : ['Decline', 'Accept chat'], defaultId: 0, cancelId: 0,
             message: fa ? `${value.peer.name} درخواست گفت‌وگو دارد.` : `${value.peer.name} wants to chat.`,
             detail: fa ? 'این اجازه فقط برای چت است. هر دریافت فایل جداگانه تأیید می‌شود؛ دسترسی به صفحه، موس یا کیبورد داده نمی‌شود.' : 'Chat permission only. Each incoming file batch needs separate approval. This does not share your screen, mouse or keyboard.' });
           if (result.response !== 1) return false;
@@ -60,7 +60,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
   });
   ipcMain.handle('collaboration-files', async (event, session, op, value) => {
     const s = state(event), g = grant(s, session), history = store(s);
-    if (op === 'pick') { const picked = await dialog.showOpenDialog(s.win, { properties: ['openFile', 'multiSelections'] }); return picked.canceled ? [] : g.send.offer(picked.filePaths); }
+    if (op === 'pick') { const picked = await dialog.showOpenDialog(s.chatWindow || s.win, { properties: ['openFile', 'multiSelections'] }); return picked.canceled ? [] : g.send.offer(picked.filePaths); }
     if (op === 'sources') return g.send.offer(value);
     if (op === 'received-sources') return g.send.offer(history.files(value));
     if (op === 'read') return g.send.read(value);

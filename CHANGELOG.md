@@ -15,6 +15,12 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ## 0.11.1 — 2026-10-21
 
+### Included in this release
+
+- Verified one-click GitHub updates for installed and portable clients without deleting settings or encrypted chat history.
+- A separate chat window that stays usable with the main window closed, file drag/drop throughout chat, optional automatic file acceptance and ordinary messages without an approval prompt by default.
+- Profile photos, display names, availability statuses, repeatable Windows Firewall repair, up to eight independent desktop viewers and automatic LAN Ultra image quality. See 0.11.0 below for complete implementation details.
+
 ### Fixed
 
 - The Windows update worker and its integration test compute SHA-256 through the built-in .NET stream API, avoiding dependency on PowerShell module discovery. Includes all 0.11.0 features; 0.11.0 packages were withheld after this compatibility issue was detected by CI.
