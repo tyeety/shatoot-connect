@@ -45,3 +45,21 @@ test('unattended access is opt-in and is revoked when the fixed password is remo
   preferences.setFixedPassword(''); assert.equal(preferences.unattended(), false);
   preferences.setFixedPassword('another-secret'); assert.equal(preferences.unattended(), false);
 });
+
+test('password recall is encrypted, canonical for LAN, isolated by server and erased when disabled',()=>{
+  const {preferences:p,storage}=fixture();p.attempt({address:'192.168.1.10:8788',password:'last-lan-secret'});
+  assert.equal(p.recall({address:'192.168.1.10'}),'last-lan-secret');
+  p.attempt({address:'123 456 789',endpoint:'wss://one.example',password:'one-password'});
+  assert.equal(p.recall({address:'123456789',endpoint:'wss://two.example'}),'');
+  assert.equal(p.recall({address:'123456789',endpoint:'wss://one.example'}),'one-password');
+  assert.ok(!JSON.stringify(storage()).includes('last-lan-secret'));assert.ok(!JSON.stringify(storage()).includes('one-password'));
+  p.remember(false);assert.equal(p.recall({address:'192.168.1.10'}),'');assert.deepEqual(storage().connectionPasswords,{});
+  p.attempt({address:'192.168.1.10',password:'do-not-store'});p.remember(true);assert.equal(p.recall({address:'192.168.1.10'}),'');
+});
+test('recent connections deduplicate and can be saved directly without a separate name/password form',()=>{
+  const {preferences:p}=fixture();const target={address:'192.168.1.10',password:'remembered-secret'};
+  p.attempt(target);p.connected(target);p.connected({...target,address:'192.168.1.10:8788'});
+  assert.equal(p.history().length,1);assert.equal(p.history()[0].count,2);const id=p.saveHistory(p.history()[0].id);assert.equal(p.get(id).password,'remembered-secret');
+  const addressOnly=p.save({address:'192.168.1.11'});assert.equal(p.get(addressOnly).password,'');assert.equal(p.get(addressOnly).name,'192.168.1.11');
+  p.clearHistory();assert.equal(p.history().length,0);assert.equal(p.list().length,2);
+});

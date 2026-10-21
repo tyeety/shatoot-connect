@@ -24,6 +24,13 @@ module.exports = async ({ host, viewer, states, wait, createWindow, log, artifac
       await run(second,'stopSession(true);true');
       for(let i=0;i<50 && [...states.values()].some(s=>s.owner===owner);i++) await new Promise(resolve=>setTimeout(resolve,100));
       log('Mixed Internet-ID and LAN desktop viewers shared the host independently; LAN Ultra selected automatically');
+      await run(second,`document.querySelector('#remote-id').value=${JSON.stringify(credentials.id)};document.querySelector('#remote-id').dispatchEvent(new Event('input'));true`);
+      await wait(second,`document.querySelector('#remote-password').value===${JSON.stringify(credentials.password)}`);
+      await run(second,"document.querySelector('#remote-password').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));true");
+      await wait(second,"window.shatootconnectDiagnostics().connection==='connected'");
+      await run(second,'stopSession(true);true');
+      for(let i=0;i<50 && [...states.values()].some(s=>s.owner===owner);i++) await new Promise(resolve=>setTimeout(resolve,100));
+      log('Remembered password autofilled the matching ID and Enter reconnected through the real connection button');
     } finally { second.destroy(); }
     return;
   }
@@ -45,6 +52,6 @@ module.exports = async ({ host, viewer, states, wait, createWindow, log, artifac
   const received=states.get(viewer.webContents.id).chatStore.history({conversation:`p:${self}`}).find(m=>m.kind==='file'&&m.text.includes('chat-window-drop.txt')&&m.attachment);
   if (fs.readFileSync(states.get(viewer.webContents.id).chatStore.files(received.attachment)[0],'utf8')!==content) throw new Error('Chat window drag/drop corrupted the file');
   chat.show(); chat.focus(); await new Promise(resolve=>setTimeout(resolve,300)); fs.writeFileSync(path.join(artifacts,'chat-window.png'),(await chat.webContents.capturePage()).toPNG());
-  chat.close(); for(let i=0;i<50 && !host.isVisible();i++) await new Promise(resolve=>setTimeout(resolve,100)); if (!host.isVisible()) throw new Error('Main window was inaccessible after closing the last chat window');
+  chat.close(); await new Promise(resolve=>setTimeout(resolve,150)); if(host.isVisible())throw new Error('Closing chat unexpectedly reopened the main window');await run(host,'api.showMain()');if(!host.isVisible())throw new Error('Main window cannot be restored from the tray');
   log('Separate chat continued with main window closed; actual OS file drop and automatic receipt preserved the exact contents');
 };

@@ -1,0 +1,27 @@
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+module.exports=async({host,states,notices,screen,wait,log,artifacts})=>{
+  const request=notices.showMessageBox(host,{type:'question',title:'Shatoot Connect',message:'Connection request / درخواست اتصال',detail:'Themed urgent approval test',buttons:['Reject','View only','View, control and files']});
+  const popup=[...notices.entries.values()][0].win;
+  await wait(popup,"document.querySelectorAll('#notice-actions button').length===3");
+  for(let i=0;i<30&&!popup.isVisible();i++)await new Promise(resolve=>setTimeout(resolve,50));
+  const area=screen.getPrimaryDisplay().workArea,bounds=popup.getBounds();if(!popup.isAlwaysOnTop()||bounds.x!==area.x+16||bounds.y+bounds.height>area.y+area.height)throw new Error('Urgent notification is not visible in the bottom-left screen corner');
+  fs.writeFileSync(path.join(artifacts,'urgent-notification.png'),(await popup.webContents.capturePage()).toPNG());
+  await popup.webContents.executeJavaScript("document.querySelector('#notice-actions button').click();true");
+  if((await request).response!==0||states.get(host.webContents.id).captureAllowed)throw new Error('Declining a notification granted screen access');
+  const queued=Array.from({length:Math.max(1,Math.floor(area.height/242))+1},()=>notices.showMessageBox(host,{type:'question',priority:'critical',message:'Queued approval test',buttons:['Reject','Accept']}));
+  notices.cancelFor(host,'critical');if((await Promise.all(queued)).some(r=>r.response!==0)||notices.entries.size)throw new Error('Cancelled/queued requests remained visible or were accepted');
+  host.close();if(host.isDestroyed()||host.isVisible())throw new Error('Close did not minimize the app to tray');
+  await host.webContents.executeJavaScript('api.showMain()');
+  await host.webContents.executeJavaScript("messenger.open();document.querySelector('#chat-new-group').click();true");
+  await wait(host,"document.querySelector('#chat-group-dialog').open");
+  await host.webContents.executeJavaScript("document.querySelector('#chat-group-name').value='Group without contacts';document.querySelector('#chat-group-form').requestSubmit();true");
+  await wait(host,"!document.querySelector('#chat-group-dialog').open && collaboration.catalog.groups.some(g=>g.name==='Group without contacts'&&g.members.length===1)");
+  await host.webContents.executeJavaScript("document.querySelector('#messenger-dialog').close();true");
+  await host.webContents.executeJavaScript("document.querySelector('#open-settings').click();selectSettingsTab('general');document.querySelector('#startup-enabled').checked=false;document.querySelector('#startup-enabled').dispatchEvent(new Event('change'));true");
+  await wait(host,"config.startupEnabled===false");
+  await host.webContents.executeJavaScript("document.querySelector('#startup-enabled').checked=true;document.querySelector('#startup-enabled').dispatchEvent(new Event('change'));true");await wait(host,"config.startupEnabled===true");
+  await host.webContents.executeJavaScript("document.querySelector('#settings-dialog').close();true");
+  log('Themed topmost notification, safe rejection, tray close/reopen and group creation with zero contacts passed');
+};

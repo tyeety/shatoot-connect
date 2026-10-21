@@ -113,12 +113,12 @@ function disconnectHost(s) {
   if (!s.win.isDestroyed()) s.win.webContents.send('host-disconnect');
 }
 function showHostOverlay(s) {
-  if (!s.captureAllowed || s.win.isDestroyed()) return;
+  if (!s.captureAllowed || s.win.isDestroyed() || s.overlayHidden) return;
   hideHostOverlay(s);
   const display = screen.getAllDisplays().find(d => String(d.id) === s.source?.display_id) || screen.getPrimaryDisplay();
   const area = display.workArea;
   const ordinal = [...states.values()].filter(other => other !== s && other.overlay && !other.overlay.isDestroyed()).length;
-  const overlay = new BrowserWindow({ width: 292, height: 66, x: area.x + area.width - 304, y: area.y + area.height - 78 - ordinal * 72,
+  const overlay = new BrowserWindow({ width: 320, height: 76, x: area.x + area.width - 332, y: area.y + area.height - 88 - ordinal * 84,
     frame: false, resizable: false, maximizable: false, minimizable: false, fullscreenable: false,
     alwaysOnTop: true, skipTaskbar: true, focusable: false, show: false, transparent: true, backgroundColor: '#00000000',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
@@ -149,7 +149,27 @@ function state(event) {
   if (!s || event.senderFrame !== event.sender.mainFrame) throw new Error('Unauthorized IPC');
   return s;
 }
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings });
+const notices=require('./notifications.cjs').createNotifications({BrowserWindow,ipcMain,screen,language:()=>settings().language==='fa'?'fa':'en'});
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options)}, shell, smoke, settings });
+ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message);});
+function configureStartup(enabled){
+  if(!smoke && app.isPackaged)app.setLoginItemSettings({name:'Shatoot Connect',openAtLogin:enabled,path:process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),args:['--start-in-tray']});
+  saveSettings({startupEnabled:enabled});return enabled;
+}
+function refreshTray(s){if(!tray||!s)return;const fa=s.language==='fa';tray.setContextMenu(Menu.buildFromTemplate([{label:'Shatoot Connect',click:()=>showMain(s)},{label:fa?'چت و فایل‌ها':'Chats and files',click:()=>openChat(s)},{label:fa?'نمایش پنل اتصال‌ها':'Show connection panels',click:()=>{for(const state of states.values())if(state.captureAllowed){state.overlayHidden=false;showHostOverlay(state);}}},{type:'separator'},{label:fa?'خروج کامل':'Quit completely',click:()=>{quitting=true;app.quit();}}]));}
+ipcMain.handle('lifecycle',(e,operation,value)=>{const s=state(e);if(operation==='startup'){if(typeof value!=='boolean')throw new Error('Invalid startup setting.');return configureStartup(value);}if(operation==='quit'){quitting=true;setTimeout(()=>app.quit(),50);return;}if(operation==='panels'){for(const state of states.values())if(state.captureAllowed){state.overlayHidden=false;showHostOverlay(state);}return;}throw new Error('Invalid application setting.');});
+ipcMain.handle('fit-video',(e,size)=>{
+  const s=state(e);if(s.owner)return;
+  if(!size){s.videoSizing=null;s.win.setAspectRatio(0);if(s.normalBounds){s.win.setMinimumSize(Math.min(1000,s.normalBounds.width),Math.min(720,s.normalBounds.height));s.win.setBounds(s.normalBounds);s.normalBounds=null;}return;}
+  if(!Number.isFinite(size.width)||!Number.isFinite(size.height)||size.width<1||size.height<1||size.width>32768||size.height>32768)return;
+  const work=screen.getDisplayMatching(s.win.getBounds()).workArea,ratio=size.width/size.height;
+  if(!s.normalBounds)s.normalBounds=s.win.getBounds();
+  const frameHeight=s.win.getBounds().height-s.win.getContentBounds().height,frameWidth=s.win.getBounds().width-s.win.getContentBounds().width;
+  const extraHeight=Number.isFinite(size.extraHeight)?Math.max(0,Math.min(250,size.extraHeight)):82,extraWidth=Number.isFinite(size.extraWidth)?Math.max(0,Math.min(80,size.extraWidth)):16;
+  let width=Math.min(s.normalBounds.width-frameWidth,work.width-frameWidth-24),height=Math.round((width-extraWidth)/ratio+extraHeight);
+  if(height+frameHeight>work.height-24){height=work.height-frameHeight-24;width=Math.round((height-extraHeight)*ratio+extraWidth);}
+  s.videoSizing={ratio,extraHeight,extraWidth};s.win.setMinimumSize(Math.min(640,width),Math.min(360,height));if(!s.win.isFullScreen()&&!s.win.isMaximized()){s.win.setContentSize(Math.round(width),Math.round(height));const bounds=s.win.getBounds();s.win.setPosition(Math.round(Math.max(work.x+12,Math.min(bounds.x,work.x+work.width-bounds.width-12))),Math.round(Math.max(work.y+12,Math.min(bounds.y,work.y+work.height-bounds.height-12))));}
+});
 function hostReply(s, message) {
   if (!s.owner || s.owner.win.isDestroyed()) return;
   const data = { ...message, session: s.invitation.session };
@@ -182,7 +202,7 @@ function openChat(s) {
   if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show(); s.chatWindow.focus(); return; }
   const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor: '#0a0e17', title: 'Shatoot Connect · Chats', autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   s.chatWindow = win; win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
-  win.on('closed', () => { s.chatWindow = null; if (!s.win.isDestroyed() && !s.win.isVisible() && !quitting) showMain(s); });
+  win.on('closed', () => { s.chatWindow = null; });
   win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
 }
 ipcMain.handle('chat-open', e => openChat(state(e)));
@@ -190,7 +210,7 @@ ipcMain.handle('show-main', e => showMain(state(e)));
 ipcMain.handle('chat-close', e => state(e).chatWindow?.close());
 ipcMain.handle('chat-call', (e, operation, args = []) => {
   const s = state(e);
-  if (s.chatWindow?.webContents !== e.sender || !['snapshot','connect','send','sendFiles','close','createGroup'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
+  if (s.chatWindow?.webContents !== e.sender || !['snapshot','refresh','connect','send','sendFiles','close','createGroup'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
   const id = crypto.randomUUID();
   return new Promise((resolve,reject) => { const timer = setTimeout(() => { chatPending.delete(id); reject(new Error('Chat operation timed out.')); }, operation === 'sendFiles' ? 1800000 : 75000); chatPending.set(id, { s, resolve, reject, timer }); s.win.webContents.send('chat-command', { id, operation, args }); });
 });
@@ -239,7 +259,7 @@ ipcMain.handle('discovery', event => { const s = state(event); s.discovery?.refr
 function createWindow() {
   const work = screen.getPrimaryDisplay().workArea;
   const win = new BrowserWindow({ width: Math.min(1100, work.width - 16), height: Math.min(720, work.height - 16), minWidth: Math.min(1000, work.width - 16), minHeight: Math.min(720, work.height - 16),
-    backgroundColor: '#0a0e17', title: 'ShatootConnect', autoHideMenuBar: true,
+    backgroundColor: '#160d20', title: 'Shatoot Connect', icon:path.join(__dirname,'ui/assets/app-icon.png'), show:smoke || !process.argv.includes('--start-in-tray'), autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
   const s = { win, source: null, control: false, helper: null, captureAllowed: false, language: 'en' };
   const contentsId = win.webContents.id;
@@ -251,11 +271,12 @@ function createWindow() {
   }
   states.set(win.webContents.id, s);
   win.on('blur', () => { s.grab?.stdin.end(); s.grab = null; });
+  win.on('will-resize',(event,bounds,details)=>{if(!s.videoSizing||s.win.isMaximized()||s.win.isFullScreen())return;const {ratio,extraWidth,extraHeight}=s.videoSizing,outer=s.win.getBounds(),content=s.win.getContentBounds(),horizontal=outer.width-content.width+extraWidth,vertical=outer.height-content.height+extraHeight;if(['top','bottom'].includes(details?.edge))bounds.width=Math.round((bounds.height-vertical)*ratio+horizontal);else bounds.height=Math.round((bounds.width-horizontal)/ratio+vertical);event.preventDefault();s.win.setBounds(bounds);});
   win.removeMenu();
   win.webContents.setWebRTCIPHandlingPolicy('default');
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
-  win.on('close', event => { if (!quitting && s.chatWindow && !s.chatWindow.isDestroyed()) { event.preventDefault(); win.hide(); } });
+  win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); } });
   win.on('closed', () => { for (const child of states.values()) if (child.owner === s) closeExtraHost(child); s.chatWindow?.destroy(); collaborationHost.close(s); s.discovery?.close(); for (const ws of s.lanSockets?.values() || []) ws.terminate(); hideHostOverlay(s); release(s); s.keyboardMonitor?.stdin.end(); s.helper?.stdin.end(); s.directSocket?.close(); s.directService?.close(); states.delete(contentsId); });
   win.loadFile(path.join(__dirname, 'ui/index.html'));
   return win;
@@ -265,13 +286,14 @@ ipcMain.handle('config', e => {
   let bootstrap = {};
   try { bootstrap = JSON.parse(fs.readFileSync(path.join(process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(app.getPath('exe')), 'shatootconnect.connection.json'), 'utf8')); } catch {}
   s.language = saved.language === 'fa' ? 'fa' : 'en';
+  refreshTray(s);
   if (!s.identity) s.identity = smoke ? { deviceId: crypto.randomUUID(), deviceSecret: crypto.randomBytes(32).toString('base64url') } : identity();
   const endpoint = saved.endpoint || bootstrap.endpoint || (smoke ? 'ws://127.0.0.1:8787' : 'wss://connect.shatootsoft.com');
   let serverKey = bootstrap.endpoint === endpoint ? bootstrap.serverKey || '' : '';
   try { if (saved.serverKeys?.[endpoint]) serverKey = safeStorage.decryptString(Buffer.from(saved.serverKeys[endpoint], 'base64')); } catch {}
   s.sharedCursor = saved.sharedCursor === true; s.showGuestCursor = saved.showGuestCursor !== false;
   const pendingFavorite = launchFavorite; launchFavorite = null;
-  return { smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles === true, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
+  return { rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles === true, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
 });
 ipcMain.handle('internet-enabled', (e,value)=>{state(e);if(typeof value!=='boolean')throw new Error('Invalid connection mode.');saveSettings({internetEnabled:value});return value;});
 ipcMain.handle('show-guest-cursor', (e,value)=>{const s=state(e);if(typeof value!=='boolean')throw new Error('Invalid cursor setting.');saveSettings({showGuestCursor:value});s.showGuestCursor=value;if(!value)hideGuestCursor(s);return value;});
@@ -286,7 +308,19 @@ ipcMain.handle('fixed-password', (e, value) => {
   return password;
 });
 ipcMain.handle('favorite-save', (e, value) => { state(e); preferences.save(value); return preferences.list(); });
-ipcMain.handle('favorite-get', (e, id) => { state(e); return preferences.get(id); });
+ipcMain.handle('favorite-get', (e, id) => { state(e); const record=preferences.get(id);record.password=preferences.recall(record)||record.password;if(!record.serverKey && settings().serverKeys?.[record.endpoint]) record.serverKey=safeStorage.decryptString(Buffer.from(settings().serverKeys[record.endpoint],'base64')); return record; });
+ipcMain.handle('connections', (e, operation, value) => {
+  state(e);
+  if(operation==='history')return preferences.history();
+  if(operation==='recall')return preferences.recall(value);
+  if(operation==='attempt')return preferences.attempt(value);
+  if(operation==='connected')return preferences.connected(value);
+  if(operation==='remember')return preferences.remember(value);
+  if(operation==='clear')return preferences.clearHistory();
+  if(operation==='save'){preferences.saveHistory(value);return preferences.list();}
+  if(operation==='get'){const h=preferences.history().find(h=>h.id===value);if(!h)throw new Error('Connection history entry not found.');return {...h,password:preferences.recall(h),serverKey:settings().serverKeys?.[h.endpoint]?safeStorage.decryptString(Buffer.from(settings().serverKeys[h.endpoint],'base64')):''};}
+  throw new Error('Invalid connection history operation.');
+});
 ipcMain.handle('favorite-delete', async (e, id) => {
   state(e); preferences.get(id);
   const shortcut = path.join(app.getPath('desktop'), preferences.shortcutName(id));
@@ -328,6 +362,7 @@ ipcMain.on('overlay-disconnect', e => {
   const s = [...states.values()].find(value => value.overlay?.webContents === e.sender);
   if (s && e.senderFrame === e.sender.mainFrame) disconnectHost(s);
 });
+ipcMain.on('overlay-hide',e=>{const s=[...states.values()].find(value=>value.overlay?.webContents===e.sender);if(s&&e.senderFrame===e.sender.mainFrame){s.overlayHidden=true;s.overlay.hide();}});
 ipcMain.handle('validate-endpoint', (e, endpoint) => { state(e); return validateEndpoint(endpoint); });
 ipcMain.handle('direct-endpoint', (e, address) => {
   state(e);
@@ -383,7 +418,7 @@ ipcMain.handle('save-endpoint', (e, endpoint, serverKey = '') => {
   saveSettings({ endpoint: result, serverKeys }); return result;
 });
 ipcMain.handle('language', (e, language) => {
-  const s = state(e); s.language = language === 'fa' ? 'fa' : 'en'; saveSettings({ language: s.language }); return s.language;
+  const s = state(e); s.language = language === 'fa' ? 'fa' : 'en'; saveSettings({ language: s.language }); refreshTray(s); return s.language;
 });
 ipcMain.handle('local-server', async (e, endpoint) => {
   smokeLog('local-server IPC');
@@ -416,9 +451,10 @@ ipcMain.handle('select-source', async (e, id) => {
 ipcMain.handle('approve', async (e, name, fixedPassword) => {
   const s = state(e);
   s.viewerName = String(name).slice(0, 60);
+  s.overlayHidden=false;
   if (smoke) { s.captureAllowed = true; s.control = true; return { accepted: true, control: true }; }
   const fa = s.language === 'fa';
-  const result = preferences.canAutoApprove(fixedPassword) ? { response: 2 } : await dialog.showMessageBox(s.owner?.win || s.win, { type: 'question', title: fa ? 'درخواست اتصال ShatootConnect' : 'ShatootConnect connection request',
+  const result = preferences.canAutoApprove(fixedPassword) ? { response: 2 } : await notices.showMessageBox(s.win, { priority:'critical', type: 'question', title: fa ? 'درخواست اتصال ShatootConnect' : 'ShatootConnect connection request',
     message: fa ? `${String(name).slice(0, 60)} درخواست مشاهدهٔ صفحهٔ شما را دارد.` : `${String(name).slice(0, 60)} wants to view your screen.`,
     detail: fa ? 'فقط به فرد مورد اعتماد اجازه دهید. برای قطع فوری: Ctrl + Shift + F12' : 'Only allow someone you trust. Emergency disconnect: Ctrl + Shift + F12',
     buttons: fa ? ['رد درخواست', 'فقط مشاهده', 'مشاهده، کنترل و فایل'] : ['Reject', 'View only', 'View, control and files'], defaultId: 0, cancelId: 0, noLink: true });
@@ -439,7 +475,7 @@ ipcMain.handle('capture-approved', async e => {
   await s.win.webContents.executeJavaScript('window.shatootconnectCapture()', true);
   showHostOverlay(s);
 });
-ipcMain.handle('revoke', e => { const s = state(e); release(s); s.source = null; s.captureAllowed = false; hideHostOverlay(s); if (s.win.isFullScreen()) s.win.setFullScreen(false); });
+ipcMain.handle('revoke', e => { const s = state(e);notices.cancelFor(s.win,'critical'); release(s); s.source = null; s.captureAllowed = false; hideHostOverlay(s); if (s.win.isFullScreen()) s.win.setFullScreen(false); });
 ipcMain.handle('revoke-control', e => release(state(e)));
 ipcMain.handle('release-keys', e => {
   const s = state(e); if (s.helper?.stdin.writable) s.helper.stdin.write('{"type":"release"}\n');
@@ -511,7 +547,7 @@ ipcMain.handle('exchange', async (e, operation, value) => {
 
 app.whenReady().then(async () => {
   smokeLog('app ready');
-  if (smoke) saveSettings({ favorites: [], fixedPassword: null, language: 'en' });
+  if (smoke) saveSettings({ favorites: [], connectionHistory:[], connectionPasswords:{}, rememberPasswords:true, fixedPassword: null, language: 'en' });
   // Electron 44 checks `media` as part of desktop capture. The only media API in
   // our trusted, CSP-locked renderer is getDisplayMedia; its handler denies audio.
   const capturePermission = (wc, permission) => {
@@ -531,7 +567,8 @@ app.whenReady().then(async () => {
   const win = createWindow();
   if (!smoke) {
     tray = new Tray(path.join(__dirname, 'ui/assets/app-icon.png')); tray.setToolTip('Shatoot Connect');
-    tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Shatoot Connect', click: () => showMain(states.get(win.webContents.id)) }, { label: 'Chats and files', click: () => openChat(states.get(win.webContents.id)) }, { type: 'separator' }, { label: 'Quit', click: () => { quitting = true; app.quit(); } }])); tray.on('double-click', () => showMain(states.get(win.webContents.id)));
+    refreshTray(states.get(win.webContents.id));tray.on('double-click', () => showMain(states.get(win.webContents.id)));
+    if(app.isPackaged)try{configureStartup(settings().startupEnabled!==false);}catch(error){notices.toast(win,error.message);}
     setTimeout(() => update.check(), 10000).unref(); setInterval(() => update.check(), 6 * 3600000).unref();
   }
   if (!smoke) for (const record of preferences.list()) if (record.shortcut && fs.existsSync(path.join(app.getPath('desktop'), preferences.shortcutName(record.id)))) { try { createFavoriteShortcut(record.id); } catch {} }
@@ -543,6 +580,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => { quitting = true; });
 app.on('will-quit', () => {
+  notices.close();
   globalShortcut.unregisterAll();
   for (const s of states.values()) { release(s); s.helper?.stdin.end(); }
   localServer?.close();
@@ -550,7 +588,7 @@ app.on('will-quit', () => {
 app.on('second-instance', (_event, args) => {
   const s = [...states.values()][0];
   const id = args.find(value => /^--connect-saved=[a-f0-9-]{36}$/.test(value))?.split('=')[1];
-  if (s) { s.win.restore(); s.win.focus(); if (id) s.win.webContents.send('connect-favorite', id); }
+  if (s) { showMain(s); if (id) s.win.webContents.send('connect-favorite', id); }
   else if (id) launchFavorite = id;
 });
 
@@ -569,7 +607,7 @@ async function runSmoke(host) {
   await wait(host, '!!window.shatootconnectReady');
   host.setSize(1000, 720);
   await host.webContents.executeJavaScript('document.fonts.ready.then(()=>true)');
-  const fullFormFit = "[...document.querySelectorAll('input,select,button,footer,#network-status,#app-version,.favorites-heading,#favorites-empty')].filter(e=>e.getClientRects().length && !e.closest('#favorites-list')).every(e=>{const r=e.getBoundingClientRect();return r.bottom<=innerHeight && r.top>=0 && r.left>=0 && r.right<=innerWidth}) && document.documentElement.scrollHeight<=innerHeight";
+  const fullFormFit = "[...document.querySelectorAll('input,select,button,footer,#network-status,#app-version,.favorites-heading,#favorites-empty')].filter(e=>e.getClientRects().length && !e.closest('#favorites-list,#connection-history')).every(e=>{const r=e.getBoundingClientRect();return r.bottom<=innerHeight && r.top>=0 && r.left>=0 && r.right<=innerWidth}) && document.documentElement.scrollHeight<=innerHeight";
   const compactFit = await host.webContents.executeJavaScript(fullFormFit);
   if (await host.webContents.executeJavaScript("document.querySelector('#fixed-password').getClientRects().length > 0 || document.querySelector('#server-url').getClientRects().length > 0")) throw new Error('Advanced settings leaked onto main form');
   await host.webContents.executeJavaScript("document.querySelector('#open-settings').click(); true");
@@ -577,6 +615,7 @@ async function runSmoke(host) {
   await host.webContents.executeJavaScript("document.querySelector('#settings-dialog').close(); true");
   await delay(150);
   if (!compactFit) throw new Error('Inputs do not fit at 1000x720');
+  await require('../tests/workspace-ux-smoke.cjs')({host,states,notices,screen,wait,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')});
   fs.writeFileSync(path.join(__dirname, '../artifacts/compact-en.png'), (await host.webContents.capturePage()).toPNG());
   smokeLog('host renderer ready');
   const keyboard = await host.webContents.executeJavaScript('window.shatootconnect.currentKeyboard()');
@@ -590,7 +629,7 @@ async function runSmoke(host) {
   await wait(host, `config.fixedPassword===${JSON.stringify(offlinePassword)} && window.shatootconnectDirect.password===${JSON.stringify(offlinePassword)}`);
   if(await host.webContents.executeJavaScript("document.querySelector('#save-fixed-password').disabled || document.querySelector('#copy-password').disabled"))throw new Error('LAN-only password controls depend on Internet registration');
   await host.webContents.executeJavaScript("document.querySelector('#open-settings').click();true");
-  for(const tab of ['host','lan','display','saved','internet']){await host.webContents.executeJavaScript(`selectSettingsTab('${tab}');true`);if(!await host.webContents.executeJavaScript(`document.querySelector('#settings-${tab}').getClientRects().length>0 && document.querySelectorAll('[role=tabpanel]:not([hidden])').length===1`))throw new Error('Settings tabs overlap');}
+  for(const tab of ['host','lan','display','general','internet']){await host.webContents.executeJavaScript(`selectSettingsTab('${tab}');true`);if(!await host.webContents.executeJavaScript(`document.querySelector('#settings-${tab}').getClientRects().length>0 && document.querySelectorAll('[role=tabpanel]:not([hidden])').length===1`))throw new Error('Settings tabs overlap');}
   await host.webContents.executeJavaScript("selectSettingsTab('host');document.querySelector('#settings-dialog').close();true");
   smokeLog('Offline fixed-password save, LAN credentials, and five settings tabs passed');
   await host.webContents.executeJavaScript("document.querySelector('#local-server').click(); true", true);
@@ -621,14 +660,18 @@ async function runSmoke(host) {
   const viewer = createWindow();
   await wait(viewer, '!!window.shatootconnectReady');
   smokeLog('viewer ready');
-  await viewer.webContents.executeJavaScript(`document.querySelector('#server-url').value=${JSON.stringify(credentials.endpoint)};document.querySelector('#remote-id').value=${JSON.stringify(credentials.id)};document.querySelector('#remote-password').value=${JSON.stringify(credentials.password)};document.querySelector('#favorite-name').value='Smoke office';document.querySelector('#save-favorite').click(); true`, true);
+  await viewer.webContents.executeJavaScript(`document.querySelector('#server-url').value=${JSON.stringify(credentials.endpoint)};document.querySelector('#remote-id').value=${JSON.stringify(credentials.id)};document.querySelector('#remote-password').value=${JSON.stringify(credentials.password)};document.querySelector('#quick-save').click(); true`, true);
   await wait(viewer, "document.querySelectorAll('.favorite-connect').length > 0");
-  const favorite = preferences.list().find(record => record.name === 'Smoke office');
+  const favorite = preferences.list().find(record => record.address === credentials.id.replace(/\s/g,''));
   const shortcut = await viewer.webContents.executeJavaScript(`window.shatootconnect.favoriteShortcut(${JSON.stringify(favorite.id)})`);
   const link = shell.readShortcutLink(shortcut);
   if (!link.args.includes(`--connect-saved=${favorite.id}`) || link.args.includes(fixedPassword) || JSON.stringify(settings()).includes(fixedPassword)) throw new Error('Shortcut or saved connection leaked a password');
   await viewer.webContents.executeJavaScript("document.querySelector('.favorite-connect').click(); true", true);
   await wait(viewer, "document.querySelector('#remote-video').videoWidth > 0", 45000);
+  await wait(viewer,"(()=>{const stage=document.querySelector('#video-stage'),video=document.querySelector('#remote-video');return Math.abs(stage.clientWidth/stage.clientHeight-video.videoWidth/video.videoHeight)<0.04})()");
+  {const bounds=viewer.getBounds();viewer.emit('will-resize',{preventDefault(){}},{...bounds,width:bounds.width-80},{edge:'right'});await delay(100);await wait(viewer,"(()=>{const s=document.querySelector('#video-stage'),v=document.querySelector('#remote-video');return Math.abs(s.clientWidth/s.clientHeight-v.videoWidth/v.videoHeight)<0.04})()");}
+  const historyEntries=await viewer.webContents.executeJavaScript("api.connections('history')");if(!historyEntries.some(h=>h.address===credentials.id.replace(/\s/g,'')))throw new Error('Accepted connection was not added to history');
+  await viewer.webContents.executeJavaScript(`api.connections('save',${JSON.stringify(historyEntries[0].id)}).then(renderFavorites)`);
   const hostState = states.get(host.webContents.id);
   await wait(host, "window.shatootconnectDiagnostics().role === 'host'");
   const overlayDeadline = Date.now() + 5000;
@@ -642,6 +685,10 @@ async function runSmoke(host) {
   host.minimize(); await delay(200);
   if (!hostState.overlay.isVisible()) throw new Error('Host overlay disappeared when the app minimized');
   host.restore();
+  await hostState.overlay.webContents.executeJavaScript("document.querySelector('#overlay-hide').click();true");await delay(100);
+  if(hostState.overlay.isVisible()||!hostState.captureAllowed)throw new Error('Hiding the host panel disconnected the guest');
+  await host.webContents.executeJavaScript("api.lifecycle('panels')");await delay(200);
+  if(!hostState.overlay?.isVisible())throw new Error('Hidden host panel cannot be restored');
   await viewer.webContents.executeJavaScript("document.querySelector('#fullscreen').click(); true", true);
   await wait(viewer, "document.fullscreenElement?.id === 'session-panel'");
   await delay(300);

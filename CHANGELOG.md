@@ -13,6 +13,29 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.12.0 — 2026-10-21
+
+### Added
+
+- Encrypted last-password recall per LAN IP/port or Internet ID/server, on by default, with a setting that erases/disables the automatic cache.
+- A 200-entry recent-connection list with timestamps, reuse counts, direct reconnect/save actions and inline saved-computer renaming. Saving a computer no longer needs a separate name/password form.
+- Themed bottom-left application notifications, topmost critical desktop approvals, priority over ordinary toasts, queued concurrent requests and safe cancellation.
+- Default close-to-tray and packaged Windows startup in the tray, with settings and explicit full-exit actions. Hidden host panels can be restored without changing session permissions.
+- A dark Shatoot-purple theme, larger readable fonts and a new multi-resolution application/installer icon.
+
+### Changed
+
+- Removed the Saved computers settings tab, the Workspace/Remote desktop breadcrumb and You are in control slogan.
+- Groups can be created without any other contact and populated later from saved/offline/discovered contacts. Removed minimum-two and fixed membership-count restrictions; transport/storage bounds remain. Invitations are delivered when connected and still require recipient consent.
+- Enter submits the relevant action in connection, server, password, profile and nickname inputs. Static UI text/images no longer select/drag; editable fields and incoming file drops retain their behavior.
+
+### Fixed
+
+- Favorite saving no longer depends on hidden/empty remote fields or a required nickname/password; IPC wrapper prefixes are removed from connection-form errors.
+- Remembered-password lookup is scoped to the exact target/server and cannot overwrite a later address or user input. Immediate Enter waits for an available remembered password.
+- Windowed viewing fits the incoming display and measured UI chrome, preserves aspect during resizing, stays inside the screen work area and restores normal main-window size afterward.
+- Discovery/language updates reach an already-open independent chat window.
+
 ## 0.11.1 — 2026-10-21
 
 ### Included in this release

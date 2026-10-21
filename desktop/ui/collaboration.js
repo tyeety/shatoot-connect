@@ -178,11 +178,14 @@
     async announceGroup(s, group) {
       if (s.groups.has(group.id)) return true; if (s.declined.has(group.id)) return false;
       if (group.owner !== this.self.deviceId) return true;
-      const accepted = await this.rpc(s, 'group', group); if (accepted) s.groups.add(group.id); else s.declined.add(group.id); return accepted;
+      s.groupInvitations||=new Map();if(s.groupInvitations.has(group.id))return s.groupInvitations.get(group.id);
+      const invitation=this.rpc(s,'group',group).then(accepted=>{if(accepted)s.groups.add(group.id);else s.declined.add(group.id);return accepted;});s.groupInvitations.set(group.id,invitation);
+      try{return await invitation;}finally{s.groupInvitations.delete(group.id);}
     }
     async flush(s) {
       if (s.flushing) { s.flushAgain = true; return; } if (s.closed) return; s.flushing = true;
       try {
+        for(const group of this.catalog.groups)if(group.owner===this.self.deviceId&&group.members.some(m=>m.deviceId===s.peer.deviceId))await this.announceGroup(s,group);
         do {
         s.flushAgain = false;
         const messages = await this.api.collaboration('pending', { peer: s.peer.deviceId });
@@ -197,17 +200,17 @@
       } finally { s.flushing = false; }
     }
     wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind, text: message.text, at: message.at }; }
-    async createGroup(name, members) {
+    async createGroup(name, members, existingId) {
       if (typeof name !== 'string' || !name.trim() || name.length > 60) throw new Error('Enter a group name of up to 60 characters.');
-      const peers = [...new Set(members)].map(id => this.peer(id)?.peer); if (peers.some(p => !p) || peers.length < 2 || peers.length > 15) throw new Error('Select 2 to 15 connected contacts.');
-      const group = { id: crypto.randomUUID(), name, owner: this.self.deviceId, members: [this.self, ...peers].map(p => ({ deviceId: p.deviceId, name: p.name })) };
-      const accepted = [];
-      for (const peer of peers) if (await this.rpc(this.peer(peer.deviceId), 'group', group)) accepted.push(peer);
-      if (!accepted.length) throw new Error('No contact accepted the group invitation.');
-      group.members = [this.self, ...accepted].map(p => ({ deviceId: p.deviceId, name: p.name }));
+      if(!Array.isArray(members))throw new Error('Invalid group membership.');
+      const previous=existingId&&this.group(existingId);if(existingId&&(!previous||previous.owner!==this.self.deviceId))throw new Error('Only the group owner can change members.');
+      const candidates=new Map([...this.catalog.contacts,...this.connected(),...(previous?.members||[])].map(p=>[p.deviceId,p]));
+      const peers=[...new Set(members)].filter(id=>id!==this.self.deviceId).map(id=>candidates.get(id));if(peers.some(p=>!p))throw new Error('Unknown group contact.');
+      const group = { id: existingId||crypto.randomUUID(), name, owner: this.self.deviceId, members: [this.self, ...peers].map(p => ({ deviceId: p.deviceId, name: p.name })) };
       await this.api.collaboration('group', group);
-      for (const peer of accepted) { const s = this.peer(peer.deviceId); await this.rpc(s, 'group', group); s.groups.add(group.id); }
-      await this.refresh(); return group;
+      await this.refresh();
+      for(const peer of peers){const s=this.peer(peer.deviceId);if(s){s.groups.delete(group.id);s.declined.delete(group.id);this.announceGroup(s,group).catch(error=>this.error(error.message));}else{const contact=this.catalog.contacts.find(c=>c.deviceId===peer.deviceId);if(contact?.route)this.connect({...contact.route,deviceId:peer.deviceId,name:peer.name}).catch(()=>{});}}
+      return group;
     }
     sendFiles(conversation, selection = 'pick', value) {
       const operation = this.fileQueue.then(() => this.sendSelectedFiles(conversation, selection, value)); this.fileQueue = operation.catch(() => {}); return operation;

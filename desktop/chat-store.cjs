@@ -40,7 +40,7 @@ class ChatStore {
     return this.change(data => data.contacts[peer.deviceId] = { ...data.contacts[peer.deviceId], ...require('../shared/profile.cjs').profile(peer), deviceId: peer.deviceId, name: peer.name, route: route || data.contacts[peer.deviceId]?.route || null });
   }
   group(value) {
-    if (!value || !UUID.test(value.id) || !UUID.test(value.owner) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !Array.isArray(value.members) || value.members.length < 2 || value.members.length > 16) throw new Error('Invalid chat group.');
+    if (!value || !UUID.test(value.id) || !UUID.test(value.owner) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !Array.isArray(value.members) || value.members.length < 1) throw new Error('Invalid chat group.');
     const members = value.members.map(m => { if (!UUID.test(m.deviceId) || typeof m.name !== 'string' || m.name.length > 60) throw new Error('Invalid group member.'); return { deviceId: m.deviceId, name: m.name }; });
     if (new Set(members.map(m => m.deviceId)).size !== members.length || !members.some(m => m.deviceId === this.self) || !members.some(m => m.deviceId === value.owner)) throw new Error('Invalid group membership.');
     return this.change(data => { if (data.groups[value.id] && data.groups[value.id].owner !== value.owner) throw new Error('The group owner cannot change.'); return data.groups[value.id] = { id: value.id, name: value.name.trim(), owner: value.owner, members }; });
@@ -52,7 +52,7 @@ class ChatStore {
     if ((value.conversation.startsWith('p:') && !data.contacts[key]) || (value.conversation.startsWith('g:') && !data.groups[key])) throw new Error('Unknown conversation.');
     const existing = data.messages.find(m => m.id === value.id && m.conversation === value.conversation); if (existing) return { message: existing, duplicate: true };
     const relay = value.conversation.startsWith('g:') && data.groups[key]?.owner === this.self;
-    const pending = outgoing || relay ? [...new Set((value.pending || []).filter(id => UUID.test(id) && id !== this.self && (!relay || data.groups[key].members.some(m => m.deviceId === id))))].slice(0, 16) : [];
+    const pending = outgoing || relay ? [...new Set((value.pending || []).filter(id => UUID.test(id) && id !== this.self && (!relay || data.groups[key].members.some(m => m.deviceId === id))))] : [];
     const message = { id: value.id, conversation: value.conversation, sender: value.sender, name: value.name, kind: value.kind, text: value.text, at: Number.isSafeInteger(value.at) && Math.abs(Date.now() - value.at) < 365 * 86400000 ? value.at : Date.now(), receivedAt: Math.max(Date.now(), (data.messages.at(-1)?.receivedAt || 0) + 1), status: outgoing ? (pending.length ? 'queued' : 'sent') : 'received', pending };
     return this.change(d => { d.messages.push(message); return { message, duplicate: false }; });
   }

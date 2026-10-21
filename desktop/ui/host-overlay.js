@@ -7,5 +7,7 @@ api.overlayInfo().then(info => {
   document.getElementById('overlay-name').textContent = info.name || (fa ? 'میهمان' : 'Viewer');
   document.getElementById('overlay-mode').textContent = info.control ? (fa ? 'مشاهده و کنترل' : 'View and control') : (fa ? 'فقط مشاهده' : 'View only');
   const button = document.getElementById('overlay-disconnect'); button.title = button.ariaLabel = fa ? 'قطع اتصال' : 'Disconnect';
+  const hide=document.getElementById('overlay-hide');hide.title=hide.ariaLabel=fa?'پنهان کردن پنل':'Hide panel';
 });
 document.getElementById('overlay-disconnect').onclick = () => api.overlayDisconnect();
+document.getElementById('overlay-hide').onclick=()=>api.overlayHide();

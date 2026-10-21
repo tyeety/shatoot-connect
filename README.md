@@ -4,13 +4,13 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)
 
-## Version 0.11.1
+## Version 0.12.0
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.11.1-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.11.1-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.11.1-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.12.0-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.12.0-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.12.0-win-x64.zip` | Coordinator, runtime and service manager |
 
 Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. Remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
@@ -32,9 +32,9 @@ Setup checks the OS/architecture, destination, write access, destination/TEMP di
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.11.1-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.11.1-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.11.1-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.12.0-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.12.0-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.12.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.
@@ -61,7 +61,7 @@ No coordinator, Internet ID, STUN or TURN is used. **Settings → Internet serve
 
 Set a fixed password of 8–128 characters in **Host and access**. Empty restores random passwords. Passwords are DPAPI-encrypted and never placed in desktop shortcut arguments. Fixed credentials apply to coordinator registration and the direct listener. **Allow unattended access with fixed password** is off by default; enabling it permits authenticated fixed-password view/control/file sessions without a further host dialog. Clearing the password disables it.
 
-Saved computers keep name, ID/IP, server endpoint and encrypted password. One click reconnects. App-created shortcuts contain only a local record identifier. Keep a portable executable available until its shortcuts have migrated to the installed version.
+Save computer on the connection form needs only an ID/IP; a nickname is optional. Recent connections records up to 200 approved connection attempts with time and reuse count. Reconnect or save directly from each history row; rename saved entries inline with Enter. The obsolete Saved computers settings tab has been removed. Saved computers keep name, ID/IP, server endpoint and an optional encrypted password. One click reconnects if credentials are available, otherwise the password input receives focus. App-created shortcuts contain only a local record identifier. Keep a portable executable available until its shortcuts have migrated to the installed version.
 
 Independent guest input uses window messages without moving the physical host pointer. Some raw-input apps/nonclient gestures require the optional **Allow guest to move my cursor** setting. The small always-on-top host panel provides disconnect and remains visible when minimized; guest clicks target the underlying app. A click-through overlay draws the guest pointer. Capture exclusion depends on Windows support; older Windows can include it in video.
 
@@ -71,7 +71,7 @@ Keyboard layouts synchronize in both directions with versioned conflict resoluti
 
 Open **Chats and files**, enter an Internet ID/private LAN IP or click a nearby device's chat button. Ordinary messages connect without a recipient approval prompt by default. Settings > Chat and files can restore explicit chat approval. Chat needs no desktop password and grants no screen, mouse, keyboard or clipboard access. ID chat requires both devices on the same updated coordinator; LAN chat needs no coordinator/STUN/TURN.
 
-A separate reliable WebRTC data connection carries messages/files. The coordinator sees invitation and ICE/SDP signaling, not their contents. Direct traffic bypasses the coordinator; optional TURN relays encrypted transport and consumes relay bandwidth. The messenger runs in a separate window. Closing the main window while chat is open keeps the background engine alive; Show main window or the tray restores it. Closing the chat window retains connected sessions while the main window remains open; **Disconnect chat** does not end a desktop session.
+A separate reliable WebRTC data connection carries messages/files. The coordinator sees invitation and ICE/SDP signaling, not their contents. Direct traffic bypasses the coordinator; optional TURN relays encrypted transport and consumes relay bandwidth. The messenger runs in a separate window. Closing either main/chat UI keeps the background engine and connected sessions alive in the tray; use the tray or Show main window to restore the UI. Quit completely in Settings > Application or the tray exits the process and ends sessions; **Disconnect chat** does not end a desktop session.
 
 Contacts, groups, transcripts and queued text are atomically saved in a DPAPI-encrypted `%APPDATA%\shatoot-connect\chat-<device-id>.dat` file. Search and **Load older messages** operate locally. A delivery acknowledgement follows recipient persistence; it is not a human read receipt. Text to disconnected saved contacts queues until a new approved connection. There is no server-hosted offline mailbox. Limits are 50,000 messages / 32 MiB; full or unreadable history reports an error without silently overwriting the old transcript. Received file contents are ordinary Downloads files, not encrypted database blobs.
 
@@ -79,7 +79,7 @@ LAN announcements/plain signaling are not cryptographic human-identity certifica
 
 ## Groups
 
-Connect at least two contacts, choose **New group**, enter a name and select participants. Each contact approves joining. The limit is sixteen participants including the creator. Accepted contacts can use LAN and/or ID routes.
+Choose **New group** and enter a name. You may create it with no other members, then use **Add members** later. The chooser includes saved chat contacts and discovered LAN peers, including offline contacts. There is no minimum or fixed group-member count. Invitations are offered when a selected contact connects; the recipient still approves joining. Stored membership does not imply acceptance. Actual concurrent transports remain bounded (16 chat connections per client/coordinator socket); very large groups are not a guarantee of unlimited simultaneous connectivity. LAN and ID routes can be mixed.
 
 The creator's client is the **owner and relay**. It forwards group messages to members and persists a queue for temporarily disconnected members. The owner must be online for group delivery. If it is offline, members retain outgoing text until reconnecting. A member's delivery acknowledgement confirms persistence by the owner, not delivery/read status for every member.
 
@@ -95,7 +95,7 @@ Approved **desktop control** sessions have a separate clipboard channel for Unic
 
 ## Updates, profile and availability
 
-Starting with 0.11.1, the packaged client checks the latest stable GitHub Release at startup and every six hours. Settings > Updates also provides a manual check. **Update and restart** downloads the matching installed/portable Windows x64 package, checks its exact length and GitHub asset SHA-256 digest, then runs the update worker after the old process exits. A failed/corrupt download leaves the running app untouched. Installed editions use the existing installer/installation folder; portable editions replace the original executable and keep one `.previous` backup. Updating never deletes the Windows user profile, encrypted passwords, favorites or chat database. Keep the same Windows account so DPAPI data remains readable. Updating restarts the client and ends active sessions/transfers. Source/dev launches cannot install updates. Version 0.10.0 needs one manual upgrade to acquire the updater. Server service upgrades still use the separate server package.
+The packaged client checks the latest stable GitHub Release at startup and every six hours. Settings > Updates also provides a manual check. **Update and restart** downloads the matching installed/portable Windows x64 package, checks its exact length and GitHub asset SHA-256 digest, then runs the update worker after the old process exits. A failed/corrupt download leaves the running app untouched. Installed editions use the existing installer/installation folder; portable editions replace the original executable and keep one `.previous` backup. Updating never deletes the Windows user profile, encrypted passwords, favorites or chat database. Keep the same Windows account so DPAPI data remains readable. Updating restarts the client and ends active sessions/transfers. Source/dev launches cannot install updates. Version 0.10.0 needs one manual upgrade to acquire the updater. Server service upgrades still use the separate server package.
 
 Profile and status settings support a display name, cropped local PNG/JPEG/WebP photo, and Available, Busy, Away, Do not disturb or Appear offline. These are per-device identities, not centralized user accounts. Photos are stored as bounded PNG thumbnails; LAN neighbors retrieve the public profile locally and connected chat peers receive updates over WebRTC. The selected status is advisory; it does not disable hosting or disconnect peers. Display names/photos do not prove identity. Do not disturb does not revoke incoming-message permission.
 
@@ -104,6 +104,18 @@ Settings > LAN > **Repair Windows Firewall access** requests Windows administrat
 Up to eight viewers can connect to one updated host, using LAN, ID, or both. Each needs the password and independent host approval (or configured unattended access), its own WebRTC connection and a separate disconnect panel. One guest disconnecting does not revoke the others. The viewers share one Windows desktop, cursor and keyboard layout; simultaneous control can conflict. Every connection adds capture/encoding/network load. Old servers/clients keep their single-viewer behavior; upgrade the coordinator and host for ID multi-viewer use.
 
 LAN IP connections automatically select **LAN · Ultra**, preserving available display resolution up to 8K at 60 fps with a 100 Mbit/s ceiling and resolution-prioritized adaptation. This is a cap, not a guaranteed frame rate or lossless format. The real display, GPU/encoder and network determine delivered quality. Change Live quality to reduce load. Internet ID connections keep their saved quality preference.
+
+## Desktop experience and remembered credentials
+
+Settings > Application controls **Remember the last password for each computer** (on by default). The last entered password is stored with Windows encryption, keyed by LAN IP/port or by Internet ID plus coordinator address. Default LAN port 8788 and an omitted port refer to the same cache entry. Typing an address fills its own password; stale asynchronous lookups cannot overwrite a different address or a user-entered password. Turning the setting off deletes the automatic cache and disables autofill. Explicitly saved computers retain their own credentials. Clearing connection history removes recent rows without deleting saved computers or chat history. History stores connection metadata, not plaintext passwords.
+
+The app adopts Shatoot's purple palette (#7400a8 / #9f38d7) on dark surfaces with larger type and a redesigned multi-resolution Windows icon. Static UI text/images do not select or drag; text inputs remain editable/selectable and external file drops still work. Enter activates the matching connection/server/password/profile action; chat/group forms retain normal Enter submission.
+
+Closing the main window hides it to the tray even without an open chat. **Quit completely** is available in Settings > Application and the tray. Packaged clients enable startup with Windows by default and open in the tray using the installed/portable executable; the Application tab can turn startup off. Source/smoke runs never modify real Windows startup. A signed-in desktop session is still required; this is not pre-login or post-logout desktop service support.
+
+Application notifications use the app theme in the lower-left screen corner. Screen invitations use topmost critical approval windows without granting access until a valid action is chosen. Urgent requests take precedence over informational toasts; concurrent prompts queue with bounded expiry. Native file/folder pickers, Windows elevation and installer dialogs remain OS dialogs. A host can hide its connection panel without disconnecting guests, then restore panels from Settings or the tray. Emergency disconnect remains available.
+
+Windowed viewing fits the received display aspect ratio and measured controls/chrome, caps size to the current work area, and preserves the ratio during manual resize. Ending viewing restores normal main-window dimensions. Fullscreen continues to apply to the video panel.
 
 ## Internet coordinator and Windows service
 

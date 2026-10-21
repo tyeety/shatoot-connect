@@ -1,0 +1,3 @@
+'use strict';
+const api=window.shatootconnect;
+api.noticeInfo().then(data=>{window.i18n.setLanguage(data.language);document.getElementById('notice-title').textContent=data.title;document.getElementById('notice-message').textContent=window.i18n.translate(data.message);document.getElementById('notice-detail').textContent=data.detail;for(const [index,label]of data.buttons.entries()){const button=document.createElement('button');button.className='small-button';button.textContent=window.i18n.translate(label);button.onclick=()=>api.noticeAnswer(index);document.getElementById('notice-actions').append(button);}});

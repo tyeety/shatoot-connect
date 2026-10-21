@@ -25,10 +25,10 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if (op === 'group') return history.group(value);
     if (op === 'approve-group') {
       const g = grant(s, value.session), group = value.group;
-      if (!UUID.test(group?.id) || group.owner !== g.peer.deviceId || typeof group.name !== 'string' || group.name.length > 60 || !Array.isArray(group.members) || group.members.length > 16 || group.members.some(m => !UUID.test(m.deviceId) || typeof m.name !== 'string' || m.name.length > 60)) throw new Error('Invalid group invitation.');
+      if (!UUID.test(group?.id) || group.owner !== g.peer.deviceId || typeof group.name !== 'string' || group.name.length > 60 || !Array.isArray(group.members) || group.members.some(m => !UUID.test(m.deviceId) || typeof m.name !== 'string' || m.name.length > 60)) throw new Error('Invalid group invitation.');
       if (s.chatPrompt) return false; s.chatPrompt = true;
       try { const fa = s.language === 'fa'; const result = smoke ? { response: 1 } : await dialog.showMessageBox(s.chatWindow || s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'پیوستن به گروه'] : ['Decline', 'Join group'], defaultId: 0, cancelId: 0,
-        message: fa ? `پیوستن به گروه ${group.name}؟` : `Join ${group.name}?`, detail: `${g.peer.name}\n${group.members.map(m => m.name).join(', ')}` }); return result.response === 1; }
+        message: fa ? `پیوستن به گروه ${group.name}؟` : `Join ${group.name}?`, detail: `${g.peer.name}\n${group.members.slice(0,10).map(m => m.name).join(', ')}` }); return result.response === 1; }
       finally { s.chatPrompt = false; }
     }
     if (op === 'append') return history.append(value.message, value.outgoing === true);

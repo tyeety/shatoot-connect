@@ -1,0 +1,20 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const os=require('node:os');
+const crypto=require('node:crypto');
+const vm=require('node:vm');
+const {ChatStore}=require('../desktop/chat-store.cjs');
+test('groups can start empty, add offline contacts beyond the old 16-member cap and persist every pending recipient',async t=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'shatoot-group-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const self={deviceId:crypto.randomUUID(),name:'Owner'},store=new ChatStore({self:self.deviceId,file:path.join(directory,'history'),encrypt:text=>Buffer.from(text),decrypt:bytes=>bytes.toString()});
+  const contacts=Array.from({length:32},(_,i)=>({deviceId:crypto.randomUUID(),name:`Offline ${i}`}));for(const peer of contacts)store.contact(peer);
+  const context={window:{},crypto,console,setTimeout,clearTimeout};vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../desktop/ui/collaboration.js'),'utf8'),context);
+  const api={collaboration:async(op,value)=>op==='list'?store.list():op==='group'?store.group(value):null};
+  const engine=new context.window.CollaborationClient({api,self,internet:()=>({}),ensureInternet:async()=>{throw new Error('Group creation must not require a server.');}});await engine.ready;
+  const empty=await engine.createGroup('My group',[]);assert.equal(empty.members.length,1);
+  const expanded=await engine.createGroup('My group',contacts.map(c=>c.deviceId),empty.id);assert.equal(expanded.id,empty.id);assert.equal(expanded.members.length,33);
+  store.append({id:crypto.randomUUID(),conversation:`g:${empty.id}`,sender:self.deviceId,name:self.name,kind:'text',text:'Queued for everyone',pending:contacts.map(c=>c.deviceId)},true);
+  assert.equal(store.load().messages[0].pending.length,32);
+});
