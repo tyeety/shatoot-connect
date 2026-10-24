@@ -141,7 +141,7 @@ public class VerifiedSetupFixture {
     $probeBytes = [Text.Encoding]::UTF8.GetBytes([Guid]::NewGuid().ToString())
     [IO.File]::WriteAllBytes($profileProbe, $probeBytes)
     $settings = Join-Path $profile 'connection.json'
-    if(!(Test-Path -LiteralPath $settings)){[IO.File]::WriteAllText($settings,'{"startupEnabled":false}');$createdSettings=$true}
+    if(!(Test-Path -LiteralPath $settings)){[IO.File]::WriteAllText($settings,'{"startupEnabled":false,"internetEnabled":false}');$createdSettings=$true}
     $settingsHash = if (Test-Path -LiteralPath $settings) { Get-ContentHash $settings } else { $null }
     Invoke-Setup $Installer "/S /currentuser /D=$installDir"
     Assert-Payload
