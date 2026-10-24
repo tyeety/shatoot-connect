@@ -18,20 +18,22 @@ if (smoke) {
 }
 const states = new Map();
 let localServer, tray, quitting = false;
+let settingsCache;
 const profile = () => ({ ...require('../shared/profile.cjs').profile(settings().profile), name: settings().profile?.name || require('node:os').hostname() });
 const update = new (require('./updater.cjs').Updater)({ version: app.getVersion(), directory: path.join(app.getPath('userData'), 'updates'), portable: !!process.env.PORTABLE_EXECUTABLE_FILE, request: require('./updater.cjs').electronResponse,
   changed: value => { for (const s of states.values()) { if (!s.win.isDestroyed()) s.win.webContents.send('update-status', value); } } });
 function settings() {
-  try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'connection.json'), 'utf8')); }
+  if(settingsCache)return settingsCache;
+  try { return settingsCache=JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'connection.json'), 'utf8')); }
   catch {
-    if (!smoke) try { return JSON.parse(fs.readFileSync(path.join(app.getPath('appData'), 'farwatch', 'connection.json'), 'utf8')); } catch {}
-    return {};
+    if (!smoke) try { return settingsCache=JSON.parse(fs.readFileSync(path.join(app.getPath('appData'), 'farwatch', 'connection.json'), 'utf8')); } catch {}
+    return settingsCache={};
   }
 }
 function saveSettings(patch) {
   fs.mkdirSync(app.getPath('userData'), { recursive: true });
   const file = path.join(app.getPath('userData'), 'connection.json');
-  fs.writeFileSync(file + '.tmp', JSON.stringify({ ...settings(), ...patch })); fs.renameSync(file + '.tmp', file);
+  const next={...settings(),...patch};fs.writeFileSync(file+'.tmp',JSON.stringify(next));fs.renameSync(file+'.tmp',file);settingsCache=next;
 }
 function validateEndpoint(endpoint) {
   const u = new URL(endpoint);
@@ -47,6 +49,18 @@ function validateDirect(address) {
 const preferences = new (require('./preferences.cjs').ClientPreferences)({ read: settings, write: saveSettings, validateEndpoint, validateDirect,
   encrypt: text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows credential encryption is unavailable.'); return safeStorage.encryptString(text).toString('base64'); },
   decrypt: text => safeStorage.decryptString(Buffer.from(text, 'base64')) });
+function computerChanged(){for(const s of states.values())for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed())win.webContents.send('computer-cards-changed');}
+function rememberComputer(peer,route){preferences.rememberComputer(peer,route);}
+function decorateDiscovery(value){return {...value,peers:value.peers.map(peer=>preferences.decorate(peer))};}
+ipcMain.handle('computer-card',(e,operation,value={})=>{
+  state(e);
+  if(operation==='resolve')return preferences.decorate(value.peer,value.route);
+  if(operation==='remember'){rememberComputer(value.peer||{},value.route||{});computerChanged();return preferences.decorate(value.peer,value.route);}
+  if(operation==='rename'){const result=preferences.renameComputer(value.peer,value.name);computerChanged();return result;}
+  if(operation==='preview'){const s=state(e);if(!s.outgoingDesktop)throw new Error('A received desktop session is required.');rememberComputer({...value.peer,preview:value.preview},value.route);computerChanged();return;}
+  throw new Error('Invalid computer card operation.');
+});
+ipcMain.on('desktop-viewing',(e,value)=>{state(e).outgoingDesktop=value===true;});
 let launchFavorite = process.argv.find(value => /^--connect-saved=[a-f0-9-]{36}$/.test(value))?.split('=')[1];
 let stableLauncher;
 function getLauncher(){
@@ -72,7 +86,7 @@ function identity() {
   saveSettings({ deviceId: result.deviceId, deviceSecret: safeStorage.encryptString(result.deviceSecret).toString('base64') });
   return result;
 }
-if (!smoke && !app.requestSingleInstanceLock()) app.quit();
+if(!smoke){const locked=app.requestSingleInstanceLock();if(!locked||process.argv.includes('--quit-if-background'))app.quit();}
 
 function release(s) {
   hideGuestCursor(s);
@@ -164,9 +178,9 @@ function chatFilesReceived(s,record,files){
     if(win.isVisible()&&!win.isMinimized()&&win.isFocused()&&view?.active&&view.conversation===record.conversation)reading=true;
     win.webContents.send('chat-files-received',{conversation:record.conversation,id:record.id});
   }
-  if(!reading){const fa=s.language==='fa';notices.toast(s.win,fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`,{detail:files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads'});}
+  if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa';notices.toast(s.win,fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`,{detail:files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads'});}
 }
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, received:chatFilesReceived });
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route)=>{rememberComputer(peer,route);computerChanged();}, received:chatFilesReceived });
 ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active});});
 ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message);});
 function configureStartup(enabled){
@@ -198,6 +212,7 @@ ipcMain.handle('host-session', async (e, message, route, sourceId) => {
   const owner = state(e); if (owner.owner || !require('./discovery.cjs').UUID.test(message?.session) || !['server','lan-host'].includes(route)) throw new Error('Invalid desktop session.');
   let s = [...states.values()].find(s => s.owner === owner && s.invitation.session === message.session && s.hostRoute === route);
   if (message.type === 'desktop-invite') {
+    message={...message,name:preferences.decorate({...message.peer,name:message.name}).displayName};
     if (s) return;
     if ([...states.values()].filter(s => s.owner === owner).length >= 7) { hostReply({ owner, hostRoute: route, invitation: message },{type:'desktop-reject'}); return; }
     const win = new BrowserWindow({ show: false, width: 320, height: 180, skipTaskbar: true, webPreferences: { preload: path.join(__dirname,'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
@@ -231,6 +246,7 @@ function openChat(s) {
   win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
 }
 ipcMain.handle('chat-open', e => openChat(state(e)));
+ipcMain.handle('profile-edit',e=>{const s=state(e);showMain(s);s.win.webContents.send('profile-edit');});
 ipcMain.handle('show-main', e => showMain(state(e)));
 ipcMain.handle('chat-close', e => state(e).chatWindow?.close());
 ipcMain.handle('chat-call', (e, operation, args = []) => {
@@ -314,7 +330,7 @@ ipcMain.handle('lan-open', (event, id, endpoint) => {
 });
 ipcMain.on('lan-send', (event, id, value) => { const ws = state(event).lanSockets?.get(id); if (ws?.readyState === 1 && typeof value === 'string' && Buffer.byteLength(value) <= 110000) ws.send(value); });
 ipcMain.on('lan-close', (event, id) => state(event).lanSockets?.get(id)?.close());
-ipcMain.handle('discovery', event => { const s = state(event); s.discovery?.refresh(); return s.discovery?.snapshot() || { peers: [], interfaces: [], errors: ['LAN listener is not ready.'] }; });
+ipcMain.handle('discovery', event => { const s = state(event); s.discovery?.refresh(); return decorateDiscovery(s.discovery?.snapshot() || { peers: [], interfaces: [], errors: ['LAN listener is not ready.'] }); });
 function createWindow() {
   const work = screen.getPrimaryDisplay().workArea;
   const win = new BrowserWindow({ width: Math.min(1100, work.width - 16), height: Math.min(720, work.height - 16), minWidth: Math.min(1000, work.width - 16), minHeight: Math.min(720, work.height - 16),
@@ -366,7 +382,7 @@ ipcMain.handle('fixed-password', (e, value) => {
   if (s.directSocket?.readyState === 1) s.directSocket.send(JSON.stringify({ type: 'register', hostToken: s.directHostToken, ...s.identity, ...profile(), multiDesktop: true, password }));
   return password;
 });
-ipcMain.handle('favorite-save', (e, value) => { state(e); preferences.save(value); return preferences.list(); });
+ipcMain.handle('favorite-save', (e, value) => { state(e); preferences.save(value);computerChanged(); return preferences.list(); });
 ipcMain.handle('favorite-get', (e, id) => { state(e); const record=preferences.get(id);record.password=preferences.recall(record)||record.password;if(!record.serverKey && settings().serverKeys?.[record.endpoint]) record.serverKey=safeStorage.decryptString(Buffer.from(settings().serverKeys[record.endpoint],'base64')); return record; });
 ipcMain.handle('connections', (e, operation, value) => {
   state(e);
@@ -374,6 +390,7 @@ ipcMain.handle('connections', (e, operation, value) => {
   if(operation==='recall')return preferences.recall(value);
   if(operation==='attempt')return preferences.attempt(value);
   if(operation==='connected')return preferences.connected(value);
+  if(operation==='resolve')return preferences.decorate(value.peer,value.route);
   if(operation==='remember')return preferences.remember(value);
   if(operation==='clear')return preferences.clearHistory();
   if(operation==='save'){preferences.saveHistory(value);return preferences.list();}
@@ -455,7 +472,7 @@ ipcMain.handle('direct-listener', async e => {
       });
       const addresses = Object.values(require('node:os').networkInterfaces()).flat().filter(n => n.family === 'IPv4' && !n.internal).map(n => `${n.address}:${port}`);
       s.discovery = new (require('./discovery.cjs').Discovery)({ identity: s.identity, name: profile().name, port, ...(smoke ? { discoveryPort: 0, networkInterfaces: () => ({}), neighbors: false } : {}) }); s.discovery.status = profile().status;
-      s.discovery.on('change', value => { if (!s.win.isDestroyed()) s.win.webContents.send('discovery', value); });
+      s.discovery.on('change',value=>{for(const peer of value.peers)rememberComputer(peer);if(!s.win.isDestroyed())s.win.webContents.send('discovery',decorateDiscovery(value));});
       s.discovery.start().catch(() => {});
       return s.directInfo = { addresses, port, password: credentials.password, fixedPassword: credentials.fixedPassword };
     } catch (error) { s.directSocket?.close(); await service.close(); s.directService = null; s.directInfo = null; throw error; }
@@ -507,9 +524,9 @@ ipcMain.handle('select-source', async (e, id) => {
   s.captureAllowed = false;
   return true;
 });
-ipcMain.handle('approve', async (e, name, fixedPassword) => {
+ipcMain.handle('approve', async (e, name, fixedPassword, peer) => {
   const s = state(e);
-  s.viewerName = String(name).slice(0, 60);
+  s.viewerName=preferences.decorate({...peer,name:String(name).slice(0,60)}).displayName;name=s.viewerName;
   s.overlayHidden=false;
   if (smoke) { s.captureAllowed = true; s.control = true; return { accepted: true, control: true }; }
   const fa = s.language === 'fa';
@@ -613,7 +630,7 @@ ipcMain.handle('exchange', async (e, operation, value) => {
 
 app.whenReady().then(async () => {
   smokeLog('app ready');
-  if (smoke) saveSettings({ favorites: [], connectionHistory:[], connectionPasswords:{}, rememberPasswords:true, fixedPassword: null, language: 'en' });
+  if (smoke) saveSettings({ favorites: [], connectionHistory:[], connectionPasswords:{},computerCards:{}, rememberPasswords:true, fixedPassword: null, language: 'en' });
   if(smoke&&(process.argv.includes('--chat-notification-smoke')||process.argv.includes('--connection-ui-smoke')))saveSettings({internetEnabled:false,autoAcceptFiles:true});
   // Electron 44 checks `media` as part of desktop capture. The only media API in
   // our trusted, CSP-locked renderer is getDisplayMedia; its handler denies audio.
@@ -653,7 +670,8 @@ app.on('will-quit', () => {
   for (const s of states.values()) { release(s); s.helper?.stdin.end(); }
   localServer?.close();
 });
-app.on('second-instance', (_event, args) => {
+app.on('second-instance', (_event,args)=>{
+  if(args.includes('--quit-if-background')){if(!BrowserWindow.getAllWindows().some(win=>win.isVisible())){quitting=true;app.quit();}return;}
   const s = [...states.values()][0];
   const id = args.find(value => /^--connect-saved=[a-f0-9-]{36}$/.test(value))?.split('=')[1];
   if (s) { showMain(s); if (id) s.win.webContents.send('connect-favorite', id); }

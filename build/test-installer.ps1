@@ -106,6 +106,34 @@ try {
     } finally { Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue; $fixture = $null }
     Write-Output 'Running application returns 1618 without terminating the session.'
 
+    $verifiedDir=Join-Path $testRoot 'verified-background';New-Item -ItemType Directory -Path $verifiedDir|Out-Null
+    $verifiedExe=Join-Path $verifiedDir 'Shatoot Connect.exe'
+    Add-Type -ReferencedAssemblies 'System.Windows.Forms','System.Drawing' -TypeDefinition @'
+using System;using System.Reflection;using System.Runtime.InteropServices;using System.Windows.Forms;
+[assembly:AssemblyProduct("Shatoot Connect")][assembly:AssemblyInformationalVersion("0.14.2")]
+public class VerifiedSetupFixture {
+ [DllImport("user32.dll")]static extern bool ShowWindow(IntPtr window,int command);
+ [STAThread]public static void Main(string[] args){
+  if(args.Length==0){System.Threading.Thread.Sleep(120000);return;}
+  var form=new Form {Text="Shatoot Connect installer visibility fixture"};
+  form.Shown+=(sender,e)=>ShowWindow(form.Handle,5);Application.Run(form);
+ }
+}
+'@ -OutputAssembly $verifiedExe -OutputType WindowsApplication
+    $closer=Join-Path $workspace 'build/installer-close.ps1'
+    $fixture=Start-Process -FilePath $verifiedExe -ArgumentList 'visible' -WindowStyle Hidden -PassThru
+    try{
+        for($i=0;$i -lt 50;$i++){$fixture.Refresh();if($fixture.MainWindowHandle -ne 0){break};Start-Sleep -Milliseconds 100}
+        if($fixture.MainWindowHandle -eq 0){throw 'Visible installer fixture did not open.'}
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $closer -OnlyExecutable $verifiedExe
+        $fixture.Refresh();if($fixture.HasExited){throw 'Background closer terminated an open window.'}
+    }finally{Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue;$fixture=$null}
+    $fixture=Start-Process -FilePath $verifiedExe -WindowStyle Hidden -PassThru
+    try{
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $closer -OnlyExecutable $verifiedExe
+        if(!$fixture.WaitForExit(5000)){throw 'Verified background app was not closed.'}
+    }finally{Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue;$fixture=$null}
+    Write-Output 'Installer background closer preserves a visible product window and closes a verified hidden legacy process.'
     $profile = Join-Path ([Environment]::GetFolderPath('ApplicationData')) $package.name
     New-Item -ItemType Directory -Path $profile -Force | Out-Null
     $profileProbe = Join-Path $profile ('installer-preservation-' + [Guid]::NewGuid().ToString('N'))

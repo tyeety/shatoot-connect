@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const { ClientPreferences } = require('../desktop/preferences.cjs');
 function fixture() {
   let stored = {}; const secrets = new Map();
-  const options = { read: () => stored, write: patch => stored = { ...stored, ...patch },
+  const options = { read: () => structuredClone(stored), write: patch => stored = { ...stored, ...patch },
     encrypt: value => { const key = crypto.randomUUID(); secrets.set(key, value); return key; }, decrypt: key => secrets.get(key),
     validateEndpoint: endpoint => { if (!endpoint.startsWith('wss://')) throw Error('Invalid endpoint'); return endpoint; },
     validateDirect: address => { if (!/^192\.168\.\d+\.\d+(?::\d+)?$/.test(address)) throw Error('Invalid LAN IP'); return address; } };
@@ -67,4 +67,19 @@ test('recent connections deduplicate and can be saved directly without a separat
   assert.equal(p.history().length,1);assert.equal(p.history()[0].count,2);const id=p.saveHistory(p.history()[0].id);assert.equal(p.get(id).password,'remembered-secret');
   const addressOnly=p.save({address:'192.168.1.11'});assert.equal(p.get(addressOnly).password,'');assert.equal(p.get(addressOnly).name,'192.168.1.11');
   p.clearHistory();assert.equal(p.history().length,0);assert.equal(p.list().length,2);
+});
+
+test('local names and encrypted offline previews follow LAN/ID identity without changing the published profile',()=>{
+  const{preferences:p,storage}=fixture(),deviceId=crypto.randomUUID(),preview='data:image/jpeg;base64,YWJj';
+  p.save({address:'192.168.1.20',name:'دفتر',password:'secret'});
+  p.rememberComputer({preview},{address:'192.168.1.20:8788'});
+  p.rememberComputer({deviceId,name:'Amir',avatar:''},{address:'192.168.1.20'});
+  assert.equal(p.decorate({deviceId,name:'Amir'}).displayName,'دفتر');assert.equal(p.decorate({deviceId}).preview,preview);assert.ok(!JSON.stringify(storage()).includes(preview));
+  p.rememberComputer({deviceId,name:'Amir changed'},{address:'123456789',endpoint:'wss://one.example'});
+  p.renameComputer({deviceId},'حسابداری');p.save({address:'192.168.1.20',name:'حسابداری'});assert.equal(p.decorate({deviceId}).preview,preview);
+  assert.equal(p.decorate({deviceId,name:'Amir changed'}).name,'Amir changed');assert.equal(p.decorate({address:'123456789',endpoint:'wss://one.example'}).displayName,'حسابداری');assert.equal(p.list()[0].name,'حسابداری');
+  p.rememberComputer({deviceId,name:'New published name',avatar:''});assert.equal(p.decorate({deviceId}).displayName,'حسابداری');assert.equal(p.decorate({deviceId}).preview,preview);
+  assert.equal(p.decorate({address:'123456789',endpoint:'wss://another.example'}).preview,'');
+  p.renameComputer({deviceId},'');assert.equal(p.decorate({deviceId}).displayName,'New published name');
+  assert.throws(()=>p.rememberComputer({preview:'data:image/svg+xml;base64,YWJj'},{address:'192.168.1.20'}),/Invalid desktop preview/);
 });

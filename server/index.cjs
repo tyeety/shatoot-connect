@@ -120,7 +120,7 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         room.guest = ws; ws.roomId = room.id;
         if (room.host.registrationId) room.host.roomId = room.id;
         send(ws, { type: 'waiting' });
-        send(room.host, { type: 'join-request', fixedPassword: room.fixedPassword === true, name: typeof m.name === 'string' ? m.name.slice(0, 60) : 'دستگاه مهمان' });
+        send(room.host, { type: 'join-request', fixedPassword: room.fixedPassword === true, peer:{deviceId:ws.deviceId||m.deviceId},name: typeof m.name === 'string' ? m.name.slice(0, 60) : 'دستگاه مهمان' });
       } else if (m.type === 'accept' || m.type === 'reject') {
         const room = rooms.get(ws.registrationId || ws.roomId);
         if (room?.host !== ws || !room.guest || room.approved) return;
@@ -138,7 +138,7 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
           if (room.guest !== guest || rooms.get(room.id) !== room) return;
           room.approved = true;
           send(guest, { type: 'ice', ...config }); send(room.host, { type: 'ice', ...config });
-          send(guest, { type: 'accepted', control: m.control === true });
+          send(guest, { type:'accepted',peer:{...room.host.deviceProfile,deviceId:room.host.deviceId,id:room.id,name:room.host.deviceName},control:m.control===true });
           send(room.host, { type: 'peer-ready' });
         }
       } else if (m.type === 'signal') {

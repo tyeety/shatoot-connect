@@ -11,7 +11,7 @@ function desktopSessions({ rooms, send, ice, direct }) {
     if (!room.host.multiDesktop || [...sessions.values()].filter(s => s.host === room.host).length >= 7 || sessions.size >= 500) { send(ws, { type: 'error', message: 'The remote computer is busy.' }); return; }
     const id = crypto.randomUUID(), s = { host: room.host, guest: ws, approved: false };
     s.timer = setTimeout(() => end(id, 'Screen invitation timed out.'), 60000); s.timer.unref(); sessions.set(id,s); ws.desktopSession = id;
-    send(ws, { type: 'waiting' }); send(s.host, { type: 'desktop-invite', session: id, fixedPassword: room.fixedPassword === true, name: typeof m.name === 'string' ? m.name.slice(0,60) : 'Guest' });
+    send(ws, { type: 'waiting' }); send(s.host, { type: 'desktop-invite', session: id, peer:{deviceId:ws.deviceId||m.deviceId},fixedPassword: room.fixedPassword === true, name: typeof m.name === 'string' ? m.name.slice(0,60) : 'Guest' });
   }
   async function handle(ws,m) {
     if (ws.desktopSession && ['signal','end-session','leave','unregister'].includes(m.type)) {
@@ -23,7 +23,7 @@ function desktopSessions({ rooms, send, ice, direct }) {
     const s = sessions.get(m.session); if (!s || s.host !== ws) return true;
     if (m.type === 'desktop-accept' && !s.approved && !s.accepting) {
       s.accepting = true;
-      try { const config = await ice(); if (sessions.get(m.session) !== s) return true; clearTimeout(s.timer); s.approved = true; send(s.guest, { type: 'ice', ...config }); send(s.guest, { type: 'accepted', control: m.control === true }); send(s.host, { type: 'desktop-ready', session: m.session, ...config }); }
+      try { const config = await ice(); if (sessions.get(m.session) !== s) return true; clearTimeout(s.timer); s.approved = true; send(s.guest, { type: 'ice', ...config }); send(s.guest, { type:'accepted',peer:{...s.host.deviceProfile,deviceId:s.host.deviceId,name:s.host.deviceName,id:s.host.registrationId},control:m.control===true }); send(s.host, { type: 'desktop-ready', session: m.session, ...config }); }
       catch { end(m.session, 'Screen connection configuration failed.'); }
     } else if (m.type === 'desktop-signal' && s.approved && validSignal(m.data)) send(s.guest, { type: 'signal', data: m.data });
     else if (['desktop-reject','desktop-end'].includes(m.type)) end(m.session, 'The host ended the session.');

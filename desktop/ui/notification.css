@@ -1,2 +1,6 @@
 body{display:block;min-height:0;height:100vh;border:1px solid #9357c3;border-radius:12px;background:#21132f;overflow:hidden}.notice{padding:12px 16px;display:flex;flex-direction:column;height:100%;gap:8px}.notice header{border:0;height:auto;display:flex;align-items:center;gap:10px}.notice header img{width:28px;height:28px}.notice header b{font-size:14px}.notice h2{font-size:15px;line-height:1.6;margin:0;overflow-wrap:anywhere}.notice p{font-size:12px;color:#cdbada;white-space:pre-wrap;overflow:auto;flex:1;margin:0;line-height:1.5}#notice-actions{display:flex;gap:7px;justify-content:flex-end}.notice button{white-space:normal;font-size:12px;padding:6px 9px}
 html{background:transparent}body{opacity:1;transition:opacity .6s ease}body.fading{opacity:0}@media(prefers-reduced-motion:reduce){body{transition:none}}
+
+body{height:auto}.notice{height:auto;max-height:calc(100vh - 2px);overflow:auto;box-sizing:border-box}.notice p{flex:none;overflow:visible}.notice p:empty{display:none}#notice-actions{flex-wrap:wrap;flex-shrink:0}.notice header b{overflow-wrap:anywhere;min-width:0}
+
+.notice{width:max-content;min-width:min(280px,calc(100vw - 2px));max-width:calc(100vw - 2px)}

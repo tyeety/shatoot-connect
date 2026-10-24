@@ -4,13 +4,13 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)
 
-## Version 0.14.2
+## Version 0.15.0
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.14.2-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.14.2-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.14.2-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.15.0-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.15.0-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.15.0-win-x64.zip` | Coordinator, runtime and service manager |
 
 Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. Remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
@@ -27,14 +27,14 @@ Builds go to `release/`. Binaries belong in GitHub Release assets, not source co
 
 Windows 10/11 or Windows Server 2016+ x64 is required. Run Setup, select English/Persian, current-user/all-user scope and a dedicated local **Shatoot Connect** folder. Current-user installation normally needs no administrator access; all-user installation requests elevation. Desktop/Start menu shortcuts and a Windows Installed apps entry are created.
 
-Setup checks the OS/architecture, destination, write access, destination/TEMP disk space, accidental downgrades and running application processes. It rejects unrelated nonempty directories, network destinations and a junction at the final folder. Close the app before upgrading; Setup does not terminate active sessions. The payload uses forced installer CRC, checked 7z extraction and SHA-256 verification of every packaged file before successful registration. Locked-file upgrade/removal errors stop the operation and attempt to restore the previous files.
+Setup checks the OS/architecture, destination, write access, destination/TEMP disk space, accidental downgrades and running application processes. It rejects unrelated nonempty directories, network destinations and a junction at the final folder. Setup closes verified background instances in the same Windows account/session when no product window is visible. Visible app/chat windows must be closed first. Current versions exit gracefully; older background versions without that command are closed after a second visibility check. This can end background connections/transfers. Unknown same-name programs and other users/sessions are preserved. The payload uses forced installer CRC, checked 7z extraction and SHA-256 verification of every packaged file before successful registration. Locked-file upgrade/removal errors stop the operation and attempt to restore the previous files.
 
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.14.2-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.14.2-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.14.2-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.15.0-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.15.0-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.15.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.
@@ -68,6 +68,10 @@ Independent guest input uses window messages without moving the physical host po
 Keyboard layouts synchronize in both directions with versioned conflict resolution and restoration when control ends. Focus the remote video to capture supported shortcuts; leaving it releases capture. `Ctrl+Shift+F12` disconnects locally. Interface language is independent of keyboard language. Elevated windows, UAC/secure desktops, `Ctrl+Alt+Delete`, pre-login/locked desktops, audio and arbitrary raw hardware input are not supported.
 
 Outgoing desktop connections show **Cancel connection** throughout validation, approval and video negotiation. The Internet settings and chat connection form have their own cancel controls. Cancelling a pending chat leaves established chats intact.
+
+Local nicknames are shared between saved/recent/nearby computer cards and chat lists, titles, message history and group-member labels. The name button in a private chat changes your local nickname; it does not change the remote profile published to other people. The self-profile chip opens your own display-name/photo settings. Chat lists always show a profile picture or default icon.
+
+Computer cards retain a small JPEG thumbnail of the last desktop you received in an approved video session, with a dark purple readability overlay. The encrypted local cache follows known device identities across LAN/ID routes and remains visible offline. It refreshes once per minute and on disconnect; it never captures an unconnected peer's desktop. A device not previously viewed has no desktop background. These cached images stay on your Windows profile and are not included in discovery/chat profile broadcasts.
 
 ## Private chat and history
 

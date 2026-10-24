@@ -4,6 +4,10 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   let engine, selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
   let editingGroup,connecting=false,connectSequence=0;
   const progress = new Map();
+  const displayName=peer=>peer?.displayName||peer?.name||'';
+  const previewCard=(element,peer)=>{element.classList.add('computer-preview');if(peer.preview){const image=document.createElement('img');image.className='desktop-preview';image.alt='';image.src=peer.preview;image.draggable=false;element.prepend(image);}};
+  const own=document.createElement('button');own.id='chat-own-profile';own.type='button';own.className='small-button';own.onclick=()=>api.editProfile();document.querySelector('.chat-sidebar').prepend(own);
+
   const fileSetting=document.createElement('label');fileSetting.className='chat-file-setting';fileSetting.hidden=true;
   const fileCaption=document.createElement('span');fileCaption.textContent=tr('Incoming files');const filePolicy=document.createElement('select');filePolicy.id='chat-file-policy';filePolicy.setAttribute('aria-label',tr('Incoming files'));
   for(const[value,text]of [['inherit','Use global setting'],['accept','Receive automatically'],['ask','Ask before receiving files']]){const option=document.createElement('option');option.value=value;option.textContent=tr(text);filePolicy.append(option);}fileSetting.append(fileCaption,filePolicy);document.querySelector('.chat-thread-heading').after(fileSetting);
@@ -43,7 +47,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     for (const row of rows) {
       const item = document.createElement('article'); item.className = 'chat-message'; const own = row.sender === self.deviceId;
       if (own) item.classList.add('own'); if (own && row.pending.length) item.classList.add('pending');
-      const name = document.createElement('header'); name.textContent = row.name;
+      const name = document.createElement('header'); name.textContent=row.sender===self.deviceId?self.name:row.displayName||displayName(contact(row.sender))||row.name;
       const text = document.createElement('p'); text.dir = 'auto'; text.textContent = row.text;
       const meta = document.createElement('small'); const date = new Date(row.at); meta.textContent = new Intl.DateTimeFormat(window.i18n.language === 'fa' ? 'fa-IR' : 'en', { dateStyle: 'short', timeStyle: 'short' }).format(date);
       if (own) meta.textContent += ' · ' + tr(row.pending.length ? (row.kind === 'file' ? 'Not delivered to all recipients' : 'Queued') : row.status === 'delivered' ? 'Delivered' : 'Sent');
@@ -56,13 +60,15 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   function render(refreshHistory = false) {
     if (!engine) return;
     const pending=connecting||(engine.connectAttempts?.size||engine.pendingConnections||0)>0;cancelConnect.hidden=!pending;$('chat-connect').disabled=pending;$('chat-address').disabled=pending;
+    own.replaceChildren();const ownImage=document.createElement('img');ownImage.src=self.avatar||'assets/app-icon.png';ownImage.className='profile-avatar';ownImage.alt='';const ownName=document.createElement('span');ownName.textContent=self.name;own.append(ownImage,ownName);
     const list = $('chat-conversations'); list.replaceChildren();
-    const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar: c.avatar, name: c.name, detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, name: g.name, status: 'Group' }))];
-    for (const item of items) { const b = document.createElement('button'); b.className = 'chat-conversation'; b.type = 'button'; b.setAttribute('aria-pressed', String(item.id === selected)); const name = document.createElement('b'), status = document.createElement('small'); name.textContent = item.name; status.textContent = tr(item.status) + (item.detail ? ' · ' + item.detail : ''); if (item.avatar) { const image = document.createElement('img'); image.src = item.avatar; image.className = 'profile-avatar'; image.alt = ''; b.append(image); } b.append(name, status); b.onclick = run(() => select(item.id)); list.append(b); }
+    const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar:c.avatar,preview:c.preview,name:displayName(c),detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, name: g.name, status: 'Group' }))];
+    for (const item of items) { const b = document.createElement('button'); b.className = 'chat-conversation'; b.type = 'button'; b.setAttribute('aria-pressed', String(item.id === selected)); const name = document.createElement('b'), status = document.createElement('small'); name.textContent = item.name; status.textContent = tr(item.status) + (item.detail ? ' · ' + item.detail : ''); { const image = document.createElement('img'); image.src=item.avatar||'assets/app-icon.png'; image.className = 'profile-avatar'; image.alt = ''; b.append(image); } b.append(name,status);previewCard(b,item); b.onclick = run(() => select(item.id)); list.append(b); }
     const group = selected.startsWith('g:') && engine.group(selected.slice(2)), peer = selected.startsWith('p:') && contact(selected.slice(2));
+    if($('chat-rename'))$('chat-rename').hidden=!selected.startsWith('p:');
     $('chat-edit-group').hidden=!group||group.owner!==self.deviceId;
-    $('chat-title').textContent = group?.name || peer?.name || tr('Select a conversation');
-    $('chat-peer-status').textContent = group ? `${tr(group.owner === self.deviceId || online(group.owner) ? 'Group owner online' : 'Group owner offline')} · ${group.members.map(m => m.name).join(', ')}` : peer ? tr(online(peer.deviceId) ? 'Connected' : 'Offline') : '';
+    $('chat-title').textContent = group?.name || displayName(peer) || tr('Select a conversation');
+    $('chat-peer-status').textContent = group ? `${tr(group.owner === self.deviceId || online(group.owner) ? 'Group owner online' : 'Group owner offline')} · ${group.members.map(m => displayName(contact(m.deviceId))||displayName(m)).join(', ')}` : peer ? tr(online(peer.deviceId) ? 'Connected' : 'Offline') : '';
     $('chat-text').disabled = !selected; $('chat-send').disabled = !selected || busy; $('chat-send-files').disabled = !selected || busy;
     $('chat-reconnect').hidden = !peer || online(peer.deviceId); $('chat-disconnect').hidden = !peer || !online(peer.deviceId);
     $('chat-progress').textContent = selected && progress.get(selected) || '';
@@ -77,8 +83,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     for (const peer of value.peers) {
       const card = document.createElement('div'); card.className = 'network-peer';
       if (peer.avatar) { const avatar = document.createElement('img'); avatar.className = 'profile-avatar'; avatar.src = peer.avatar; avatar.alt = ''; card.append(avatar); }
-      const info = document.createElement('div'); info.className = 'network-peer-info'; const name = document.createElement('b'), address = document.createElement('small'); name.textContent = peer.name; address.textContent = tr(peer.status || 'available') + ' · ' + peer.endpoints.join(' / '); info.append(name, address);
-      card.append(info, button('Start chat', () => start({ type: 'lan', address: peer.endpoints[0], deviceId: peer.deviceId, name: peer.name }), 'chat'), button('Connect to a computer', () => remote(peer.endpoints[0]), 'desktop_windows')); list.append(card);
+      const info = document.createElement('div'); info.className = 'network-peer-info'; const name = document.createElement('b'), address = document.createElement('small'); name.textContent=displayName(peer); address.textContent = tr(peer.status || 'available') + ' · ' + peer.endpoints.join(' / '); info.append(name, address);
+      previewCard(card,peer);card.append(info, button('Start chat', () => start({ type: 'lan', address: peer.endpoints[0], deviceId: peer.deviceId, name: peer.name }), 'chat'), button('Connect to a computer', () => remote(peer.endpoints[0]), 'desktop_windows')); list.append(card);
     }
     render();publish();
   }
@@ -101,12 +107,18 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('chat-send-files').onclick = run(() => files());
   $('messenger-dialog').ondragover = event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = selected ? 'copy' : 'none'; } };
   $('messenger-dialog').ondrop = run(async event => { if (!selected || !event.dataTransfer.files.length) return; await files('drop', [...event.dataTransfer.files]); });
+  const rename=button('Rename saved computer',async()=>{
+    const peer=contact(selected.slice(2));if(!peer)return;
+    let dialog=$('chat-name-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='chat-name-dialog';dialog.innerHTML='<form id="chat-name-form"><h2>Rename saved computer</h2><label for="chat-local-name">Computer nickname</label><input id="chat-local-name" maxlength="60"><div class="inline-setting"><button type="submit" class="small-button">Save</button><button type="button" id="chat-name-cancel" class="small-button">Cancel</button></div><p id="chat-name-error" class="error"></p></form>';document.body.append(dialog);}
+    $('chat-local-name').value=peer.displayName||peer.name;dialog.showModal();$('chat-local-name').focus();$('chat-local-name').select();$('chat-name-cancel').onclick=()=>dialog.close();
+    $('chat-name-form').onsubmit=async event=>{event.preventDefault();try{await api.computerCard('rename',{peer:{...peer,...peer.route},name:$('chat-local-name').value});await engine.refresh();dialog.close();render(true);}catch(e){$('chat-name-error').textContent=e.message;}};
+  },'person');rename.id='chat-rename';document.querySelector('.chat-thread-heading').append(rename);
   const groupEditor=async existing=>{
     editingGroup=existing;const list = $('chat-group-members'); list.replaceChildren(); $('chat-group-error').textContent = ''; $('chat-group-name').value = existing?.name||'';
     for(const peer of discovery.peers)if(!engine.catalog.contacts.some(c=>c.deviceId===peer.deviceId))await api.collaboration('contact',{peer:{deviceId:peer.deviceId,name:peer.name},route:{type:'lan',address:peer.endpoints[0]}});
     await engine.refresh();
     const candidates=new Map([...engine.catalog.contacts,...engine.connected(),...(existing?.members||[])].filter(p=>p.deviceId!==self.deviceId).map(p=>[p.deviceId,p]));
-    for (const peer of candidates.values()) { const label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span'); input.type = 'checkbox'; input.value = peer.deviceId;input.checked=!!existing?.members.some(m=>m.deviceId===peer.deviceId);text.textContent = peer.name; label.append(input, text); list.append(label); }
+    for (const peer of candidates.values()) { const label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span'); input.type = 'checkbox'; input.value = peer.deviceId;input.checked=!!existing?.members.some(m=>m.deviceId===peer.deviceId);text.textContent=displayName(peer); label.append(input, text); list.append(label); }
     $('chat-group-dialog').showModal();
   };
   $('chat-new-group').onclick=run(()=>groupEditor());$('chat-edit-group').onclick=run(()=>groupEditor(engine.group(selected.slice(2))));

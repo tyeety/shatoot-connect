@@ -26,6 +26,7 @@ jobs:
       - run: npm run test:updater
       - run: npm run dist -- --publish never
       - run: npm run test:connection-ui
+      - run: npm run test:chat-ui
       - run: npm run test:packaged -- --ui
       - run: ./native/publish/ShatootConnect.Input.exe --self-test
       - run: npm run build:server-manager

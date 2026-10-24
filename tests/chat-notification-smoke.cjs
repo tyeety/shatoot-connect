@@ -36,6 +36,28 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await until(()=>[...notices.entries.values()].some(r=>r.owner===host&&r.data.message.includes('Files received')));clear();
   await run(chat,`messenger.select('${conversation}').then(()=>{window.i18n.setLanguage('fa');return true})`);await pause(100);fs.writeFileSync(path.join(artifacts,'chat-file-settings-fa.png'),(await chat.webContents.capturePage()).toPNG());
   const faded=notices.toast(host,'Passive fade test',{timeout:800});await until(()=>notices.entries.size>0);const fading=[...notices.entries.values()][0];await until(()=>fading.fading);await until(()=>run(fading.win,"document.body.classList.contains('fading')"));await faded;
+  await run(chat,`messenger.select('${conversation}').then(()=>true)`);
+  await run(viewer,"document.querySelector('#profile-name').value='Published Amir';document.querySelector('#profile-save').click();true");
+  await until(()=>run(host,`collaboration.catalog.contacts.some(c=>c.deviceId==='${peer.identity.deviceId}'&&c.name==='Published Amir')`));
+  await run(chat,"document.querySelector('#chat-rename').click();true");await until(()=>run(chat,"document.querySelector('#chat-name-dialog')?.open"));
+  await run(chat,"document.querySelector('#chat-local-name').value='دفتر حسابداری';document.querySelector('#chat-name-form').requestSubmit();true");
+  await until(()=>run(chat,"document.querySelector('#chat-title').textContent==='دفتر حسابداری'"));
+  if(!await run(viewer,"collaboration.self.name==='Published Amir'"))throw Error('Local nickname changed the published profile');
+  await run(host,`(async()=>{remoteComputer={deviceId:'${peer.identity.deviceId}',name:'Published Amir'};connectionAttempt={address:'127.0.0.1:${peer.directInfo.port}',endpoint:''};role='viewer';api.desktopViewing(true);window.previewSource=document.createElement('canvas');previewSource.width=960;previewSource.height=540;const c=previewSource.getContext('2d');c.fillStyle='#317b78';c.fillRect(0,0,960,540);c.fillStyle='#c088ec';c.fillRect(200,100,500,300);document.querySelector('#remote-video').srcObject=previewSource.captureStream(1);await document.querySelector('#remote-video').play();saveDesktopPreview();return true})()`);
+  await until(()=>run(chat,"!!document.querySelector('.chat-conversation .desktop-preview')"));
+  await run(host,`api.favoriteSave({address:'127.0.0.1:${peer.directInfo.port}',name:'دفتر حسابداری'}).then(renderFavorites)`);
+  await until(()=>run(host,"!!document.querySelector('.favorite-row .desktop-preview')"));
+  await run(host,"role='idle';api.desktopViewing(false);for(const track of document.querySelector('#remote-video').srcObject.getTracks())track.stop();document.querySelector('#remote-video').srcObject=null;updateControls();true");
+  await run(host,`collaboration.close(collaboration.peer('${peer.identity.deviceId}'));true`);await until(()=>run(chat,"document.querySelector('#chat-peer-status').textContent===window.i18n.translate('Offline')"));
+  if(!await run(chat,"!!document.querySelector('.chat-conversation .desktop-preview') && !!document.querySelector('.chat-conversation .profile-avatar')"))throw Error('Offline preview/avatar disappeared');
+  for(const language of ['en','fa']){
+    chat.setSize(680,520);await run(chat,`window.i18n.setLanguage('${language}');true`);await pause(150);
+    if(!await run(chat,"(()=>{const group=document.querySelector('#chat-new-group').getBoundingClientRect(),list=document.querySelector('#chat-conversations').getBoundingClientRect(),form=document.querySelector('#chat-connect-form').getBoundingClientRect();return group.top>=form.bottom&&list.top>=group.bottom&&list.bottom<=innerHeight&&document.querySelector('.chat-conversation .profile-avatar').getBoundingClientRect().width>20})()"))throw Error('Chat sidebar overlaps/clips in '+language);
+    fs.writeFileSync(path.join(artifacts,`cards-${language}.png`),(await chat.webContents.capturePage()).toPNG());
+  }
+  clear();const short=notices.toast(host,'Saved');await until(()=>notices.entries.size>0);const shortNotice=[...notices.entries.values()][0];await until(()=>run(shortNotice.win,"!!document.querySelector('#notice-hide')"));await until(()=>shortNotice.win.getBounds().height<230);const shortHeight=shortNotice.win.getBounds().height;if(shortNotice.win.getBounds().width>=420)throw Error('Short notification did not compact its width');fs.writeFileSync(path.join(artifacts,'notice-compact.png'),(await shortNotice.win.webContents.capturePage()).toPNG());shortNotice.finish(0);await short;
+  const long=notices.toast(host,'A longer notification',{detail:'One\nTwo\nThree\nFour\nFive\nSix'});await until(()=>notices.entries.size>0);const longNotice=[...notices.entries.values()][0];await until(()=>run(longNotice.win,"!!document.querySelector('#notice-hide')"));await until(()=>longNotice.win.getBounds().height>shortHeight);fs.writeFileSync(path.join(artifacts,'notice-content.png'),(await longNotice.win.webContents.capturePage()).toPNG());longNotice.finish(0);await long;
+  log('Private nicknames preserve the remote published name; cached desktop preview/avatar remain offline; narrow English/Persian chat layout and content-sized notices passed');
   if(owner.captureAllowed||owner.control)throw new Error('Chat file handling granted desktop control');
   log('Different selected chat still notifies; passive notice fades; per-chat settings work in the separate English/Persian chat window');
   console.log('SHATOOTCONNECT_CHAT_NOTIFICATION_SMOKE passed');app.quit();

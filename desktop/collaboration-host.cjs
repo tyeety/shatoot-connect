@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { ChatStore } = require('./chat-store.cjs');
 const { Transfers } = require('./transfers.cjs');
 const { UUID } = require('./discovery.cjs');
-function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, received = () => {} }) {
+function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {} }) {
   function store(s) {
     if (!s.identity) throw new Error('The device is not initialized.');
     return s.chatStore ||= new ChatStore({ file: path.join(app.getPath('userData'), `chat-${s.identity.deviceId}.dat`), self: s.identity.deviceId,
@@ -14,14 +14,14 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
   function grant(s, id) { const value = s.chatGrants?.get(id); if (!value) throw new Error('Chat permission is required.'); return value; }
   ipcMain.handle('collaboration', async (event, op, value = {}) => {
     const s = state(event), history = store(s);
-    if (op === 'list') return history.list();
-    if (op === 'history') return history.history(value);
+    if(op==='list'){const list=history.list();return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
+    if(op==='history')return history.history(value).map(m=>({...m,displayName:decorateComputer({deviceId:m.sender,name:m.name}).displayName||m.name}));
     if (op === 'file-policy') return history.filePolicy(value.conversation,value.mode);
     if (op === 'pending') return history.pending(value.peer);
     if (op === 'contact') {
       const route = value.route;
       if (route && (typeof route !== 'object' || !['lan', 'id'].includes(route.type) || typeof route.address !== 'string' || route.address.length > 300 || (route.endpoint && (typeof route.endpoint !== 'string' || route.endpoint.length > 500)))) throw new Error('Invalid contact address.');
-      return history.contact(value.peer, route);
+      rememberComputer(value.peer,route);return history.contact(value.peer, route);
     }
     if (op === 'group') return history.group(value);
     if (op === 'approve-group') {
@@ -29,7 +29,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
       if (!UUID.test(group?.id) || group.owner !== g.peer.deviceId || typeof group.name !== 'string' || group.name.length > 60 || !Array.isArray(group.members) || group.members.some(m => !UUID.test(m.deviceId) || typeof m.name !== 'string' || m.name.length > 60)) throw new Error('Invalid group invitation.');
       if (s.chatPrompt) return false; s.chatPrompt = true;
       try { const fa = s.language === 'fa'; const result = smoke ? { response: 1 } : await dialog.showMessageBox(s.chatWindow || s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'پیوستن به گروه'] : ['Decline', 'Join group'], defaultId: 0, cancelId: 0,
-        message: fa ? `پیوستن به گروه ${group.name}؟` : `Join ${group.name}?`, detail: `${g.peer.name}\n${group.members.slice(0,10).map(m => m.name).join(', ')}` }); return result.response === 1; }
+        message: fa ? `پیوستن به گروه ${group.name}؟` : `Join ${group.name}?`, detail: `${decorateComputer(g.peer).displayName||g.peer.name}\n${group.members.slice(0,10).map(m => m.name).join(', ')}` }); return result.response === 1; }
       finally { s.chatPrompt = false; }
     }
     if (op === 'append') return history.append(value.message, value.outgoing === true);
@@ -43,7 +43,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
         try {
           const fa = s.language === 'fa';
           const result = smoke ? { response: 1 } : await dialog.showMessageBox(s.chatWindow || s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'پذیرش چت'] : ['Decline', 'Accept chat'], defaultId: 0, cancelId: 0,
-            message: fa ? `${value.peer.name} درخواست گفت‌وگو دارد.` : `${value.peer.name} wants to chat.`,
+            message: fa ? `${decorateComputer(value.peer).displayName||value.peer.name} درخواست گفت‌وگو دارد.` : `${decorateComputer(value.peer).displayName||value.peer.name} wants to chat.`,
             detail: fa ? 'این اجازه فقط برای چت است. دریافت فایل از تنظیمات سراسری یا همین چت پیروی می‌کند؛ دسترسی به صفحه، موس یا کیبورد داده نمی‌شود.' : 'Chat permission only. File reception follows global or per-chat settings. This does not share your screen, mouse or keyboard.' });
           if (result.response !== 1) return false;
         } finally { s.chatPrompt = false; }
@@ -82,7 +82,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
         const fa = s.language === 'fa';
         const policy=history.filePolicy(conversation),accept=policy==='accept'||(policy==='inherit'&&settings().autoAcceptFiles!==false);
         const result = smoke || accept ? { response: 1 } : await dialog.showMessageBox(g.promptOwner, { type: 'question', priority:`file:${session}`, title: 'Shatoot Connect', buttons: fa ? ['رد', 'دریافت فایل‌ها'] : ['Decline', 'Receive files'], defaultId: 0, cancelId: 0,
-          message: fa ? `دریافت ${count} فایل از ${g.peer.name}؟` : `Receive ${count} files from ${g.peer.name}?`,
+          message: fa ? `دریافت ${count} فایل از ${decorateComputer(g.peer).displayName||g.peer.name}؟` : `Receive ${count} files from ${decorateComputer(g.peer).displayName||g.peer.name}?`,
           detail: `${Math.ceil(bytes / 1024)} KB\n${value.entries.slice(0, 6).map(e => typeof e.name === 'string' ? e.name.slice(0, 150) : '').join('\n')}\nDownloads` });
         if (result.response !== 1) throw new Error('File offer declined.');
         if(grant(s,session)!==g)throw new Error('Chat permission is required.');

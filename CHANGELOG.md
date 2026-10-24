@@ -13,6 +13,22 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.15.0 — 2026-10-24
+
+### Added
+
+- Shared private computer nicknames across saved computers, recent connections, nearby cards, chat lists/titles/history/group members and file notices. Rename a private chat contact with its name button; remote profile updates preserve the local nickname, and nicknames are not sent as the other person's published name.
+- Visible self-profile chips in the main and chat windows open Profile settings. A chosen display name and photo propagate to peers; chat lists always render a profile photo or a default icon.
+- Last-received desktop thumbnails behind saved/recent/nearby/chat cards with a dark purple overlay. Thumbnails refresh during an authorized received video session and at disconnect, remain available offline, are bounded and encrypted with Windows DPAPI, and follow known LAN/ID device identities. Devices never viewed have no desktop thumbnail; there is no background remote-screen capture.
+- Installer background-app closing for verified Shatoot Connect processes in the same Windows account/session. Current clients exit gracefully through a background-exit command; older clients without that command are closed only after verifying no visible windows. Visible application/chat windows and unknown same-name programs block installation with the existing Retry/1618 behavior.
+
+### Fixed
+
+- Notifications measure their rendered text/buttons before appearing and use only the required width/height, bounded by available screen space. The common priority queue reflows mixed-height notices without overlap; queued-window events are ignored safely after removal.
+- The chat sidebar now separates fixed connection/group/profile controls from a scrolling contact list. Profile pictures align with names, narrow English/Persian layouts remain usable and cards no longer shrink into overlapping rows.
+- Cached settings and decoded thumbnails avoid repeated disk reads/decryption in the live input/presence path. Preview capture uses a small JPEG, runs at most once per minute plus connection/disconnection, and does not transmit screenshots through discovery or chat.
+- Extended Windows/UI tests cover nickname privacy, profile changes, persistent offline thumbnails, avatar rendering, compact/long notices, narrow bilingual layouts and visible-versus-hidden installer process handling.
+
 ## 0.14.2 — 2026-10-24
 
 ### Added

@@ -36,7 +36,7 @@ test('chat signaling requires independent consent, rejects forged relays, and le
   const crypto = require('node:crypto'), { client, service } = await fixture(t, { iceServers: [] });
   async function registered(name) { const c = await client(); c.deviceId = crypto.randomUUID(); c.send({ type: 'register', deviceId: c.deviceId, deviceSecret: crypto.randomBytes(32).toString('base64url'), name }); c.identity = await c.next('registered'); return c; }
   const a = await registered('A'), b = await registered('B'), stranger = await registered('C');
-  a.send({ type: 'join', id: b.identity.id, password: b.identity.password }); await b.next('join-request'); b.send({ type: 'accept', control: true }); await a.next('accepted'); await b.next('peer-ready');
+  a.send({ type: 'join', id: b.identity.id, password: b.identity.password }); await b.next('join-request'); b.send({ type: 'accept', control: true }); const accepted=await a.next('accepted');assert.equal(accepted.peer.deviceId,b.deviceId);assert.equal(accepted.peer.name,'B');await b.next('peer-ready');
   const session = crypto.randomUUID(), data = { description: { type: 'offer', sdp: 'chat-sdp' } };
   a.send({ type: 'collab-request', session, target: b.identity.id }); const invite = await b.next('collab-invite'); assert.equal(invite.peer.deviceId, a.deviceId);
   a.send({ type: 'collab-signal', session, data }); stranger.send({ type: 'collab-accept', session });

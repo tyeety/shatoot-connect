@@ -8,7 +8,7 @@ function fixture(t){
   const clock=ms=>{const end=time+ms;for(;;){const item=[...timersMap].sort((a,b)=>a[1].at-b[1].at).find(([,r])=>r.at<=end);if(!item)break;const[id,r]=item;time=r.at;if(r.interval)r.at+=r.interval;else timersMap.delete(id);r.fn();}time=end;};
   class Window extends EventEmitter{
     constructor(options={}){super();this.bounds={x:0,y:0,width:options.width||320,height:options.height||76};this.messages=[];this.webContents=new EventEmitter();this.webContents.id=++nextWindow;this.webContents.mainFrame={};this.webContents.setWindowOpenHandler=()=>{};this.webContents.send=(...args)=>this.messages.push(args);}
-    isDestroyed(){return!!this.destroyed}isVisible(){return!!this.visible}getBounds(){return{...this.bounds}}setPosition(x,y){Object.assign(this.bounds,{x,y})}setContentProtection(){}setAlwaysOnTop(){}showInactive(){this.visible=true;this.emit('show')}destroy(){this.destroyed=true;this.visible=false;this.emit('closed')}loadFile(){queueMicrotask(()=>{if(!this.destroyed)this.emit('ready-to-show')});return Promise.resolve()}
+    isDestroyed(){return!!this.destroyed}isVisible(){return!!this.visible}getBounds(){return{...this.bounds}}setPosition(x,y){Object.assign(this.bounds,{x,y})}setBounds(bounds){Object.assign(this.bounds,bounds)}setSize(width,height){Object.assign(this.bounds,{width,height})}setContentProtection(){}setAlwaysOnTop(){}showInactive(){this.visible=true;this.emit('show')}destroy(){this.destroyed=true;this.visible=false;this.emit('closed')}loadFile(){queueMicrotask(()=>{if(!this.destroyed){this.emit('ready-to-show');listeners.get('notice-size')?.({sender:this.webContents,senderFrame:this.webContents.mainFrame},this.bounds.height);}});return Promise.resolve()}
   }
   const screen=new EventEmitter();screen.area={x:-1920,y:-100,width:1920,height:1080};screen.getPrimaryDisplay=()=>({workArea:screen.area});
   const owner=new Window(),api=createNotifications({BrowserWindow:Window,ipcMain:{handle:(n,f)=>handlers.set(n,f),on:(n,f)=>listeners.set(n,f)},screen,activity:()=>active,now:()=>time,timers});t.after(()=>api.close());
@@ -36,4 +36,12 @@ test('critical expiry and cancellation never accept requests; host panels reserv
   const promises=Array.from({length:5},()=>f.api.showMessageBox(f.owner,{type:'question',priority:'critical',buttons:['Reject','Allow']}));await f.ready();f.api.cancelFor(f.owner,'critical');assert.ok((await Promise.all(promises)).every(r=>r.response===0));await f.ready();
   const question=f.api.showMessageBox(f.owner,{type:'question',buttons:['Reject','Allow']});f.active(false);await f.ready();f.clock(60000);assert.equal((await question).response,0);
   panel.destroy();await f.ready();const record=[...f.api.entries.values()][0];assert.throws(()=>f.listeners.get('notice-hide')({sender:record.win.webContents,senderFrame:{}}),/Unauthorized/);f.hide(record);await toast;
+});
+
+test('measured notification heights compact the stack and a tall critical request preempts short passive notices',async t=>{
+  const f=fixture(t);f.screen.area.height=560;const a=f.api.toast(f.owner,'Short'),b=f.api.toast(f.owner,'Short 2');await f.ready();
+  for(const record of f.api.entries.values())f.listeners.get('notice-size')(f.event(record),110);
+  const c=f.api.toast(f.owner,'Short 3');await f.ready();for(const record of f.api.entries.values())f.listeners.get('notice-size')(f.event(record),110);assert.equal(f.api.entries.size,3);f.disjoint();
+  const critical=f.api.showMessageBox(f.owner,{type:'question',priority:'critical',buttons:['Reject','Allow']});await f.ready();const record=[...f.api.entries.values()].find(r=>r.data.urgent);assert.ok(record);f.listeners.get('notice-size')(f.event(record),450);f.disjoint();assert.ok(f.api.entries.size<=2);f.answer(record,0);await critical;
+  while(f.api.entries.size){for(const r of [...f.api.entries.values()])f.hide(r);await f.ready()}await Promise.all([a,b,c]);
 });

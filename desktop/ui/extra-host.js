@@ -45,5 +45,5 @@
       else if (data.candidate) { if (pc.remoteDescription) await pc.addIceCandidate(data.candidate); else candidates.push(data.candidate); }
     }
   }).catch(stop); });
-  (async () => { config = await api.hostInit(); profile = config.lan ? 'lan' : config.profile; const sources = await api.sources(); await api.selectSource(config.source || sources[0]?.id); const result = await api.approve(config.invitation.name,config.invitation.fixedPassword === true); if (!result.accepted) { send({type:'desktop-reject'}); return; } allowed = result.control; await api.capture(); send({type:'desktop-accept',control:allowed}); })().catch(() => send({type:'desktop-reject'}));
+  (async () => { config = await api.hostInit(); profile = config.lan ? 'lan' : config.profile; const sources = await api.sources(); await api.selectSource(config.source || sources[0]?.id); const result = await api.approve(config.invitation.name,config.invitation.fixedPassword===true,config.invitation.peer); if (!result.accepted) { send({type:'desktop-reject'}); return; } allowed = result.control; await api.capture(); send({type:'desktop-accept',control:allowed}); })().catch(() => send({type:'desktop-reject'}));
 })();

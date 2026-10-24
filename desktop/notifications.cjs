@@ -5,34 +5,42 @@ function createNotifications({BrowserWindow,ipcMain,screen,language=()=> 'en',ac
   const width=420,height=230,gap=12,margin=16;
   let closed=false,pumping=false,lastTick=now(),sequence=0,listening=false;
   const rank=task=>task.data.priority==='critical'?0:task.data.urgent?1:2;
-  function entry(event){const record=entries.get(event.sender.id);if(!record||event.senderFrame!==event.sender.mainFrame)throw new Error('Unauthorized notification.');return record;}
-  ipcMain.handle('notice-info',event=>entry(event).data);
-  ipcMain.on('notice-answer',(event,index)=>{const record=entry(event);if(Number.isInteger(index)&&index>=0&&index<record.data.buttons.length)record.finish(index);});
-  ipcMain.on('notice-hide',event=>{const record=entry(event);if(!record.data.urgent)record.finish(record.cancel);});
-  ipcMain.on('notice-hover',(event,hovered)=>{const record=entry(event);record.hovered=hovered===true;if(record.hovered)stopFade(record);});
+  function entry(event){const record=entries.get(event.sender.id);if(!record)return null;if(event.senderFrame!==event.sender.mainFrame)throw new Error('Unauthorized notification.');return record;}
+  ipcMain.handle('notice-info',event=>entry(event)?.data);
+  ipcMain.on('notice-answer',(event,index)=>{const record=entry(event);if(!record)return;if(Number.isInteger(index)&&index>=0&&index<record.data.buttons.length)record.finish(index);});
+  ipcMain.on('notice-hide',event=>{const record=entry(event);if(!record)return;if(!record.data.urgent)record.finish(record.cancel);});
+  ipcMain.on('notice-size',(event,value)=>{
+    const record=entry(event);if(!record)return;const requested=typeof value==='number'?{height:value}:value;
+    if(!Number.isFinite(requested?.height))return;
+    const area=screen.getPrimaryDisplay().workArea,nextHeight=Math.max(90,Math.min(Math.ceil(requested.height),geometry().bottom-area.y-margin));
+    const nextWidth=Number.isFinite(requested.width)?Math.max(240,Math.min(width,Math.ceil(requested.width),area.width-2*margin)):record.width||width;
+    record.measured=true;if(record.height===nextHeight&&record.width===nextWidth){reveal(record);return;}record.height=nextHeight;record.width=nextWidth;pump();reveal(record);
+  });
+  ipcMain.on('notice-hover',(event,hovered)=>{const record=entry(event);if(!record)return;record.hovered=hovered===true;if(record.hovered)stopFade(record);});
   function geometry(){
     if(!listening){for(const event of displays)screen.on?.(event,pump);listening=true;}
     const area=screen.getPrimaryDisplay().workArea;let bottom=area.y+area.height-margin;
     for(const win of reserved.keys())if(!win.isDestroyed()&&win.isVisible()){const b=win.getBounds();if(b.x<area.x+area.width&&b.x+b.width>area.x+area.width-width-margin&&b.y<bottom&&b.y+b.height>area.y)bottom=Math.min(bottom,b.y-gap);}
-    bottom=Math.max(area.y+margin+height,bottom);
-    return{x:area.x+area.width-width-margin,bottom,capacity:Math.max(1,Math.min(3,Math.floor((bottom-area.y-margin+gap)/(height+gap))))};
+    bottom=Math.max(area.y+margin+90,bottom);
+    return{x:area.x+area.width-Math.min(width,area.width-2*margin)-margin,bottom};
   }
-  function position(){const{x,bottom}=geometry();let offset=0;for(const task of entries.values()){task.win.setPosition(x,bottom-height-offset);offset+=height+gap;}}
+  function position(){const{x,bottom}=geometry();let offset=0;for(const task of entries.values()){const taskWidth=Math.min(task.width||width,screen.getPrimaryDisplay().workArea.width-2*margin);const bounds={x:screen.getPrimaryDisplay().workArea.x+screen.getPrimaryDisplay().workArea.width-margin-taskWidth,y:bottom-(task.height||height)-offset,width:taskWidth,height:task.height||height};if(task.win.setBounds)task.win.setBounds(bounds);else task.win.setPosition(bounds.x,bounds.y);offset+=(task.height||height)+gap;}}
   function removeWindow(task){const win=task.win;task.win=null;task.visible=false;if(!win)return;entries.delete(win.webContents.id);if(!win.isDestroyed())win.destroy();}
   function stopFade(task){if(!task.fading)return;timers.clearTimeout(task.fadeTimer);task.fading=false;task.remaining=Math.max(2000,task.remaining);task.win?.webContents.send('notice-fade',false);}
   function finish(task,response){if(task.done)return;task.done=true;tasks.delete(task);timers.clearTimeout(task.deadline);timers.clearTimeout(task.fadeTimer);const index=waiting.indexOf(task);if(index>=0)waiting.splice(index,1);task.owner?.removeListener('closed',task.ownerClosed);removeWindow(task);task.resolve({response});pump();}
   function suspend(task){stopFade(task);removeWindow(task);waiting.push(task);}
-  function present(task){
-    const win=new BrowserWindow({width,height,show:false,frame:false,resizable:false,skipTaskbar:true,alwaysOnTop:true,transparent:true,backgroundColor:'#00000000',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false}});
+  function reveal(task){if(!task.ready||!task.measured||task.done||!task.win||task.visible)return;position();task.win.setAlwaysOnTop(true,'screen-saver');task.win.showInactive();task.visible=true;}
+  function present(task){task.ready=false;task.measured=false;
+    const win=new BrowserWindow({width:task.width||width,height:task.height||height,show:false,frame:false,resizable:false,skipTaskbar:true,alwaysOnTop:true,transparent:true,backgroundColor:'#00000000',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,backgroundThrottling:false}});
     task.win=win;entries.set(win.webContents.id,task);win.on('closed',()=>{if(task.win===win)task.finish(task.cancel);});win.setContentProtection(true);win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',event=>event.preventDefault());
-    win.once('ready-to-show',()=>{if(task.win!==win||task.done)return;position();win.setAlwaysOnTop(true,'screen-saver');win.showInactive();task.visible=true;});
+    win.once('ready-to-show',()=>{if(task.win!==win||task.done)return;task.ready=true;reveal(task);});
     win.loadFile(path.join(__dirname,'ui/notification.html')).catch(()=>task.finish(task.cancel));
   }
   function pump(){
     if(closed||pumping)return;pumping=true;
-    try{const capacity=geometry().capacity;while(entries.size>capacity)suspend([...entries.values()].at(-1));waiting.sort((a,b)=>rank(a)-rank(b)||a.sequence-b.sequence);
-      const last=[...entries.values()].sort((a,b)=>rank(b)-rank(a)).find(task=>waiting[0]&&rank(task)>rank(waiting[0]));if(entries.size>=capacity&&last)suspend(last);
-      waiting.sort((a,b)=>rank(a)-rank(b)||a.sequence-b.sequence);while(entries.size<capacity&&waiting.length)present(waiting.shift());position();
+    try{const g=geometry(),available=g.bottom-screen.getPrimaryDisplay().workArea.y-margin;for(const task of [...entries.values(),...waiting])if((task.height||height)>available)task.height=Math.max(90,available);const used=()=>[...entries.values()].reduce((n,t)=>n+(t.height||height)+gap,0);const capacity=3;while(entries.size>1&&(entries.size>capacity||used()-gap>available))suspend([...entries.values()].at(-1));waiting.sort((a,b)=>rank(a)-rank(b)||a.sequence-b.sequence);
+      const last=[...entries.values()].sort((a,b)=>rank(b)-rank(a)).find(task=>waiting[0]&&rank(task)>rank(waiting[0]));if((entries.size>=capacity||waiting[0]&&used()+(waiting[0].height||height)>available)&&last){suspend(last);waiting.sort((a,b)=>rank(a)-rank(b)||a.sequence-b.sequence);while(entries.size&&used()+(waiting[0]?.height||height)>available){const lower=[...entries.values()].find(t=>rank(t)>rank(waiting[0]));if(!lower)break;suspend(lower);}}
+      waiting.sort((a,b)=>rank(a)-rank(b)||a.sequence-b.sequence);while(entries.size<capacity&&waiting.length&&(!entries.size||used()+(waiting[0].height||height)<=available))present(waiting.shift());position();
     }finally{pumping=false;}
   }
   function showMessageBox(owner,options={}){
