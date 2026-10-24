@@ -46,7 +46,7 @@ window.installVoiceMessages = ({api,conversation,available,send,error}) => {
       };
       recorder.start(1000);current.timer=setInterval(()=>{const seconds=Math.floor((Date.now()-current.started)/1000);clock.textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;if(seconds>=300)stop();},250);
       clock.textContent='00:00';
-    }catch(e){stream?.getTracks().forEach(track=>track.stop());if(revision===generation)error(e.message==='Voice recording is not supported.'?e:new Error('Microphone unavailable. Check microphone access in Windows Settings.'));}
+    }catch(e){if(recording?.stream===stream){recording.discard=true;release(recording);recording=null;}stream?.getTracks().forEach(track=>track.stop());if(revision===generation)error(e.message==='Voice recording is not supported.'?e:new Error('Microphone unavailable. Check microphone access in Windows Settings.'));}
     finally{if(revision===generation){starting=false;await api.voiceRecording(false).catch(()=>{});}sync();}
   }
   record.onclick=()=>{if(recording)stop();else start();};cancel.onclick=()=>stop(true);
