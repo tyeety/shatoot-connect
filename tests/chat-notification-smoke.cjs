@@ -12,6 +12,12 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(viewer,`collaboration.connect({type:'lan',address:'127.0.0.1:${owner.directInfo.port}'}).then(()=>true)`);
   await run(host,'api.openChat()');await until(()=>owner.chatWindow);const chat=owner.chatWindow;
   await until(()=>run(chat,'window.shatootconnectChatReady===true'));
+  if(chat.getTitle()!=='Chats · Shatoot Connect'||chat.getTitle()===host.getTitle())throw Error('Native chat/main window titles are not distinct');
+  if(!await run(chat,"document.title==='Chats · Shatoot Connect' && document.querySelector('link[rel=icon]')?.href.endsWith('/chat-icon.png')"))throw Error('Chat document title/favicon is not distinct');
+  const nativeImage=require('electron').nativeImage,chatIcon=nativeImage.createFromPath(path.join(__dirname,'../desktop/ui/assets/chat-icon.png')),appIcon=nativeImage.createFromPath(path.join(__dirname,'../desktop/ui/assets/app-icon.png'));
+  if(chatIcon.isEmpty()||chatIcon.toPNG().equals(appIcon.toPNG()))throw Error('Chat icon is missing or identical to the main icon');
+  await run(chat,"document.title='Shatoot Connect';true");await pause(50);if(chat.getTitle()!=='Chats · Shatoot Connect')throw Error('HTML replaced the native chat title');
+  await run(chat,"document.title='Chats · Shatoot Connect';true");
   await run(chat,`messenger.select('${conversation}').then(()=>true)`);host.close();chat.show();chat.focus();
   await run(chat,"document.querySelector('#chat-file-policy').value='ask';document.querySelector('#chat-file-policy').dispatchEvent(new Event('change'));true");
   await until(()=>owner.chatStore.filePolicy(conversation)==='ask');
@@ -99,6 +105,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   if(!await run(chat,"document.querySelector('#chat-reconnect').hidden"))throw Error('Automatic chat still requires Connect');
   log('A saved LAN chat reconnects automatically without discovery or pressing Connect');
   for(const language of ['en','fa']){
+    await run(host,`api.language('${language}').then(value=>window.i18n.setLanguage(value))`);await until(()=>chat.getTitle()===(language==='fa'?'گفتگوها · Shatoot Connect':'Chats · Shatoot Connect'));
     chat.setSize(680,520);await run(chat,`window.i18n.setLanguage('${language}');true`);await pause(150);
     if(!await run(chat,"(()=>{const group=document.querySelector('#chat-new-group').getBoundingClientRect(),list=document.querySelector('#chat-conversations').getBoundingClientRect(),form=document.querySelector('#chat-connect-form').getBoundingClientRect();return group.top>=form.bottom&&list.top>=group.bottom&&list.bottom<=innerHeight&&document.querySelector('.chat-conversation .profile-avatar').getBoundingClientRect().width>20})()"))throw Error('Chat sidebar overlaps/clips in '+language);
     fs.writeFileSync(path.join(artifacts,`cards-${language}.png`),(await chat.webContents.capturePage()).toPNG());

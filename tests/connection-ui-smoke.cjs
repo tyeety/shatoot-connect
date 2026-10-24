@@ -56,7 +56,16 @@ module.exports=async({host,states,app,dialog,update,log,artifacts})=>{
     await run("document.querySelector('#messenger-dialog').close();true");
     for(const language of ['en','fa']){await run(`window.i18n.setLanguage('${language}');true`);await pause(100);fs.writeFileSync(path.join(artifacts,`connections-${language}.png`),(await host.webContents.capturePage()).toPNG())}
     update.emit({state:'available',version:'99.0.0'});await until(()=>run("!document.querySelector('#update-notice').hidden"));
-    update.emit({state:'downloading',percent:37});await until(()=>run("!document.querySelector('#update-notice').hidden && document.querySelector('#update-notice').textContent.includes('37%') && document.querySelector('#update-notice').disabled"));
+    for(const language of ['en','fa']){
+      await run(`window.i18n.setLanguage('${language}');document.querySelector('#settings-dialog').showModal();selectSettingsTab('updates');true`);
+      for(const percent of [0,37,100]){
+        update.emit({state:'downloading',percent});
+        await until(()=>run(`['update-notice','install-update'].every(id=>{const b=document.getElementById(id),p=b.querySelector('.update-percent');return !b.hidden&&b.disabled&&p?.textContent==='${percent}%'&&!p.hidden})`));
+        if(!await run("['update-notice','install-update'].every(id=>{const b=document.getElementById(id),p=b.querySelector('.update-percent'),outer=b.getBoundingClientRect(),inner=p.getBoundingClientRect();return inner.width>25&&inner.left>=outer.left&&inner.right<=outer.right&&p.scrollWidth<=p.clientWidth&&getComputedStyle(b).opacity==='1'})"))throw Error('Update percentage is clipped or dimmed in '+language);
+      }
+      fs.writeFileSync(path.join(artifacts,`update-${language}.png`),(await host.webContents.capturePage()).toPNG());
+      await run("document.querySelector('#settings-dialog').close();true");
+    }
     update.emit({state:'error',error:'Update network interrupted'});await until(()=>run("!document.querySelector('#action-snackbar').hidden && document.querySelector('#action-snackbar').textContent.includes('Update network interrupted')"));
     update.emit({state:'current',version:'0.0.0'});
     log('Update progress stays visible outside Settings and a failed update reports its error');

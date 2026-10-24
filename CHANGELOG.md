@@ -13,6 +13,17 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.17.1 — 2026-10-24
+
+### Fixed
+
+- Show live download percentages on both the main-window update button and the Settings update button. A dedicated nonshrinking percentage badge remains visible when the translated status label is long or the header is narrow, including 0% and 100%; downloading buttons retain full contrast while disabled. Language changes refresh both button labels without losing the current progress.
+- Give the chat window its own blue speech-bubble icon and a role-first native title: Chats · Shatoot Connect (or its Persian equivalent). Prevent the shared HTML page title from replacing that native title during loading. The chat document/favicon and native title now remain distinct from the purple main application window; global language changes update the chat title.
+
+### Compatibility
+
+- No coordinator, protocol or data-format changes. Settings, credentials, voice messages and chat history are preserved.
+
 ## 0.17.0 — 2026-10-24
 
 ### Added

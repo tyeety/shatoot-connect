@@ -1,6 +1,9 @@
 'use strict';
 (async () => {
   document.body.classList.add('chat-window');
+  const updateTitle=()=>{document.title=window.i18n.language==='fa'?'گفتگوها · Shatoot Connect':'Chats · Shatoot Connect';};
+  window.addEventListener('shatoot-language-change',updateTitle);updateTitle();
+  const icon=document.createElement('link');icon.rel='icon';icon.href='assets/chat-icon.png';document.head.append(icon);
   const api = window.shatootconnect, initial = await api.chatCall('snapshot');
   let changed;
   class ChatWindowClient {

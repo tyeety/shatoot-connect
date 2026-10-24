@@ -1,3 +1,4 @@
+param([switch]$ChatOnly)
 Add-Type -AssemblyName System.Drawing
 function Round-Path($x,$y,$width,$height,$radius) {
     $shape=[System.Drawing.Drawing2D.GraphicsPath]::new()
@@ -9,6 +10,23 @@ function Round-Path($x,$y,$width,$height,$radius) {
     $shape.CloseFigure()
     return $shape
 }
+function New-ChatIcon {
+    $chat=[System.Drawing.Bitmap]::new(256,256)
+    $g=[System.Drawing.Graphics]::FromImage($chat)
+    $g.SmoothingMode=[System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $tile=Round-Path 8 8 240 240 54
+    $blue=[System.Drawing.Drawing2D.LinearGradientBrush]::new([System.Drawing.Point]::new(20,20),[System.Drawing.Point]::new(236,240),[System.Drawing.ColorTranslator]::FromHtml('#36b9f2'),[System.Drawing.ColorTranslator]::FromHtml('#123c86'))
+    $white=[System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
+    $ink=[System.Drawing.SolidBrush]::new([System.Drawing.ColorTranslator]::FromHtml('#17579e'))
+    $bubble=Round-Path 40 49 176 132 28
+    $g.FillPath($blue,$tile);$g.FillPath($white,$bubble)
+    $g.FillPolygon($white,[System.Drawing.Point[]]@([System.Drawing.Point]::new(57,160),[System.Drawing.Point]::new(57,215),[System.Drawing.Point]::new(111,173)))
+    foreach($x in @(76,117,158)){$g.FillEllipse($ink,$x,105,22,22)}
+    $chat.Save((Join-Path $PSScriptRoot '../desktop/ui/assets/chat-icon.png'),[System.Drawing.Imaging.ImageFormat]::Png)
+    $bubble.Dispose();$tile.Dispose();$blue.Dispose();$white.Dispose();$ink.Dispose();$g.Dispose();$chat.Dispose()
+}
+if($ChatOnly){New-ChatIcon;return}
 $bitmap=[System.Drawing.Bitmap]::new(256,256)
 $graphics=[System.Drawing.Graphics]::FromImage($bitmap)
 $graphics.SmoothingMode=[System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -65,3 +83,5 @@ $sidebarGraphics.DrawString('ShatootSoft', $detailFont, $white, [System.Drawing.
 $sidebar.Save((Join-Path $PSScriptRoot 'installerSidebar.bmp'), [System.Drawing.Imaging.ImageFormat]::Bmp)
 $sidebarGraphics.Dispose(); $sidebar.Dispose(); $brandFont.Dispose(); $detailFont.Dispose(); $alignment.Dispose(); $white.Dispose()
 $graphics.Dispose(); $bitmap.Dispose(); $brush.Dispose(); $ink.Dispose()
+
+New-ChatIcon

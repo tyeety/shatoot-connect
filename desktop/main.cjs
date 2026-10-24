@@ -244,9 +244,11 @@ ipcMain.handle('app-ready',e=>{
   else{fs.mkdirSync(update.directory,{recursive:true});const worker=path.join(update.directory,'update-worker.ps1');fs.copyFileSync(path.join(__dirname,'update-worker.ps1'),worker);const child=spawn(launcher.powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',worker,'-CleanupOnly','-Target',process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),'-Version',app.getVersion(),'-CacheDirectory',update.directory],{windowsHide:true,detached:true,stdio:'ignore'});child.on('error',()=>{});child.unref();}
 });
 function showMain(s) { if (s.win.isDestroyed()) return; s.win.show(); if (s.win.isMinimized()) s.win.restore(); s.win.focus(); }
+function chatWindowTitle(s){return s.language==='fa'?'گفتگوها · Shatoot Connect':'Chats · Shatoot Connect';}
 function openChat(s) {
   if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show(); s.chatWindow.focus(); return; }
-  const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor: '#0a0e17', title: 'Shatoot Connect · Chats', autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor: '#0a0e17', title:chatWindowTitle(s), icon:path.join(__dirname,'ui/assets/chat-icon.png'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  win.on('page-title-updated',event=>event.preventDefault());
   s.chatWindow = win; win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
   const chatContentsId=win.webContents.id;win.on('closed', () => { s.chatViews?.delete(chatContentsId);s.voicePermissions?.delete(chatContentsId);s.chatWindow = null; });
   win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
@@ -500,7 +502,7 @@ ipcMain.handle('save-endpoint', (e, endpoint, serverKey = '') => {
   saveSettings({ endpoint: result, serverKeys }); return result;
 });
 ipcMain.handle('language', (e, language) => {
-  const s = state(e); s.language = language === 'fa' ? 'fa' : 'en'; saveSettings({ language: s.language }); refreshTray(s); return s.language;
+  const s = state(e); s.language = language === 'fa' ? 'fa' : 'en'; saveSettings({ language: s.language });if(s.chatWindow&&!s.chatWindow.isDestroyed())s.chatWindow.setTitle(chatWindowTitle(s)); refreshTray(s); return s.language;
 });
 ipcMain.handle('local-server', async (e, endpoint) => {
   smokeLog('local-server IPC');

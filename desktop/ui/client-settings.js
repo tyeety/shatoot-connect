@@ -27,12 +27,28 @@ window.installClientSettings = (config, profileChanged) => {
   $('auto-accept-files').checked = !config.autoAcceptFiles; $('require-chat-approval').checked = config.requireChatApproval;
   for (const id of ['auto-accept-files','require-chat-approval']) $(id).onchange = run(async () => { const result = await api.chatPreferences({ autoAcceptFiles: !$('auto-accept-files').checked, requireChatApproval: $('require-chat-approval').checked }); Object.assign(config,result); });
   const notice = document.createElement('button'); notice.id = 'update-notice'; notice.className = 'small-button'; notice.hidden = true; document.querySelector('main>header').append(notice);
-  function update(value) {
-    const messages = { idle: 'Check for updates', checking: 'Checking for updates…', current: 'You are using the latest version.', available: 'Update available', downloading: 'Downloading update…', ready: 'Update ready', installing: 'Installing update…', error: value.error };
-    $('update-details').textContent = tr(messages[value.state] || value.state) + (value.version ? ` · ${value.version}` : '') + (value.state === 'downloading' ? ` ${value.percent}%` : '');
-    $('check-update').disabled = ['checking','downloading','installing'].includes(value.state);
-    $('install-update').hidden = !(['available','ready','downloading','installing'].includes(value.state)||(value.state==='error'&&value.version&&value.version!==config.version)); notice.hidden = $('install-update').hidden; notice.textContent = tr(['downloading','installing'].includes(value.state)?messages[value.state]:'Update and restart') + ' · ' + (value.version || '')+(value.state==='downloading'?` ${value.percent}%`:'');notice.title=notice.textContent;if(value.state==='error')window.actionNotice?.(value.error);notice.disabled=['downloading','installing'].includes(value.state);$('install-update').disabled=notice.disabled;
+  let lastUpdate;
+  function updateButton(button,label,value) {
+    let text=button.querySelector('.update-label'),percent=button.querySelector('.update-percent');
+    if(!text){text=document.createElement('span');text.className='update-label';percent=document.createElement('span');percent.className='update-percent';percent.dir='ltr';button.replaceChildren(text,percent);}
+    const downloading=value.state==='downloading',amount=Math.max(0,Math.min(100,Math.floor(Number(value.percent)||0)));
+    text.textContent=tr(label)+(button===notice&&!['downloading','installing'].includes(value.state)&&value.version?` · ${value.version}`:'');percent.hidden=!downloading;percent.textContent=downloading?`${amount}%`:'';
+    button.classList.toggle('update-downloading',downloading);button.title=text.textContent+(downloading?` ${amount}%`:'');button.setAttribute('aria-label',button.title);
   }
+  function update(value) {
+    lastUpdate=value;
+    const messages = { idle: 'Check for updates', checking: 'Checking for updates…', current: 'You are using the latest version.', available: 'Update available', downloading: 'Downloading update…', ready: 'Update ready', installing: 'Installing update…', error: value.error };
+    const busy=['checking','downloading','installing'].includes(value.state),amount=Math.max(0,Math.min(100,Math.floor(Number(value.percent)||0)));
+    $('update-details').textContent = tr(messages[value.state] || value.state) + (value.version ? ` · ${value.version}` : '') + (value.state === 'downloading' ? ` ${amount}%` : '');
+    $('check-update').disabled=busy;
+    $('install-update').hidden=!(['available','ready','downloading','installing'].includes(value.state)||(value.state==='error'&&value.version&&value.version!==config.version));notice.hidden=$('install-update').hidden;
+    const label=['downloading','installing'].includes(value.state)?messages[value.state]:'Update and restart';
+    updateButton($('install-update'),label,value);updateButton(notice,label,value);
+    if(value.version&&!notice.title.includes(` · ${value.version}`))notice.title+=` · ${value.version}`;
+    if(value.state==='error')window.actionNotice?.(value.error);
+    notice.disabled=['downloading','installing'].includes(value.state);$('install-update').disabled=notice.disabled;
+  }
+  window.addEventListener('shatoot-language-change',()=>{if(lastUpdate)update(lastUpdate);});
   $('check-update').onclick = run(async () => update(await api.update('check')));
   const install = run(async () => { $('install-update').disabled = true; notice.disabled = true; try { window.actionNotice?.('Downloading update…');await api.update('install'); } finally { $('install-update').disabled = false; notice.disabled = false; } });
   $('install-update').onclick = install; notice.onclick = install; api.onUpdate(update); api.update('status').then(update); showProfile(); window.i18n.setLanguage(config.language);
