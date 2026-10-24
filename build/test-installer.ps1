@@ -185,7 +185,15 @@ public class VerifiedSetupFixture {
         $result=Get-Content -LiteralPath (Join-Path $updateCache 'last-update.json') -Raw|ConvertFrom-Json
         if($result.state -ne 'installed' -or $result.token -ne $updateToken -or (Test-Path -LiteralPath $updatePackage)){throw 'Installed update did not acknowledge restart/cleanup.'}
         Assert-Payload
-        foreach($link in $links){if($wsh.CreateShortcut($link).TargetPath -ne $updateTarget){throw 'Update changed the stable desktop shortcut.'}}
+        foreach($link in $links){
+            $shortcut=$wsh.CreateShortcut($link)
+            if($shortcut.TargetPath -eq $updateTarget){continue}
+            $launcherFile=Join-Path $profile 'launcher/launcher.ps1';$launcherConfig=Join-Path $profile 'launcher/launcher.json'
+            $powershellFile=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            if($shortcut.TargetPath -ne $powershellFile -or !$shortcut.Arguments.Contains($launcherFile) -or !(Test-Path -LiteralPath $launcherConfig)){throw 'Update changed the shortcut to an unrecognized target.'}
+            $registeredLauncher=Get-Content -LiteralPath $launcherConfig -Raw|ConvertFrom-Json
+            if($registeredLauncher.target -ne $updateTarget -or $registeredLauncher.version -ne $package.version){throw 'The stable desktop launcher does not target the updated application.'}
+        }
         Write-Output 'Real installed updater repaired payload through NSIS, relaunched the packaged app, verified startup, cleaned cache and retained shortcuts/profile.'
     }finally{
         $env:SHATOOTCONNECT_UPDATE_TEST=$originalUpdateTest
