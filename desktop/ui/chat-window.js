@@ -17,7 +17,8 @@
     send(conversation, text) { return api.chatCall('send', [conversation, text]); }
     sendFiles(conversation, operation, value) { return operation === 'drop' ? api.chatDrop(conversation, value) : api.chatCall('sendFiles', [conversation, operation, value]); }
     close(session) { return api.chatCall('close', [session?.peer.deviceId]); }
-    createGroup(name, members, id) { return api.chatCall('createGroup', [name, members, id]); }
+    createGroup(name,members,id,details){return api.chatCall('createGroup',[name,members,id,details]);}
+    changeMessage(conversation,id,text,removed){return api.chatCall('changeMessage',[conversation,id,text,removed]);}
   }
   window.CollaborationClient = ChatWindowClient;
   window.i18n.setLanguage(initial.language);

@@ -2,6 +2,7 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+['ویرایش پیام','Edit message'],['حذف پیام','Delete message'],['پیام حذف شد','Message deleted'],['ویرایش شده','Edited'],['ویرایش گروه','Edit group'],['ذخیره تغییرات','Save changes'],['توضیحات گروه','Group description'],['کپی','Copy'],['انتخاب عکس','Choose photo'],['حذف عکس','Remove photo'],['برای همگام‌سازی تغییرات پیام، برنامهٔ طرف مقابل را به‌روزرسانی کنید.','Update the other computer to synchronize message changes.'],
 ['ضبط ویس','Record voice'],['ارسال ویس','Send voice'],['لغو ضبط','Cancel recording'],['در حال ضبط…','Recording…'],['پخش ویس','Play voice'],['پیام صوتی','Voice message'],['میکروفن در دسترس نیست. دسترسی میکروفن را در تنظیمات ویندوز بررسی کنید.','Microphone unavailable. Check microphone access in Windows Settings.'],['این پیام صوتی در دسترس نیست.','This voice message is unavailable.'],['پیام صوتی معتبر نیست.','Invalid voice message.'],['ضبط ویس پشتیبانی نمی‌شود.','Voice recording is not supported.'],
 ['انجام شد','Done'],['باز کردن فایل‌های ارسالی','Open sent files'],['تصویر کلیپ‌بورد بیش از حد بزرگ است.','Clipboard image is too large.'],['تصویر کلیپ‌بورد معتبر نیست.','Invalid clipboard image.'],['این مخاطب آفلاین است.','This contact is offline.'],['فایل جابه‌جا یا حذف شده است.','The file was moved or deleted.'],
 ['لغو اتصال','Cancel connection'],['اتصال لغو شد.','Connection cancelled.'],['تغییر نام','Rename'],['لغو','Cancel'],

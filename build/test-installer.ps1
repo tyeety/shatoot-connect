@@ -26,6 +26,7 @@ if (Test-Path -LiteralPath $testRoot) { throw 'A previous installer test directo
 $installDir = Join-Path $testRoot 'installed/Shatoot Connect'
 $fixture = $null
 $profileProbe = $null
+$createdSettings=$false
 $aclPath = $null
 $originalAcl = $null
 
@@ -140,6 +141,7 @@ public class VerifiedSetupFixture {
     $probeBytes = [Text.Encoding]::UTF8.GetBytes([Guid]::NewGuid().ToString())
     [IO.File]::WriteAllBytes($profileProbe, $probeBytes)
     $settings = Join-Path $profile 'connection.json'
+    if(!(Test-Path -LiteralPath $settings)){[IO.File]::WriteAllText($settings,'{"startupEnabled":false}');$createdSettings=$true}
     $settingsHash = if (Test-Path -LiteralPath $settings) { Get-ContentHash $settings } else { $null }
     Invoke-Setup $Installer "/S /currentuser /D=$installDir"
     Assert-Payload
@@ -166,6 +168,30 @@ public class VerifiedSetupFixture {
     Invoke-Setup $Installer "/S /currentuser /D=$installDir"
     Assert-Payload
     Write-Output 'Reinstall repaired a damaged payload.'
+    # Exercise the installed updater itself, including NSIS and the real packaged
+    # application ready acknowledgement. The clean-account guards above apply.
+    $updateCache=Join-Path $profile 'updates';[IO.Directory]::CreateDirectory($updateCache)|Out-Null
+    $updatePackage=Join-Path $updateCache "ShatootConnect-Setup-$($package.version)-win-x64.exe"
+    Copy-Item -LiteralPath $Installer -Destination $updatePackage
+    $updateDigest=(Get-ContentHash $updatePackage).Replace('-','').ToLowerInvariant();$updateToken=[guid]::NewGuid().ToString()
+    [IO.File]::WriteAllText((Join-Path $installDir 'resources/app.asar'),'Installed updater repair fixture')
+    $updateWorker=Join-Path $workspace 'desktop/update-worker.ps1';$updateTarget=Join-Path $installDir 'Shatoot Connect.exe'
+    $originalUpdateTest=$env:SHATOOTCONNECT_UPDATE_TEST;$env:SHATOOTCONNECT_UPDATE_TEST='1'
+    try{
+        $updateArgs="-NoProfile -ExecutionPolicy Bypass -File `"$updateWorker`" -ParentId 2147483647 -Package `"$updatePackage`" -Target `"$updateTarget`" -Digest $updateDigest -Version $($package.version) -ReadyToken $updateToken -CacheDirectory `"$updateCache`""
+        $updateProcess=Start-Process powershell.exe -ArgumentList $updateArgs -WindowStyle Hidden -PassThru
+        if(!$updateProcess.WaitForExit(180000)){Stop-Process -Id $updateProcess.Id -Force;throw 'Installed update timed out.'}
+        $updateProcess.Refresh();if($updateProcess.ExitCode -ne 0){throw ('Installed updater failed: '+[IO.File]::ReadAllText((Join-Path $updateCache 'last-update.json')))}
+        $result=Get-Content -LiteralPath (Join-Path $updateCache 'last-update.json') -Raw|ConvertFrom-Json
+        if($result.state -ne 'installed' -or $result.token -ne $updateToken -or (Test-Path -LiteralPath $updatePackage)){throw 'Installed update did not acknowledge restart/cleanup.'}
+        Assert-Payload
+        foreach($link in $links){if($wsh.CreateShortcut($link).TargetPath -ne $updateTarget){throw 'Update changed the stable desktop shortcut.'}}
+        Write-Output 'Real installed updater repaired payload through NSIS, relaunched the packaged app, verified startup, cleaned cache and retained shortcuts/profile.'
+    }finally{
+        $env:SHATOOTCONNECT_UPDATE_TEST=$originalUpdateTest
+        foreach($running in Get-Process -Name 'Shatoot Connect' -ErrorAction SilentlyContinue){try{if($running.Path -eq $updateTarget){Stop-Process -Id $running.Id -Force -ErrorAction SilentlyContinue}}catch{}}
+        Start-Sleep -Milliseconds 500
+    }
     $locked = [IO.File]::Open((Join-Path $installDir 'resources/app.asar'), 'Open', 'Read', 'Read')
     try { Uninstall-TestCopy 1603 } finally { $locked.Dispose() }
     Assert-Payload
@@ -183,6 +209,7 @@ public class VerifiedSetupFixture {
     if ($originalAcl) { [IO.Directory]::SetAccessControl($aclPath, $originalAcl) }
     Uninstall-TestCopy
     if ($profileProbe -and (Test-Path -LiteralPath $profileProbe)) { [IO.File]::Delete($profileProbe) }
+    if($createdSettings -and (Test-Path -LiteralPath $settings)){[IO.File]::Delete($settings)}
     if (Test-Path -LiteralPath $testRoot) {
         $resolvedTestRoot = (Resolve-Path -LiteralPath $testRoot).Path
         if (!$resolvedTestRoot.StartsWith($workspace + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Cleanup path outside workspace.' }

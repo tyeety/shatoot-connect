@@ -3,7 +3,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   const $ = id => document.getElementById(id), tr = text => window.i18n.translate(text);
   let engine, selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
   let voice;
-  let editingGroup,connecting=false,connectSequence=0;
+  let editingGroup,groupAvatar='',connecting=false,connectSequence=0;
   const progress = new Map();
   const displayName=peer=>peer?.displayName||peer?.name||'';
   const previewCard=(element,peer)=>{element.classList.add('computer-preview');if(peer.preview){const image=document.createElement('img');image.className='desktop-preview';image.alt='';image.src=peer.preview;image.draggable=false;element.prepend(image);}};
@@ -49,12 +49,21 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       const item = document.createElement('article'); item.className = 'chat-message'; const own = row.sender === self.deviceId;
       if (own) item.classList.add('own'); if (own && row.pending.length) item.classList.add('pending');
       const name = document.createElement('header'); name.textContent=row.sender===self.deviceId?self.name:row.displayName||displayName(contact(row.sender))||row.name;
-      const text = document.createElement('p'); text.dir = 'auto'; text.textContent = row.text;
+      const text = document.createElement('p'); text.dir = 'auto'; text.textContent = row.deleted?tr('Message deleted'):row.text;
       const meta = document.createElement('small'); const date = new Date(row.at); meta.textContent = new Intl.DateTimeFormat(window.i18n.language === 'fa' ? 'fa-IR' : 'en', { dateStyle: 'short', timeStyle: 'short' }).format(date);
       if (own) meta.textContent += ' · ' + tr(row.pending.length ? (row.kind === 'file' ? 'Not delivered to all recipients' : 'Queued') : row.status === 'delivered' ? 'Delivered' : 'Sent');
+      if(row.editedAt&&!row.deleted)meta.textContent+=' · '+tr('Edited');
       item.append(name, text, meta);
-      if (row.attachment) item.append(button(own?'Open sent files':'Open received files', () => api.collaboration('open-attachment', { token: row.attachment }), 'folder'));
-      voice?.attachment(item,row);log.append(item);
+      if(row.deleted)item.classList.add('deleted');
+      else {
+        if (row.attachment) item.append(button(own?'Open sent files':'Open received files', () => api.collaboration('open-attachment', { token: row.attachment }), 'folder'));
+        voice?.attachment(item,row);
+        const actions=document.createElement('div');actions.className='chat-message-actions';
+        actions.append(button('Copy',()=>api.copyText(row.text),'content_copy'));
+        if(own){if(row.kind==='text')actions.append(button('Edit message',()=>editMessage(row),'edit'));actions.append(button('Delete message',async()=>{await engine.changeMessage(row.conversation,row.id,'',true);await load(false);},'delete'));}
+        item.append(actions);
+      }
+      log.append(item);
     }
     if (scroll && nearBottom) log.scrollTop = log.scrollHeight;
   }
@@ -63,7 +72,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     const pending=connecting||(engine.connectAttempts?[...engine.connectAttempts].filter(a=>!a.background).length:engine.pendingConnections||0)>0;cancelConnect.hidden=!pending;$('chat-connect').disabled=pending;$('chat-address').disabled=pending;
     own.replaceChildren();const ownImage=document.createElement('img');ownImage.src=self.avatar||'assets/app-icon.png';ownImage.className='profile-avatar';ownImage.alt='';const ownName=document.createElement('span');ownName.textContent=self.name;own.append(ownImage,ownName);
     const list = $('chat-conversations'); list.replaceChildren();
-    const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar:c.avatar,preview:c.preview,name:displayName(c),detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, name: g.name, status: 'Group' }))];
+    const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar:c.avatar,preview:c.preview,name:displayName(c),detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, avatar:g.avatar,name: g.name,detail:g.description, status: 'Group' }))];
     for (const item of items) { const b = document.createElement('button'); b.className = 'chat-conversation'; b.type = 'button'; b.setAttribute('aria-pressed', String(item.id === selected)); const name = document.createElement('b'), status = document.createElement('small'); name.textContent = item.name; status.textContent = tr(item.status) + (item.detail ? ' · ' + item.detail : ''); { const image = document.createElement('img'); image.src=item.avatar||'assets/app-icon.png'; image.className = 'profile-avatar'; image.alt = ''; b.append(image); } b.append(name,status);previewCard(b,item); b.onclick = run(() => select(item.id)); list.append(b); }
     const group = selected.startsWith('g:') && engine.group(selected.slice(2)), peer = selected.startsWith('p:') && contact(selected.slice(2));
     if($('chat-rename'))$('chat-rename').hidden=!selected.startsWith('p:');
@@ -95,7 +104,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   if (!detached) api.onChatCommand(async (operation, args) => { if (operation === 'snapshot') return snapshot(); if (operation === 'close') { engine.close(engine.peer(args[0])); return; } const result = await engine[operation](...args); return operation === 'connect' ? { peer: result.peer } : result; });
   window.collaboration = engine;
   $('open-messenger').onclick = open;
-  $('refresh-discovery').onclick = run(async () => renderDiscovery(await api.discovery()));
+  $('refresh-discovery').onclick = run(async () => {renderDiscovery(await api.discovery());window.refreshFeedback($('network-list'));});
   api.onDiscovery(renderDiscovery);
   $('chat-connect-form').onsubmit = run(async () => { const address = $('chat-address').value.trim(); await start({ type: address.includes('.') || address.includes(':') ? 'lan' : 'id', address }); });
   $('chat-reconnect').onclick = run(async () => { const route = routeFor(selected.slice(2)); if (!route) throw new Error('Enter the contact ID or LAN IP to reconnect.'); await start(route); });
@@ -124,14 +133,23 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   },'person');rename.id='chat-rename';document.querySelector('.chat-thread-heading').append(rename);
   const groupEditor=async existing=>{
     editingGroup=existing;const list = $('chat-group-members'); list.replaceChildren(); $('chat-group-error').textContent = ''; $('chat-group-name').value = existing?.name||'';
+    groupAvatar=existing?.avatar||'';$('chat-group-avatar').src=groupAvatar||'assets/app-icon.png';$('chat-group-description').value=existing?.description||'';
+    document.querySelector('#chat-group-dialog h2').textContent=tr(existing?'Edit group':'New group');$('chat-create-group').textContent=tr(existing?'Save changes':'Create group');
     for(const peer of discovery.peers)if(!engine.catalog.contacts.some(c=>c.deviceId===peer.deviceId))await api.collaboration('contact',{peer:{deviceId:peer.deviceId,name:peer.name},route:{type:'lan',address:peer.endpoints[0]}});
     await engine.refresh();
     const candidates=new Map([...engine.catalog.contacts,...engine.connected(),...(existing?.members||[])].filter(p=>p.deviceId!==self.deviceId).map(p=>[p.deviceId,p]));
     for (const peer of candidates.values()) { const label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span'); input.type = 'checkbox'; input.value = peer.deviceId;input.checked=!!existing?.members.some(m=>m.deviceId===peer.deviceId);text.textContent=displayName(peer); label.append(input, text); list.append(label); }
     $('chat-group-dialog').showModal();
   };
+  const photo=document.createElement('div');photo.className='chat-group-photo';photo.innerHTML='<img id="chat-group-avatar" class="profile-avatar" alt="">';photo.append(button('Choose photo',async()=>{const avatar=await api.groupPhoto(editingGroup?.id);if(avatar!==undefined){groupAvatar=avatar;$('chat-group-avatar').src=avatar||'assets/app-icon.png';}},'person'),button('Remove photo',()=>{groupAvatar='';$('chat-group-avatar').src='assets/app-icon.png';},'delete'));$('chat-group-form').prepend(photo);
+  const description=document.createElement('label');description.textContent=tr('Group description');const descriptionInput=document.createElement('textarea');descriptionInput.id='chat-group-description';descriptionInput.maxLength=500;description.append(descriptionInput);$('chat-group-name').after(description);
   $('chat-new-group').onclick=run(()=>groupEditor());$('chat-edit-group').onclick=run(()=>groupEditor(engine.group(selected.slice(2))));
-  $('chat-group-form').onsubmit = async event => { event.preventDefault(); $('chat-create-group').disabled = true; try { const group = await engine.createGroup($('chat-group-name').value.trim(), [...document.querySelectorAll('#chat-group-members input:checked')].map(i => i.value),editingGroup?.id); $('chat-group-dialog').close(); await select(`g:${group.id}`); } catch (e) { $('chat-group-error').textContent = tr(e.message); } finally { $('chat-create-group').disabled = false; } };
+  $('chat-group-form').onsubmit = async event => { event.preventDefault(); $('chat-create-group').disabled = true; try { const group = await engine.createGroup($('chat-group-name').value.trim(), [...document.querySelectorAll('#chat-group-members input:checked')].map(i => i.value),editingGroup?.id,{avatar:groupAvatar,description:$('chat-group-description').value.trim()}); $('chat-group-dialog').close(); await select(`g:${group.id}`); } catch (e) { $('chat-group-error').textContent = tr(e.message); } finally { $('chat-create-group').disabled = false; } };
+  function editMessage(row){
+    let dialog=$('message-edit-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='message-edit-dialog';dialog.innerHTML='<form id="message-edit-form"><h2></h2><textarea id="message-edit-text" maxlength="8000" required></textarea><div class="inline-setting"><button type="submit" class="small-button"></button><button type="button" class="small-button"></button></div><p class="error" role="alert"></p></form>';document.body.append(dialog);}
+    dialog.querySelector('h2').textContent=tr('Edit message');dialog.querySelector('[type=submit]').textContent=tr('Save changes');const cancel=dialog.querySelector('[type=button]');cancel.textContent=tr('Cancel');cancel.onclick=()=>dialog.close();dialog.querySelector('.error').textContent='';$('message-edit-text').value=row.text;
+    $('message-edit-form').onsubmit=async event=>{event.preventDefault();const save=dialog.querySelector('[type=submit]');save.disabled=true;try{await engine.changeMessage(row.conversation,row.id,$('message-edit-text').value);dialog.close();await load(false);}catch(e){dialog.querySelector('.error').textContent=tr(e.message);}finally{save.disabled=false;}};dialog.showModal();$('message-edit-text').focus();
+  }
   if(!detached)setInterval(()=>engine.reconnectKnown().catch(()=>{}),15000);
   engine.ready.then(()=>{render();if(!detached)engine.reconnectKnown().catch(()=>{});}).catch(error); api.discovery().then(renderDiscovery).catch(error);
   window.addEventListener('shatoot-language-change', () => { renderDiscovery(discovery); renderMessages(false);publish(); });

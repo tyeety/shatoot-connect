@@ -238,6 +238,7 @@ const chatPending = new Map();
 ipcMain.handle('app-ready',e=>{
   const s=state(e);if(smoke||!app.isPackaged||s.owner||s.readyAnnounced)return;s.readyAnnounced=true;
   const launcher=getLauncher();launcher.repair(app.getPath('desktop'),shell);
+  try{const resultFile=path.join(update.directory,'last-update.json'),result=JSON.parse(fs.readFileSync(resultFile,'utf8'));if(result.state==='error'&&!result.reported){update.emit({state:'error',version:result.version,error:result.error});notices.toast(s.win,result.error);fs.writeFileSync(resultFile,JSON.stringify({...result,reported:true}));}}catch{}
   for(const record of preferences.list())if(record.shortcut&&fs.existsSync(path.join(app.getPath('desktop'),preferences.shortcutName(record.id))))createFavoriteShortcut(record.id);
   const token=process.argv.find(arg=>/^--update-token=[a-f0-9-]{36}$/.test(arg))?.split('=')[1];
   if(token){fs.mkdirSync(update.directory,{recursive:true});const file=path.join(update.directory,token+'.ready.json');fs.writeFileSync(file+'.tmp',JSON.stringify({token,version:app.getVersion(),executable:process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),pid:process.pid}));fs.renameSync(file+'.tmp',file);}
@@ -259,26 +260,37 @@ ipcMain.handle('show-main', e => showMain(state(e)));
 ipcMain.handle('chat-close', e => state(e).chatWindow?.close());
 ipcMain.handle('chat-call', (e, operation, args = []) => {
   const s = state(e);
-  if (s.chatWindow?.webContents !== e.sender || !['snapshot','refresh','connect','cancelPending','send','sendFiles','close','createGroup'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
+  if (s.chatWindow?.webContents !== e.sender || !['snapshot','refresh','connect','cancelPending','send','sendFiles','close','createGroup','changeMessage'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
   const id = crypto.randomUUID();
   return new Promise((resolve,reject) => { const timer = setTimeout(() => { chatPending.delete(id); reject(new Error('Chat operation timed out.')); }, operation === 'sendFiles' ? 1800000 : 75000); chatPending.set(id, { s, resolve, reject, timer }); s.win.webContents.send('chat-command', { id, operation, args }); });
 });
 ipcMain.on('chat-result', (e, data) => { const pending = chatPending.get(data?.id); if (!pending || pending.s.win.webContents !== e.sender || e.senderFrame !== e.sender.mainFrame) return; clearTimeout(pending.timer); chatPending.delete(data.id); data.error ? pending.reject(new Error(data.error)) : pending.resolve(data.value); });
 ipcMain.on('chat-publish', (e, value) => { const s = state(e); if (s.win.webContents !== e.sender) return; if (s.chatWindow && !s.chatWindow.isDestroyed()) s.chatWindow.webContents.send('chat-snapshot', value); });
+let installingUpdate=false;
 ipcMain.handle('update', async (e, operation) => {
   state(e);
   if (operation === 'status') return update.status;
   if (operation === 'check') return update.check();
   if (operation !== 'install' || !app.isPackaged) throw new Error('Updates can only be installed in a packaged application.');
-  if (update.status.state !== 'ready') await update.download();
+  if(installingUpdate)throw new Error('An update is already in progress.');installingUpdate=true;
+  try{
+  await update.prepare();
   const worker = path.join(update.directory, 'update-worker.ps1');
   fs.writeFileSync(worker, fs.readFileSync(path.join(__dirname, 'update-worker.ps1')));
   const executable = process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe');
   if (process.env.PORTABLE_EXECUTABLE_FILE) fs.accessSync(path.dirname(executable), fs.constants.W_OK);
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const proc = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', worker, '-ParentId', String(process.pid), '-Package', update.file, '-Target', executable, '-Digest', update.asset.digest, '-Version',update.asset.version,'-ReadyToken',crypto.randomUUID(),'-CacheDirectory',update.directory, ...(process.env.PORTABLE_EXECUTABLE_FILE ? ['-Portable'] : [])], { detached: true, windowsHide: true, stdio: 'ignore' });
-  await new Promise((resolve, reject) => { proc.once('spawn', resolve); proc.once('error', reject); }); proc.unref();
+  const token=crypto.randomUUID(),handshake=path.join(update.directory,token+'.worker.json');
+  const proc = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', worker, '-ParentId', String(process.pid), '-Package', update.file, '-Target', executable, '-Digest', update.asset.digest, '-Version',update.asset.version,'-ReadyToken',token,'-CacheDirectory',update.directory, ...(process.env.PORTABLE_EXECUTABLE_FILE ? ['-Portable'] : [])], { detached: true, windowsHide: true, stdio: 'ignore' });
+  await new Promise((resolve,reject)=>{
+    const finish=error=>{clearInterval(poll);clearTimeout(timeout);proc.removeListener('error',failed);proc.removeListener('exit',exited);error?reject(error):resolve();};
+    const failed=error=>finish(error),exited=code=>finish(new Error(`Update installer could not start (${code}). The application remains open.`));
+    const poll=setInterval(()=>{try{const ack=JSON.parse(fs.readFileSync(handshake,'utf8'));if(ack.token===token&&ack.version===update.asset.version)finish();}catch{}},100);
+    const timeout=setTimeout(()=>{proc.kill();finish(new Error('Update installer did not become ready. The application remains open.'));},30000);
+    proc.once('error',failed);proc.once('exit',exited);
+  });proc.unref();
   update.emit({state:'installing'});quitting = true; setTimeout(() => app.quit(), 300); return { state: 'installing' };
+  }catch(error){update.emit({state:'error',error:error.message});throw error;}finally{installingUpdate=false;}
 });
 ipcMain.handle('firewall-repair', async e => { state(e); if (smoke) return true; return require('./firewall.cjs').repairFirewall(app.getPath('exe')); });
 ipcMain.handle('chat-preferences', (e, value) => { state(e); if (!value || typeof value.autoAcceptFiles !== 'boolean' || typeof value.requireChatApproval !== 'boolean') throw new Error('Invalid chat settings.'); saveSettings({ autoAcceptFiles: value.autoAcceptFiles, requireChatApproval: value.requireChatApproval }); return value; });
@@ -314,6 +326,7 @@ async function readProfilePhoto(file) {
   }catch{throw new Error('This photo could not be opened.');}
   finally{clearTimeout(timer);if(!decoder.isDestroyed())decoder.destroy();}
 }
+ipcMain.handle('group-photo',async(e,id)=>{const s=state(e);if(id&&s.chatStore?.load().groups[id]?.owner!==s.identity.deviceId)throw new Error('Only the group owner can edit the group.');const chosen=await dialog.showOpenDialog(s.chatWindow||s.win,{properties:['openFile'],filters:[{name:'Images',extensions:['png','jpg','jpeg','webp','gif','avif']}]});return chosen.canceled?undefined:readProfilePhoto(chosen.filePaths[0]);});
 ipcMain.handle('profile-photo', async (e, remove) => {
   const s=state(e);let avatar='';
   if(!remove){
@@ -574,8 +587,9 @@ ipcMain.on('input', (e, data) => {
 });
 ipcMain.handle('exit-fullscreen', e => { const s = state(e); if (s.win.isFullScreen()) s.win.setFullScreen(false); });
 ipcMain.handle('copy-text', (e, text) => {
-  state(e);
-  if (typeof text !== 'string' || text.length > 128) throw new Error('Invalid clipboard text');
+  const s=state(e);
+  if (typeof text !== 'string' || text.length > 1000000) throw new Error('Invalid clipboard text');
+  if(smoke){s.copiedText=text;return;}
   return clipboard.writeText(text);
 });
 

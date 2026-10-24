@@ -43,7 +43,8 @@ class ChatStore {
     if (!value || !UUID.test(value.id) || !UUID.test(value.owner) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !Array.isArray(value.members) || value.members.length < 1) throw new Error('Invalid chat group.');
     const members = value.members.map(m => { if (!UUID.test(m.deviceId) || typeof m.name !== 'string' || m.name.length > 60) throw new Error('Invalid group member.'); return { deviceId: m.deviceId, name: m.name }; });
     if (new Set(members.map(m => m.deviceId)).size !== members.length || !members.some(m => m.deviceId === this.self) || !members.some(m => m.deviceId === value.owner)) throw new Error('Invalid group membership.');
-    return this.change(data => { if (data.groups[value.id] && data.groups[value.id].owner !== value.owner) throw new Error('The group owner cannot change.'); return data.groups[value.id] = { id: value.id, name: value.name.trim(), owner: value.owner, members }; });
+    if(value.description!==undefined&&(typeof value.description!=='string'||value.description.length>500))throw new Error('Group description is too long.');
+    return this.change(data => { const old=data.groups[value.id];if(old&&old.owner!==value.owner)throw new Error('The group owner cannot change.');if(old&&(old.revision||0)>(value.revision||0))return old;return data.groups[value.id] = { id: value.id, name: value.name.trim(), owner: value.owner, members,description:value.description||'',avatar:require('../shared/profile.cjs').profile(value).avatar,revision:Number.isSafeInteger(value.revision)&&value.revision>=0?value.revision:0 }; });
   }
   append(value, outgoing = false) {
     const data = this.load();
@@ -54,8 +55,23 @@ class ChatStore {
     const relay = value.conversation.startsWith('g:') && data.groups[key]?.owner === this.self;
     const pending = outgoing || relay ? [...new Set((value.pending || []).filter(id => UUID.test(id) && id !== this.self && (!relay || data.groups[key].members.some(m => m.deviceId === id))))] : [];
     const message = { id: value.id, conversation: value.conversation, sender: value.sender, name: value.name, kind: value.kind, text: value.text, at: Number.isSafeInteger(value.at) && Math.abs(Date.now() - value.at) < 365 * 86400000 ? value.at : Date.now(), receivedAt: Math.max(Date.now(), (data.messages.at(-1)?.receivedAt || 0) + 1), status: outgoing ? (pending.length ? 'queued' : 'sent') : 'received', pending };
-    return this.change(d => { d.messages.push(message); return { message, duplicate: false }; });
+    return this.change(d => { const change=(d.mutations||[]).find(c=>c.message===message.id&&c.conversation===message.conversation&&c.sender===message.sender);if(change&&(change.removed||message.kind==='text'))this.applyMutation(message,change);d.messages.push(message); return { message, duplicate: false }; });
   }
+  applyMutation(message,change){message.revision=change.revision;message.editedAt=change.at;message.deleted=change.removed;message.text=change.removed?'':change.text;}
+  mutate(value,outgoing=false){
+    const data=this.load();if(!value||!UUID.test(value.id)||!UUID.test(value.message)||!UUID.test(value.sender)||!/^([pg]):[a-f0-9-]{36}$/i.test(value.conversation)||typeof value.removed!=='boolean'||!Number.isSafeInteger(value.revision)||value.revision<1||value.revision>1000000000||(!value.removed&&(typeof value.text!=='string'||!value.text.trim()||value.text.length>8000))||(outgoing&&value.sender!==this.self))throw new Error('Invalid message change.');
+    const key=value.conversation.slice(2),group=value.conversation.startsWith('g:')&&data.groups[key];
+    if(group?!group.members.some(m=>m.deviceId===value.sender):!data.contacts[key]||(!outgoing&&key!==value.sender))throw new Error('Invalid message author.');
+    const message=data.messages.find(m=>m.id===value.message&&m.conversation===value.conversation),previous=(data.mutations||[]).find(c=>c.message===value.message&&c.conversation===value.conversation);
+    if((outgoing&&!message)||(message&&(message.sender!==value.sender||(!value.removed&&message.kind!=='text'))))throw new Error('Only the sender can change this message.');
+    if((previous&&previous.sender!==value.sender)||((message?.deleted||previous?.removed)&&!value.removed))throw new Error('This message cannot be changed.');
+    if((message?.revision||previous?.revision||0)>=value.revision)return {duplicate:true,mutation:previous};
+    const pending=outgoing||group?.owner===this.self?[...new Set((value.pending||[]).filter(id=>UUID.test(id)&&id!==this.self&&(!group||group.members.some(m=>m.deviceId===id))))]:[];
+    const mutation={id:value.id,message:value.message,conversation:value.conversation,sender:value.sender,removed:value.removed,text:value.removed?'':value.text.trim(),revision:value.revision,at:Number.isSafeInteger(value.at)?value.at:Date.now(),pending};
+    return this.change(d=>{d.mutations=(d.mutations||[]).filter(c=>c.message!==value.message||c.conversation!==value.conversation);d.mutations.push(mutation);if(message)this.applyMutation(message,mutation);return {duplicate:false,mutation};});
+  }
+  pendingChanges(peer){return (this.load().mutations||[]).filter(m=>m.pending.includes(peer));}
+  deliveredChange(id,peer){return this.change(d=>{const change=(d.mutations||[]).find(c=>c.id===id);if(change)change.pending=change.pending.filter(p=>p!==peer);});}
   delivered(id, peer) {
     return this.change(data => { const message = data.messages.find(m => m.id === id && (m.sender === this.self || (m.conversation.startsWith('g:') && data.groups[m.conversation.slice(2)]?.owner === this.self))); if (message) { message.pending = message.pending.filter(value => value !== peer); if (message.sender === this.self) message.status = message.pending.length ? 'queued' : 'delivered'; } return message; });
   }
@@ -75,7 +91,7 @@ class ChatStore {
   }
   history({ conversation, before = Number.MAX_SAFE_INTEGER, search = '', limit = 100 } = {}) {
     if (typeof conversation !== 'string' || typeof search !== 'string' || search.length > 200 || !Number.isSafeInteger(before)) throw new Error('Invalid history query.');
-    return this.load().messages.filter(m => m.conversation === conversation && m.receivedAt < before && (!search || m.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).slice(-Math.max(1, Math.min(100, Number(limit) || 100))).map(m => ({ ...m, attachment: Object.entries(this.data.attachments).find(([, a]) => a.message === m.id && a.conversation === conversation)?.[0] }));
+    return this.load().messages.filter(m => m.conversation === conversation && m.receivedAt < before && (!search || m.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).slice(-Math.max(1, Math.min(100, Number(limit) || 100))).map(m => ({ ...m,pending:[...new Set([...m.pending,...(this.data.mutations||[]).filter(c=>c.message===m.id&&c.conversation===conversation).flatMap(c=>c.pending)])],attachment:m.deleted?undefined:Object.entries(this.data.attachments).find(([, a]) => a.message === m.id && a.conversation === conversation)?.[0] }));
   }
   pending(peer) { return this.load().messages.filter(m => m.pending.includes(peer)); }
   files(token) { const attachment = this.load().attachments[token]; if (!attachment) throw new Error('This attachment is unavailable.'); return attachment.files; }

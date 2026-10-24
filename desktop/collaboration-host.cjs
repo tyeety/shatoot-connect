@@ -15,6 +15,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
   ipcMain.handle('collaboration', async (event, op, value = {}) => {
     const s = state(event), history = store(s);
     if(op==='list'){const list=history.list();return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
+    if(op==='message')return history.history({conversation:value.conversation,limit:100}).find(m=>m.id===value.id)||history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation);
     if(op==='history')return history.history(value).map(m=>({...m,displayName:decorateComputer({deviceId:m.sender,name:m.name}).displayName||m.name}));
     if (op === 'file-policy') return history.filePolicy(value.conversation,value.mode);
     if (op === 'pending') return history.pending(value.peer);
@@ -23,7 +24,14 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
       if (route && (typeof route !== 'object' || !['lan', 'id'].includes(route.type) || typeof route.address !== 'string' || route.address.length > 300 || (route.endpoint && (typeof route.endpoint !== 'string' || route.endpoint.length > 500)))) throw new Error('Invalid contact address.');
       rememberComputer(value.peer,route);return history.contact(value.peer, route);
     }
-    if (op === 'group') return history.group(value);
+    if(op==='group') {if(value.owner!==s.identity.deviceId){const g=grant(s,value.session);if(g.peer.deviceId!==value.owner)throw new Error('Only the group owner can edit the group.');}return history.group(value);}
+    if(op==='pending-changes')return history.pendingChanges(value.peer);
+    if(op==='delivered-change')return history.deliveredChange(value.id,value.peer);
+    if(op==='mutate') {
+      const change=value.mutation;
+      if(!value.outgoing){const g=grant(s,value.session),group=history.load().groups[change?.conversation?.slice(2)];if(change?.conversation===`p:${g.peer.deviceId}`){if(change.sender!==g.peer.deviceId)throw new Error('Invalid message author.');}else if(!group||(group.owner!==g.peer.deviceId&&(group.owner!==s.identity.deviceId||change.sender!==g.peer.deviceId)))throw new Error('Invalid message author.');}
+      return history.mutate(change,value.outgoing===true);
+    }
     if (op === 'approve-group') {
       const g = grant(s, value.session), group = value.group;
       if (!UUID.test(group?.id) || group.owner !== g.peer.deviceId || typeof group.name !== 'string' || group.name.length > 60 || !Array.isArray(group.members) || group.members.some(m => !UUID.test(m.deviceId) || typeof m.name !== 'string' || m.name.length > 60)) throw new Error('Invalid group invitation.');
@@ -124,8 +132,8 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if (op === 'finish') {
       const files = await g.receive.finish(), message = g.message; g.message = null;
       const record = history.append(message).message;
-      const attachment = history.attachment(record.conversation, record.id, files);
-      received(s,record,files);
+      const attachment = record.deleted?undefined:history.attachment(record.conversation, record.id, files);
+      if(!record.deleted)received(s,record,files);
       return { count: files.length, attachment };
     }
     if (op === 'cancel') { g.message = null; await g.receive.abort(); return; }

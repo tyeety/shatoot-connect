@@ -487,7 +487,8 @@ stage.addEventListener('drop', event => {
   })();
 });
 window.addEventListener('beforeunload', () => { for (const track of stream?.getTracks() || []) { track.onended = null; track.stop(); } pc?.close(); socket?.close(); });
-$('remote-video').addEventListener('loadeddata', () => { $('video-placeholder').hidden = true; });
+$('remote-video').addEventListener('loadeddata', () => { $('video-placeholder').hidden = true;saveDesktopPreview(); });
+$('remote-video').addEventListener('playing',saveDesktopPreview);
 
 $('connect-server').onclick = guarded(async () => {
   config.internetEnabled = await api.internetEnabled(true); $('internet-enabled').checked = true;
@@ -570,7 +571,7 @@ function renderFavorites(records) {
     const connectButton = document.createElement('button'); connectButton.className = 'favorite-connect'; connectButton.disabled = role !== 'idle';
     const name = document.createElement('b'); name.textContent = record.displayName||record.name;
     const address = document.createElement('small'); address.textContent = record.address; address.dir = 'ltr';
-    connectButton.append(name, address); connectButton.onclick = guarded(() => connectFavorite(record.id));
+    {const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/app-icon.png';avatar.alt='';connectButton.append(avatar,name,address);} connectButton.onclick = guarded(() => connectFavorite(record.id));
     const actions = document.createElement('div'); actions.className = 'favorite-actions';
     for (const [icon, title, action] of [['screen_share','Connect to a computer',()=>connectFavorite(record.id)],['person','Rename saved computer',async()=>saveComputer(await api.favoriteGet(record.id))],['shortcut', 'Create desktop shortcut', async () => { await api.favoriteShortcut(record.id); toast('Desktop shortcut created.'); }], ['close', 'Delete saved connection', async () => renderFavorites(await api.favoriteDelete(record.id))]]) {
       const button = document.createElement('button'); button.className = 'icon-button'; button.title = tr(title); button.setAttribute('aria-label', tr(title));
@@ -612,7 +613,7 @@ async function saveComputer(value){
 $('quick-save').onclick=guarded(()=>saveComputer({address:$('remote-id').value,password:$('remote-password').value,endpoint:$('server-url').value,serverKey:$('server-key').value}));
 function renderHistory(records){
   const list=$('connection-history'); list.replaceChildren(); $('history-empty').hidden=records.length>0;
-  for(const record of records){const row=document.createElement('div');row.className='history-row';const reconnect=document.createElement('button');reconnect.className='history-connect';const name=document.createElement('b'),detail=document.createElement('small');name.textContent=record.displayName||record.name;applyComputerPreview(row,record);detail.textContent=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{dateStyle:'short',timeStyle:'short'}).format(record.at);reconnect.append(name,detail);reconnect.onclick=guarded(async()=>connectRecord(await api.connections('get',record.id)));const save=document.createElement('button');save.className='icon-button';save.title=tr('Save computer');save.setAttribute('aria-label',save.title);const icon=document.createElement('span');icon.className='mi person';save.append(icon);save.onclick=guarded(async()=>saveComputer(await api.connections('get',record.id)));row.append(reconnect,save);list.append(row);}
+  for(const record of records){const row=document.createElement('div');row.className='history-row';const reconnect=document.createElement('button');reconnect.className='history-connect';const name=document.createElement('b'),detail=document.createElement('small');name.textContent=record.displayName||record.name;applyComputerPreview(row,record);detail.textContent=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{dateStyle:'short',timeStyle:'short'}).format(record.at);const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/app-icon.png';avatar.alt='';reconnect.append(avatar,name,detail);reconnect.onclick=guarded(async()=>connectRecord(await api.connections('get',record.id)));const save=document.createElement('button');save.className='icon-button';save.title=tr('Save computer');save.setAttribute('aria-label',save.title);const icon=document.createElement('span');icon.className='mi person';save.append(icon);save.onclick=guarded(async()=>saveComputer(await api.connections('get',record.id)));row.append(reconnect,save);list.append(row);}
 }
 let recallTimer;
 $('remote-id').addEventListener('input',()=>{const revision=++recallRevision;clearTimeout(recallTimer);$('remote-password').value='';const address=$('remote-id').value,endpoint=$('server-url').value;if(!config?.rememberPasswords)return;recallTimer=setTimeout(async()=>{try{const password=await api.connections('recall',{address,endpoint});if(revision===recallRevision && role==='idle' && $('remote-id').value===address && $('server-url').value===endpoint && !$('remote-password').value)$('remote-password').value=password;}catch{}},180);});

@@ -7,7 +7,10 @@ test('automatic reception defaults on, global and per-chat policies override bot
   const peer={deviceId:crypto.randomUUID(),name:'Guest'},session=crypto.randomUUID(),call=(op,value)=>handlers.get('collaboration')({},op,value),conversation=`p:${peer.deviceId}`;
   assert.equal(await call('approve',{session,peer}),true);assert.equal(prompts,0);assert.equal(s.captureAllowed,undefined);assert.equal(s.control,undefined);await call('contact',{peer});
   const text={id:crypto.randomUUID(),conversation,sender:peer.deviceId,name:peer.name,kind:'text',text:'A background message'};
+  const fakeGroup={id:crypto.randomUUID(),owner:crypto.randomUUID(),name:'Forged owner',members:[peer,{deviceId:s.identity.deviceId,name:'Me'}]};await assert.rejects(call('group',{...fakeGroup,session}),/Only the group owner/);
   await call('append',{message:text});await call('append',{message:text});assert.equal(messages.length,1,'Notify only a new incoming text');
+  const change={id:crypto.randomUUID(),message:text.id,conversation,sender:peer.deviceId,removed:false,text:'Edited by sender',revision:1};await call('mutate',{session,mutation:change});assert.equal(s.chatStore.history({conversation})[0].text,'Edited by sender');
+  await assert.rejects(call('mutate',{session,mutation:{...change,sender:crypto.randomUUID(),revision:2}}),/Invalid message author/);
   await call('append',{message:{...text,id:crypto.randomUUID(),sender:s.identity.deviceId},outgoing:true});assert.equal(messages.length,1);
   const source=path.join(root,'original.txt');fs.writeFileSync(source,'Original source');
   await handlers.get('collaboration-files')({},session,'sources',[source]);

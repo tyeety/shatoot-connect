@@ -108,7 +108,7 @@
     }
     bind(s, channel) {
       s.channel = channel; channel.bufferedAmountLowThreshold = 131072;
-      channel.onopen = () => { clearTimeout(s.timer); s.resolve(s); this.notify(); this.rpc(s, 'profile', this.self).catch(e => this.error(e.message)); this.flush(s).catch(e => this.error(e.message)); };
+      channel.onopen = () => { clearTimeout(s.timer); s.resolve(s); this.notify(); this.rpc(s,'profile',this.self).then(result=>{s.features=result?.features||[];return this.flush(s)}).catch(e=>this.error(e.message));this.flush(s).catch(e=>this.error(e.message)); };
       channel.onclose = () => this.close(s, 'Chat connection closed.');
       channel.onmessage = event => {
         if (typeof event.data !== 'string' || event.data.length > 64000) return this.close(s, 'Invalid chat packet.');
@@ -149,7 +149,7 @@
     }
     normalize(s, message) {
       if (!message || !UUID.test(message.sender) || !UUID.test(message.id) || typeof message.conversation !== 'string') throw new Error('Invalid chat message.');
-      const result = { id: message.id, conversation: message.conversation, sender: message.sender, name: '', kind: message.kind, text: message.text, at: message.at };
+      const result = { id: message.id, conversation: message.conversation, sender: message.sender, name: '', kind: message.kind, text: message.deleted?'Message deleted':message.text, at: message.at };
       if (message.conversation === `p:${this.self.deviceId}` && message.sender === s.peer.deviceId) { result.conversation = `p:${s.peer.deviceId}`; result.name = s.peer.name; return result; }
       const group = this.group(message.conversation.slice(2));
       if (!message.conversation.startsWith('g:') || !group || !group.members.some(m => m.deviceId === message.sender) || (group.owner !== s.peer.deviceId && (group.owner !== this.self.deviceId || message.sender !== s.peer.deviceId))) throw new Error('Invalid group message.');
@@ -161,12 +161,17 @@
       if (op === 'profile') {
         if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
         Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status });
-        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return true;
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1']};
       }
       if (op === 'group') {
         if (value?.owner !== s.peer.deviceId) throw new Error('Only the group owner can invite members.');
         if (!this.group(value.id) && !await this.api.collaboration('approve-group', { session: s.id, group: value })) return false;
-        await this.api.collaboration('group', value); await this.refresh(); return true;
+        await this.api.collaboration('group', {...value,session:s.id}); await this.refresh(); return true;
+      }
+      if(op==='message-change') {
+        const normalized=this.normalize(s,value),change={...value,conversation:normalized.conversation,sender:normalized.sender,pending:normalized.pending||[]};
+        await this.api.collaboration('mutate',{session:s.id,mutation:change});await this.refresh();
+        for(const id of change.pending){const next=this.peer(id);if(next)this.flush(next).catch(e=>this.error(e.message));}return true;
       }
       if (op === 'message') {
         const now = Date.now(); if (!s.textRate || now - s.textRate.at > 10000) s.textRate = { at: now, count: 0 }; if (++s.textRate.count > 100) throw new Error('Too many chat messages.');
@@ -197,11 +202,19 @@
       for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});
       return message;
     }
+    async changeMessage(conversation,id,text,removed=false){
+      await this.ready;const rows=await this.api.collaboration('history',{conversation,limit:100,search:''});let row=rows.find(m=>m.id===id);
+      if(!row)row=await this.api.collaboration('message',{conversation,id});
+      if(!row||row.sender!==this.self.deviceId||row.deleted||(!removed&&row.kind!=='text'))throw new Error('Only the sender can change this message.');
+      const group=conversation.startsWith('g:')&&this.group(conversation.slice(2)),pending=group?(group.owner===this.self.deviceId?group.members.map(m=>m.deviceId).filter(id=>id!==this.self.deviceId):[group.owner]):[conversation.slice(2)];
+      const mutation={id:crypto.randomUUID(),message:id,conversation,sender:this.self.deviceId,kind:'text',removed,text:removed?'':text,revision:(row.revision||0)+1,at:Date.now(),pending};
+      await this.api.collaboration('mutate',{mutation,outgoing:true});await this.refresh();for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});return mutation;
+    }
     async announceGroup(s, group) {
-      if (s.groups.has(group.id)) return true; if (s.declined.has(group.id)) return false;
+      if (s.groups.has(group.id)&&s.groupVersions?.get(group.id)===(group.revision||0)) return true; if (s.declined.has(group.id)) return false;
       if (group.owner !== this.self.deviceId) return true;
-      s.groupInvitations||=new Map();if(s.groupInvitations.has(group.id))return s.groupInvitations.get(group.id);
-      const invitation=this.rpc(s,'group',group).then(accepted=>{if(accepted)s.groups.add(group.id);else s.declined.add(group.id);return accepted;});s.groupInvitations.set(group.id,invitation);
+      s.groupInvitations||=new Map();if(s.groupInvitations.has(group.id)){await s.groupInvitations.get(group.id);return this.announceGroup(s,group);}
+      const invitation=this.rpc(s,'group',group).then(accepted=>{if(accepted){s.groups.add(group.id);s.groupVersions||=new Map();s.groupVersions.set(group.id,group.revision||0);}else s.declined.add(group.id);return accepted;});s.groupInvitations.set(group.id,invitation);
       try{return await invitation;}finally{s.groupInvitations.delete(group.id);}
     }
     async flush(s) {
@@ -217,18 +230,21 @@
           if (group && !await this.announceGroup(s, group)) continue;
           await this.rpc(s, 'message', this.wire(message)); await this.api.collaboration('delivered', { id: message.id, peer: s.peer.deviceId });
         }
+        const changes=await this.api.collaboration('pending-changes',{peer:s.peer.deviceId});
+        if(s.features?.includes('message-changes-v1'))for(const change of changes){const group=change.conversation.startsWith('g:')&&this.group(change.conversation.slice(2));if(group&&!await this.announceGroup(s,group))continue;await this.rpc(s,'message-change',{...change,pending:undefined,kind:'text'});await this.api.collaboration('delivered-change',{id:change.id,peer:s.peer.deviceId});}
+        else if(changes.length&&s.features&&!s.changeCompatibilityNotice){s.changeCompatibilityNotice=true;this.error('Update the other computer to synchronize message changes.');}
         await this.refresh();
         } while (s.flushAgain && !s.closed);
       } finally { s.flushing = false; }
     }
-    wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind, text: message.text, at: message.at }; }
-    async createGroup(name, members, existingId) {
+    wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind, text: message.deleted?'Message deleted':message.text, at: message.at }; }
+    async createGroup(name, members, existingId,details={}) {
       if (typeof name !== 'string' || !name.trim() || name.length > 60) throw new Error('Enter a group name of up to 60 characters.');
       if(!Array.isArray(members))throw new Error('Invalid group membership.');
       const previous=existingId&&this.group(existingId);if(existingId&&(!previous||previous.owner!==this.self.deviceId))throw new Error('Only the group owner can change members.');
       const candidates=new Map([...this.catalog.contacts,...this.connected(),...(previous?.members||[])].map(p=>[p.deviceId,p]));
       const peers=[...new Set(members)].filter(id=>id!==this.self.deviceId).map(id=>candidates.get(id));if(peers.some(p=>!p))throw new Error('Unknown group contact.');
-      const group = { id: existingId||crypto.randomUUID(), name, owner: this.self.deviceId, members: [this.self, ...peers].map(p => ({ deviceId: p.deviceId, name: p.name })) };
+      const group = { id: existingId||crypto.randomUUID(), name,description:details.description??previous?.description??'',avatar:details.avatar??previous?.avatar??'',revision:(previous?.revision||0)+1, owner: this.self.deviceId, members: [this.self, ...peers].map(p => ({ deviceId: p.deviceId, name: p.name })) };
       await this.api.collaboration('group', group);
       await this.refresh();
       for(const peer of peers){const s=this.peer(peer.deviceId);if(s){s.groups.delete(group.id);s.declined.delete(group.id);this.announceGroup(s,group).catch(error=>this.error(error.message));}else{const contact=this.catalog.contacts.find(c=>c.deviceId===peer.deviceId);if(contact?.route)this.connect({...contact.route,deviceId:peer.deviceId,name:peer.name}).catch(()=>{});}}

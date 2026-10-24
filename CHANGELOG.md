@@ -13,6 +13,26 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.18.0 — 2026-10-24
+
+### Added
+
+- Copy beneath chat messages; senders can edit their text messages or delete their own text/file/voice messages. Changes persist in encrypted history, queue while offline, deduplicate by revision, and propagate through group owners. Deleted messages retain a tombstone; downloaded or original files are not erased from disk.
+- Group owners can update the group name, description, photo and membership. Photos support the same PNG/JPEG/WebP/GIF/AVIF decoding as profile photos. Group revisions prevent older metadata from reverting a newer edit.
+
+### Fixed
+
+- Restrict list loading animations to the manual nearby-computer Refresh button. Background discovery, receipts and history updates no longer animate every list. Keep ordinary button feedback and align all top header buttons to the same height.
+- Capture the first decoded/playing remote desktop frame automatically, including short sessions, and retain the preview offline. Reduce the dark-purple card overlay opacity so the cached desktop image is visible. Recent and saved computer cards now include profile avatars.
+- Recheck GitHub releases immediately before downloading/installing and after download; select the highest stable published version instead of trusting a previously cached package or the latest-release marker. Verify package size and SHA-256 again before reusing a download; refuse an incomplete newer release rather than installing an older one.
+- Wait for the validated update worker's readiness acknowledgement before quitting. Installed updates explicitly retain their installation scope, relaunch the application visibly and require the new version/executable to acknowledge startup. Preserve the last update result and surface failures on the next startup. Recognize four-part Windows product versions when cleaning old portable backups.
+- Exercise the installed updater through real NSIS installation and packaged application restart in clean Windows CI, in addition to portable rollback, shortcut and profile-preservation checks.
+
+### Compatibility
+
+- Desktop protocol 2 and the existing coordinator remain compatible; no exact application version match is required. Synchronized message edit/delete requires version 0.18.0 or newer on each participant, including the group owner. Older clients still exchange ordinary messages/files; pending changes wait for a capable peer. Existing credentials, settings, contacts and chat history are retained.
+- Desktop previews become available after viewing an approved remote desktop; chat alone does not grant screenshot access. Deleting a message removes it from the synchronized app history view, not from already exported/copied content or files on disk.
+
 ## 0.17.1 — 2026-10-24
 
 ### Fixed

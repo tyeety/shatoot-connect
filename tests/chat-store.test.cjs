@@ -14,6 +14,15 @@ function fixture(t) {
     decrypt: bytes => { if (bytes.length < 28) throw new Error('Invalid envelope'); const cipher = crypto.createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12), { authTagLength: 16 }); cipher.setAuthTag(bytes.subarray(12, 28)); return Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]).toString(); } };
   const store = new ChatStore(options); store.contact({ deviceId: peer, name: 'همکار' }, { type: 'lan', address: '192.168.1.10:8788' }); return { store, options, self, peer, other };
 }
+test('sender edits/deletes persist, queue offline, reject forged authors and preserve tombstones on replay',t=>{
+  const {store,options,self,peer,other}=fixture(t),conversation=`p:${peer}`,id=crypto.randomUUID();store.append({id,conversation,sender:self,name:'Me',kind:'text',text:'original',pending:[peer]},true);
+  const edit={id:crypto.randomUUID(),message:id,conversation,sender:self,removed:false,text:'updated',revision:1,pending:[peer]};store.mutate(edit,true);
+  assert.equal(new ChatStore(options).history({conversation})[0].text,'updated');assert.equal(store.pendingChanges(peer).length,1);
+  assert.throws(()=>store.mutate({...edit,sender:other,revision:2},true),/Invalid/);
+  const deleted={...edit,id:crypto.randomUUID(),revision:2,removed:true};store.mutate(deleted,true);assert.equal(store.history({conversation})[0].deleted,true);assert.equal(store.history({conversation})[0].text,'');
+  assert.throws(()=>store.mutate({...edit,revision:3},true),/cannot be changed/);store.deliveredChange(deleted.id,peer);assert.equal(store.pendingChanges(peer).length,0);
+  const late=crypto.randomUUID();store.mutate({...deleted,id:crypto.randomUUID(),message:late,sender:peer,revision:1});store.append({id:late,conversation,sender:peer,name:'Peer',kind:'text',text:'late original'});assert.equal(store.history({conversation}).find(m=>m.id===late).deleted,true);
+});
 test('encrypted history survives restart, deduplicates delivery, paginates without timestamp gaps and persists the outbox', t => {
   const { store, options, self, peer } = fixture(t);
   for (let index = 0; index < 125; index++) store.append({ id: crypto.randomUUID(), conversation: `p:${peer}`, sender: self, name: 'Me', kind: 'text', text: `پیام ${index}`, pending: [peer] }, true);

@@ -6,13 +6,13 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 The chat window uses a blue speech-bubble icon and a role-first **Chats · Shatoot Connect** title, distinct from the main purple application icon. Both update buttons keep a dedicated download percentage visible in English and Persian, even when the status text is clipped in a narrow header.
 
-## Version 0.17.1
+## Version 0.18.0
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.17.1-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.17.1-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.17.1-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.18.0-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.18.0-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.18.0-win-x64.zip` | Coordinator, runtime and service manager |
 
 Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. An exact application version match is not required: remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
@@ -34,9 +34,9 @@ Setup checks the OS/architecture, destination, write access, destination/TEMP di
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.17.1-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.17.1-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.17.1-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.18.0-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.18.0-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.18.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.
@@ -83,11 +83,13 @@ A separate reliable WebRTC data connection carries messages/files. The coordinat
 
 Contacts, groups, transcripts and queued text are atomically saved in a DPAPI-encrypted `%APPDATA%\shatoot-connect\chat-<device-id>.dat` file. Search and **Load older messages** operate locally. A delivery acknowledgement follows recipient persistence; it is not a human read receipt. Text to disconnected saved contacts queues until a new approved connection. There is no server-hosted offline mailbox. Limits are 50,000 messages / 32 MiB; full or unreadable history reports an error without silently overwriting the old transcript. Received file contents are ordinary Downloads files, not encrypted database blobs.
 
+Each message has **Copy**. Your own text messages also have **Edit message**; **Delete message** is available for your own text, file and voice messages. Changes persist and queue for offline recipients, including group-owner relay. Deleted messages show a tombstone and do not delete files from disk. All participants, including a group owner, need 0.18.0 or newer to synchronize edits/deletions; older clients continue ordinary messaging, and queued changes wait for an upgraded peer.
+
 LAN announcements/plain signaling are not cryptographic human-identity certificates. Verify computer names and accept intended invitations. Internet registration verifies a persisted device secret against the coordinator, not a directory login or a person's identity. Names/text are rendered as text, never executable HTML.
 
 ## Groups
 
-Choose **New group** and enter a name. You may create it with no other members, then use **Add members** later. The chooser includes saved chat contacts and discovered LAN peers, including offline contacts. There is no minimum or fixed group-member count. Invitations are offered when a selected contact connects; the recipient still approves joining. Stored membership does not imply acceptance. Actual concurrent transports remain bounded (16 chat connections per client/coordinator socket); very large groups are not a guarantee of unlimited simultaneous connectivity. LAN and ID routes can be mixed.
+Choose **New group** and enter a name. You may create it with no other members, then use **Edit group** later. Only the owner can edit the name, description, photo and member list; connected members receive metadata changes immediately and offline members receive them after reconnecting. The chooser includes saved chat contacts and discovered LAN peers, including offline contacts. There is no minimum or fixed group-member count. Invitations are offered when a selected contact connects; the recipient still approves joining. Stored membership does not imply acceptance. Actual concurrent transports remain bounded (16 chat connections per client/coordinator socket); very large groups are not a guarantee of unlimited simultaneous connectivity. LAN and ID routes can be mixed.
 
 The creator's client is the **owner and relay**. It forwards group messages to members and persists a queue for temporarily disconnected members. The owner must be online for group delivery. If it is offline, members retain outgoing text until reconnecting. A member's delivery acknowledgement confirms persistence by the owner, not delivery/read status for every member.
 
@@ -110,6 +112,8 @@ Paste a clipboard image into the message field to send it through the existing f
 Approved **desktop control** sessions have a separate clipboard channel for Unicode text and Explorer files/folders in both directions. A file drop on remote video transfers, clicks the target and pastes; it is not arbitrary OLE drop support. Clipboard failure after completed delivery does not discard received files. Rich text/image clipboard formats are not synchronized. Chat alone never grants this clipboard permission.
 
 ## Updates, profile and availability
+
+Update installation rechecks the recent published GitHub releases before and after downloading and chooses the highest stable version, even if GitHub's latest marker or a previous check points at an older release. An incomplete newer release reports an error. The current process stays open until the verified update worker acknowledges readiness. The worker installs, visibly relaunches the app and verifies its version/startup acknowledgement; failures remain in `%APPDATA%\shatoot-connect\updates\last-update.json` and are shown on the next launch. The installed update/restart path is tested on a clean Windows runner; personal settings and history remain in the same Windows profile.
 
 The packaged client checks the latest stable GitHub Release at startup and every six hours. Settings > Updates also provides a manual check. **Update and restart** downloads the matching installed/portable Windows x64 package, checks its exact length and GitHub asset SHA-256 digest, then runs the update worker after the old process exits. A failed/corrupt download leaves the running app untouched. Installed editions use the existing installer/installation folder; portable editions replace the original executable and keep a `.previous` backup until the new client confirms successful startup. Successful startup removes that backup, the downloaded package and obsolete updater-cache packages. Portable startup failure restores the working executable. Startup also cleans recognized backups left by older updaters; manually downloaded copies outside the updater cache are preserved. Updating never deletes the Windows user profile, encrypted passwords, favorites or chat database. Keep the same Windows account so DPAPI data remains readable. Updating restarts the client and ends active sessions/transfers. Source/dev launches cannot install updates. Version 0.10.0 needs one manual upgrade to acquire the updater. Server service upgrades still use the separate server package.
 

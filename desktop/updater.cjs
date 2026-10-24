@@ -11,7 +11,7 @@ function electronResponse(url) {
   if (!trustedAddress(url)) return Promise.reject(new Error('Untrusted update download address.'));
   return new Promise((resolve,reject) => {
     const request = require('electron').net.request({ url, redirect: 'manual', useSessionCookies: false }); let redirects = 0;
-    request.setHeader('User-Agent','ShatootConnect-Updater'); request.setHeader('Accept','application/vnd.github+json');
+    request.setHeader('User-Agent','ShatootConnect-Updater'); request.setHeader('Accept','application/vnd.github+json');request.setHeader('Cache-Control','no-cache');request.setHeader('Pragma','no-cache');
     const timer = setTimeout(() => { request.abort(); reject(new Error('Update request timed out.')); },30000);
     request.on('redirect', (_status,_method,target) => { if (++redirects > 5 || !trustedAddress(target)) { clearTimeout(timer); request.abort(); reject(new Error('Untrusted update download address.')); } else request.followRedirect(); });
     request.on('error', error => { clearTimeout(timer); reject(error); });
@@ -37,7 +37,7 @@ function response(url, redirects = 0) {
   const u = new URL(url);
   if (u.protocol !== 'https:' || u.username || u.password || !['api.github.com', 'github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(u.hostname) || redirects > 5) return Promise.reject(new Error('Untrusted update download address.'));
   return new Promise((resolve, reject) => {
-    const req = https.get(u, { headers: { 'User-Agent': 'ShatootConnect-Updater', Accept: 'application/vnd.github+json' }, timeout: 30000 }, res => {
+    const req = https.get(u, { headers: { 'User-Agent': 'ShatootConnect-Updater', Accept: 'application/vnd.github+json','Cache-Control':'no-cache' }, timeout: 30000 }, res => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode)) { res.resume(); response(new URL(res.headers.location, u).href, redirects + 1).then(resolve, reject); }
       else if (res.statusCode !== 200) { res.resume(); reject(new Error(`GitHub update request failed (${res.statusCode}). Try again later.`)); }
       else resolve(res);
@@ -52,12 +52,26 @@ class Updater {
     if (this.busy) return this.status;
     this.busy = true; this.emit({ state: 'checking', error: '' });
     try {
-      const res = await this.request(`https://api.github.com/repos/${REPOSITORY}/releases/latest`); let text = '';
+      const res = await this.request(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=100&_=${Date.now()}`); let text = '';
       for await (const chunk of res) { text += chunk; if (text.length > 2 * 1024 ** 2) { res.destroy(); throw new Error('Update metadata is too large.'); } }
-      this.asset = assetFor(JSON.parse(text), this.version, this.portable);
+      const releases=JSON.parse(text);if(!Array.isArray(releases))throw new Error('Invalid release metadata.');
+      const latest=releases.filter(r=>!r.draft&&!r.prerelease&&newer(String(r.tag_name||'').replace(/^v/,''),this.version)).reduce((a,b)=>!a||newer(b.tag_name.replace(/^v/,''),a.tag_name.replace(/^v/,''))?b:a,null);
+      this.asset = latest?assetFor(latest, this.version, this.portable):null;
       return this.emit({ state: this.asset ? 'available' : 'current', version: this.asset?.version || this.version });
     } catch (error) { return this.emit({ state: 'error', error: error.message }); }
     finally { this.busy = false; }
+  }
+  async prepare(){
+    if(this.preparing||this.busy)throw new Error('An update is already in progress.');this.preparing=true;
+    try{for(let pass=0;pass<3;pass++){
+      const status=await this.check();if(status.state==='error')throw new Error(status.error);if(!this.asset)throw new Error('The latest version is already installed.');
+      const asset=this.asset,target=path.join(this.directory,asset.name);
+      let valid=false;if(fs.existsSync(target)&&fs.statSync(target).size===asset.size){const hash=crypto.createHash('sha256');for await(const chunk of fs.createReadStream(target))hash.update(chunk);valid=hash.digest('hex')===asset.digest;}
+      if(valid){this.file=target;this.emit({state:'ready',percent:100});}else await this.download();
+      const fresh=await this.check();if(fresh.state==='error')throw new Error(fresh.error);
+      if(this.asset?.version===asset.version&&this.asset.digest===asset.digest){this.emit({state:'ready',percent:100});return this.file;}
+    }throw new Error('A newer release appeared during download. Please retry.');}
+    catch(error){this.emit({state:'error',error:error.message});throw error;}finally{this.preparing=false;}
   }
   async download() {
     if (this.busy || !this.asset) throw new Error('Check for a new version first.');

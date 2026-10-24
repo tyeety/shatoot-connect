@@ -24,9 +24,18 @@ public class NewUpdateFixture { public static void Main(string[] args) {
     $keep=Join-Path $cache 'keep.txt';[IO.File]::WriteAllText($keep,'unrelated')
     $worker=Join-Path $workspaceRoot 'desktop/update-worker.ps1';$digest=Get-Sha256 $newExe
     function Run-Worker([string]$Package,[string]$Hash,[string]$Version,[int]$Expected=0){
-        $token=[guid]::NewGuid().ToString();$arguments="-NoProfile -ExecutionPolicy Bypass -File `"$worker`" -ParentId 2147483647 -Package `"$Package`" -Target `"$target`" -Digest $Hash -Version $Version -ReadyToken $token -CacheDirectory `"$cache`" -Portable"
+        $parentFixture=$null;$parentFixtureId=2147483647;$beforeHash=Get-Sha256 $target
+        if($Expected -eq 0){$parentFixture=Start-Process powershell.exe -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 30' -WindowStyle Hidden -PassThru;$parentFixtureId=$parentFixture.Id}
+        $token=[guid]::NewGuid().ToString();$arguments="-NoProfile -ExecutionPolicy Bypass -File `"$worker`" -ParentId $parentFixtureId -Package `"$Package`" -Target `"$target`" -Digest $Hash -Version $Version -ReadyToken $token -CacheDirectory `"$cache`" -Portable"
         $process=Start-Process -FilePath powershell.exe -ArgumentList $arguments -WindowStyle Hidden -PassThru
+        if($parentFixture){try{
+            $handshake=Join-Path $cache ($token+'.worker.json');for($i=0;$i -lt 100 -and !(Test-Path -LiteralPath $handshake);$i++){Start-Sleep -Milliseconds 100}
+            if(!(Test-Path -LiteralPath $handshake) -or (Get-Sha256 $target) -ne $beforeHash){throw 'Worker failed to acknowledge readiness before waiting for the app to close.'}
+            $ack=Get-Content -LiteralPath $handshake -Raw|ConvertFrom-Json;if($ack.token -ne $token -or $ack.version -ne $Version){throw 'Invalid worker handshake.'}
+        }finally{Stop-Process -Id $parentFixture.Id -Force -ErrorAction SilentlyContinue}}
         if(!$process.WaitForExit(90000)){Stop-Process -Id $process.Id -Force;throw 'Update worker timed out.'};$process.Refresh();if($process.ExitCode -ne $Expected){throw "Unexpected update worker result $($process.ExitCode), expected $Expected."}
+        $result=Get-Content -LiteralPath (Join-Path $cache 'last-update.json') -Raw|ConvertFrom-Json
+        if($result.token -ne $token -or $result.state -ne $(if($Expected -eq 0){'installed'}else{'error'})){throw 'Worker did not retain the correct update result.'}
     }
     Run-Worker $newExe $digest '0.14.0'
     if((Get-Sha256 $target) -ne $digest -or !(Test-Path -LiteralPath ([IO.Path]::ChangeExtension($target,'.started')))){throw 'Updated app did not restart.'}

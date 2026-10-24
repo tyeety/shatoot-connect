@@ -68,6 +68,10 @@ module.exports=async({host,states,app,dialog,update,log,artifacts})=>{
     }
     update.emit({state:'error',error:'Update network interrupted'});await until(()=>run("!document.querySelector('#action-snackbar').hidden && document.querySelector('#action-snackbar').textContent.includes('Update network interrupted')"));
     update.emit({state:'current',version:'0.0.0'});
+    for(const language of ['en','fa']){await run(`window.i18n.setLanguage('${language}');true`);if(!await run("(()=>{const buttons=['own-profile','open-messenger','open-settings'].map(id=>document.getElementById(id).getBoundingClientRect());return buttons.every(b=>Math.abs(b.height-38)<1&&Math.abs(b.top-buttons[0].top)<1)})()"))throw Error('Header button heights/alignment differ in '+language);}
+    await run("window.i18n.setLanguage('en');window.automaticListAnimations=0;window.animationProbe=new MutationObserver(records=>{for(const r of records)if(r.target.classList.contains('data-feedback'))automaticListAnimations++});animationProbe.observe(document.body,{attributes:true,attributeFilter:['class'],subtree:true});renderFavorites(config.favorites);true");
+    await pause(500);if(await run('automaticListAnimations!==0'))throw Error('Background list rendering triggered a loading animation');
+    await run("animationProbe.disconnect();document.querySelector('#refresh-discovery').click();true");await until(()=>run("document.querySelector('#network-list').classList.contains('data-feedback')"));
     log('Update progress stays visible outside Settings and a failed update reports its error');
     if(!await run("!!document.querySelector('.favorite-actions .mi.shortcut') && !!document.querySelector('.favorite-actions .mi.screen_share')"))throw Error('Saved computer actions omitted shortcut/connect icons');
     await run("window.sentEnd=[];role='viewer';sessionRoute='lan-viewer';directSocket={readyState:1,send:value=>sentEnd.push(JSON.parse(value)),close:()=>{}};updateControls();api.fitVideo({width:3840,height:2160}).then(()=>true)");
