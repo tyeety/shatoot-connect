@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   onChatFilesReceived: callback => ipcRenderer.on('chat-files-received',(_event,value)=>callback(value)),
   noticeInfo: () => ipcRenderer.invoke('notice-info'),
   noticeAnswer: index => ipcRenderer.send('notice-answer',index),
+  onRemoteWindowClose:callback=>ipcRenderer.on('remote-window-close',()=>callback()),
+  remoteWindowClosed:()=>ipcRenderer.invoke('remote-window-closed'),
   fitVideo: size => ipcRenderer.invoke('fit-video',size),
   overlayHide: () => ipcRenderer.send('overlay-hide'),
   connections: (operation,value) => ipcRenderer.invoke('connections',operation,value),

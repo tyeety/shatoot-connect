@@ -6,6 +6,24 @@
     constructor({ api, self, internet, ensureInternet, changed = () => {}, error = () => {}, progress = () => {} }) {
       Object.assign(this, { api, self, internet, ensureInternet, changed, error, progress }); this.sessions = new Map(); this.connectAttempts=new Set(); this.fileQueue = Promise.resolve(); this.catalog = { contacts: [], groups: [], conversations: [] }; this.ready = this.refresh();
     }
+    async ensurePeer(id,background=false) {
+      const current=this.peer(id);if(current)return current;
+      const nearby=this.nearby?.find(p=>p.deviceId===id),saved=this.catalog.contacts.find(p=>p.deviceId===id);
+      const route=nearby?.endpoints?.length?{type:'lan',address:nearby.endpoints[0]}:saved?.route;
+      if(!route)throw new Error('This contact is offline.');
+      return this.connect({...route,deviceId:id,name:saved?.name||nearby?.name,background});
+    }
+    async reconnectKnown(){
+      if(this.reconnecting)return;this.reconnecting=true;this.retries||=new Map();
+      try{await this.ready;for(const peer of this.catalog.contacts){
+        if(this.peer(peer.deviceId)||this.sessions.size>=14||this.connectAttempts.size>=2)continue;
+        const nearby=this.nearby?.some(p=>p.deviceId===peer.deviceId);
+        if((!nearby&&!peer.route)||(nearby&&this.self.deviceId>peer.deviceId)||Date.now()<(this.retries.get(peer.deviceId)||0))continue;
+        if(!nearby&&peer.route?.type==='id'&&!this.internet().registered)continue;
+        this.retries.set(peer.deviceId,Date.now()+60000);
+        this.ensurePeer(peer.deviceId,true).catch(()=>{});
+      }}finally{this.reconnecting=false;}
+    }
     async refresh() { this.catalog = await this.api.collaboration('list'); this.notify(); }
     notify() { this.changed(); }
     peer(id) { return [...this.sessions.values()].find(s => !s.closed && s.peer?.deviceId === id && s.channel?.readyState === 'open'); }
@@ -17,7 +35,7 @@
       s.promise = new Promise((resolve, reject) => { s.resolve = resolve; s.reject = reject; }); s.promise.catch(() => {});
       s.timer = setTimeout(() => this.close(s, 'Chat invitation timed out.'), 65000); this.sessions.set(id, s); this.notify(); return s;
     }
-    async connect(destination){const attempt=new window.ConnectionAttempt();this.connectAttempts.add(attempt);this.notify();try{return await this.connectDestination(destination,attempt);}finally{this.connectAttempts.delete(attempt);this.notify();}}
+    async connect(destination){const attempt=new window.ConnectionAttempt();attempt.background=destination.background===true;this.connectAttempts.add(attempt);this.notify();try{return await this.connectDestination(destination,attempt);}finally{this.connectAttempts.delete(attempt);this.notify();}}
     cancelPending(){for(const attempt of this.connectAttempts)attempt.cancel();for(const s of [...this.sessions.values()])if(s.outgoingAttempt&&s.channel?.readyState!=='open')this.close(s,'Connection cancelled.');}
     async connectDestination(destination,attempt) {
       await attempt.wait(this.ready);
@@ -54,6 +72,8 @@
       if (message.type === 'collab-invite') {
         if (this.sessions.has(message.session) || !UUID.test(message.peer?.deviceId) || message.peer.deviceId === this.self.deviceId) return;
         if (this.peer(message.peer.deviceId) || this.sessions.size >= 16) { route.send({ type: 'collab-reject', session: message.session }); return; }
+        const outgoing=[...this.sessions.values()].find(s=>s.outgoingAttempt&&s.peer?.deviceId===message.peer.deviceId&&!s.closed);
+        if(outgoing){if(this.self.deviceId<message.peer.deviceId){route.send({type:'collab-reject',session:message.session});return;}this.close(outgoing,'Chat connection replaced.');}
         const s = this.session(message.session, route, message.peer);
         this.api.collaboration('approve', { session: s.id, peer: s.peer }).then(accepted => {
           if (s.closed) { this.api.collaboration('end', { session: s.id }).catch(() => {}); return; }
@@ -174,7 +194,7 @@
       const pending = group ? (group.owner === this.self.deviceId ? group.members.map(m => m.deviceId).filter(id => id !== this.self.deviceId) : [group.owner]) : [conversation.slice(2)];
       const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'text', text: text.trim(), at: Date.now(), pending };
       await this.api.collaboration('append', { message, outgoing: true }); await this.refresh();
-      for (const id of pending) { const s = this.peer(id); if (s) this.flush(s).catch(error => this.error(error.message)); }
+      for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});
       return message;
     }
     async announceGroup(s, group) {
@@ -220,11 +240,13 @@
     async sendSelectedFiles(conversation, selection = 'pick', value) {
       const group = conversation.startsWith('g:') && this.group(conversation.slice(2));
       const ids = group ? (group.owner === this.self.deviceId ? group.members.map(m => m.deviceId).filter(id => id !== this.self.deviceId) : [group.owner]) : [conversation.slice(2)];
+      await Promise.all(ids.map(id=>this.ensurePeer(id)));
       const targets = ids.map(id => this.peer(id)); if (targets.some(s => !s)) throw new Error('All file recipients must be connected. Connect them and try again.');
       const first = targets[0]; if (!first) throw new Error('Connect to a contact first.');
       const entries = selection === 'drop' ? await this.api.collaborationDrop(first.id, value) : await this.api.collaborationFiles(first.id, selection, value); if (!entries.length) return;
       const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'file', text: entries.slice(0, 12).map(e => e.name).join('\n').slice(0, 7800) + (entries.length > 12 ? `\n+ ${entries.length - 12}` : ''), at: Date.now(), pending: ids };
-      await this.api.collaboration('append', { message, outgoing: true }); await this.refresh();
+      await this.api.collaboration('append', { message, outgoing: true });
+      await this.api.collaborationFiles(first.id,'attach-sources',{id:message.id,conversation});await this.refresh();
       for (const s of targets) {
         if (group && !await this.announceGroup(s, group)) continue;
         try { await this.transfer(s, entries, message, first); await this.api.collaboration('delivered', { id: message.id, peer: s.peer.deviceId }); }

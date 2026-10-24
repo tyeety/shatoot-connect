@@ -18,7 +18,7 @@ let connectionAttempt, recallRevision=0;
 function signalReady() { return sessionRoute === 'lan-host' || (sessionRoute === 'lan-viewer' ? directSocket : socket)?.readyState === WebSocket.OPEN; }
 
 function status(message, error = false) { if(error && role==='viewer' && $('file-transfer-status')){$('file-transfer-status').hidden=false;$('file-transfer-status').textContent=tr(message);} if ($('settings-status')) { $('settings-status').textContent = tr(message); $('settings-status').classList.toggle('error', error); } $('session-status').textContent = tr(message); $('session-status').classList.toggle('error', error); }
-function toast(message) { if(!config?.smoke){api.notify(tr(message)).catch(()=>{});return;} $('toast').textContent = tr(message); $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 6500); }
+function toast(message) { window.actionNotice?.(tr(message)); }
 function serverState(online, text) { $('server-status').dataset.state = online ? 'online' : 'offline'; $('server-status').querySelector('span').textContent = tr(text); }
 function send(message) {
   if (sessionRoute === 'lan-host') { api.directSend(JSON.parse(JSON.stringify(message))); return; }
@@ -344,8 +344,9 @@ function closePeer() {
   $('session-panel').hidden = true; document.body.classList.remove('viewing');
   for (const id of ['stat-rtt','stat-fps','stat-size','stat-bitrate','stat-codec','stat-route']) $(id).textContent = '—';
 }
+api.onRemoteWindowClose(async()=>{try{stopSession(true);await api.fitVideo(null);}finally{await api.remoteWindowClosed();}});
 function stopSession(notify = true) {
-  if (notify && signalReady() && (role !== 'idle' || requestPending)) send({ type: 'end-session' });
+  if (notify && signalReady() && (role !== 'idle' || requestPending))try{send({ type: 'end-session' });}catch{}
   closePeer();
   if (stream) { for (const track of stream.getTracks()) { track.onended = null; track.stop(); } stream = null; }
   api.revoke().catch(() => {}); role = 'idle';
@@ -571,7 +572,7 @@ function renderFavorites(records) {
     const address = document.createElement('small'); address.textContent = record.address; address.dir = 'ltr';
     connectButton.append(name, address); connectButton.onclick = guarded(() => connectFavorite(record.id));
     const actions = document.createElement('div'); actions.className = 'favorite-actions';
-    for (const [icon, title, action] of [['person','Rename saved computer',async()=>saveComputer(await api.favoriteGet(record.id))],['desktop_windows', 'Create desktop shortcut', async () => { await api.favoriteShortcut(record.id); toast('Desktop shortcut created.'); }], ['close', 'Delete saved connection', async () => renderFavorites(await api.favoriteDelete(record.id))]]) {
+    for (const [icon, title, action] of [['screen_share','Connect to a computer',()=>connectFavorite(record.id)],['person','Rename saved computer',async()=>saveComputer(await api.favoriteGet(record.id))],['shortcut', 'Create desktop shortcut', async () => { await api.favoriteShortcut(record.id); toast('Desktop shortcut created.'); }], ['close', 'Delete saved connection', async () => renderFavorites(await api.favoriteDelete(record.id))]]) {
       const button = document.createElement('button'); button.className = 'icon-button'; button.title = tr(title); button.setAttribute('aria-label', tr(title));
       const image = document.createElement('span'); image.className = `mi ${icon}`; image.setAttribute('aria-hidden', 'true'); button.append(image);if(title==='Rename saved computer'){button.classList.add('rename-computer');const label=document.createElement('span');label.textContent=tr('Rename');button.append(label);} button.onclick = guarded(action); actions.append(button);
     }

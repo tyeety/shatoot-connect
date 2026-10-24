@@ -2,13 +2,22 @@ const {test}=require('node:test');const assert=require('node:assert/strict');con
 const{installCollaboration}=require('../desktop/collaboration-host.cjs');const{ChatStore}=require('../desktop/chat-store.cjs');
 test('automatic reception defaults on, global and per-chat policies override both ways without granting control',async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'shatoot-chat-permission-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
-  const handlers=new Map(),s={identity:{deviceId:crypto.randomUUID()},language:'en',win:{}},prefs={};let prompts=0,answer;const completed=[];
-  const host=installCollaboration({ipcMain:{handle:(n,f)=>handlers.set(n,f)},state:()=>s,app:{getPath:name=>path.join(root,name)},safeStorage:{isEncryptionAvailable:()=>true,encryptString:text=>Buffer.from(text),decryptString:bytes=>bytes.toString()},dialog:{showMessageBox:async()=>{prompts++;return answer?answer():{response:0}}},shell:{},smoke:false,settings:()=>prefs,received:(_s,record,files)=>completed.push({record,files})});t.after(()=>host.close(s));
+  const handlers=new Map(),s={identity:{deviceId:crypto.randomUUID()},language:'en',win:{}},prefs={};let prompts=0,answer;const completed=[],messages=[],opened=[];
+  const host=installCollaboration({ipcMain:{handle:(n,f)=>handlers.set(n,f)},state:()=>s,app:{getPath:name=>path.join(root,name)},safeStorage:{isEncryptionAvailable:()=>true,encryptString:text=>Buffer.from(text),decryptString:bytes=>bytes.toString()},dialog:{showMessageBox:async()=>{prompts++;return answer?answer():{response:0}}},shell:{openPath:async file=>{opened.push(file);return ""}},smoke:false,settings:()=>prefs,received:(_s,record,files)=>completed.push({record,files}),messageReceived:(_s,record)=>messages.push(record)});t.after(()=>host.close(s));
   const peer={deviceId:crypto.randomUUID(),name:'Guest'},session=crypto.randomUUID(),call=(op,value)=>handlers.get('collaboration')({},op,value),conversation=`p:${peer.deviceId}`;
   assert.equal(await call('approve',{session,peer}),true);assert.equal(prompts,0);assert.equal(s.captureAllowed,undefined);assert.equal(s.control,undefined);await call('contact',{peer});
+  const text={id:crypto.randomUUID(),conversation,sender:peer.deviceId,name:peer.name,kind:'text',text:'A background message'};
+  await call('append',{message:text});await call('append',{message:text});assert.equal(messages.length,1,'Notify only a new incoming text');
+  await call('append',{message:{...text,id:crypto.randomUUID(),sender:s.identity.deviceId},outgoing:true});assert.equal(messages.length,1);
+  const source=path.join(root,'original.txt');fs.writeFileSync(source,'Original source');
+  await handlers.get('collaboration-files')({},session,'sources',[source]);
+  const sent={...text,id:crypto.randomUUID(),sender:s.identity.deviceId,kind:'file',text:'original.txt'};await call('append',{message:sent,outgoing:true});
+  const attachment=await handlers.get('collaboration-files')({},session,'attach-sources',{id:sent.id,conversation});
+  assert.deepEqual(s.chatStore.files(attachment),[source]);await call('open-attachment',{token:attachment});assert.deepEqual(opened,[source]);
+  await assert.rejects(handlers.get('collaboration-files')({},session,'attach-sources',{id:text.id,conversation}),/Invalid outgoing/);
   prefs.requireChatApproval=true;assert.equal(await call('approve',{session:crypto.randomUUID(),peer}),false);assert.equal(prompts,1);
   const files=(op,value)=>handlers.get('collaboration-files')({},session,op,value),offer=()=>({entries:[{name:'safe.txt',size:0}],message:{id:crypto.randomUUID(),kind:'file',conversation,sender:peer.deviceId,name:peer.name,text:'safe.txt'}});
-  const value=offer();assert.equal(await files('begin',value),true);assert.equal(prompts,1);await files('end-file',{index:0,hash:crypto.createHash('sha256').digest('hex')});const result=await files('finish');assert.equal(result.count,1);assert.equal(completed.length,1);assert.equal(path.dirname(path.dirname(completed[0].files[0])),path.join(root,'downloads'));assert.equal(fs.readFileSync(completed[0].files[0],'utf8'),'');assert.equal(s.chatStore.history({conversation})[0].attachment,result.attachment);
+  const value=offer();assert.equal(await files('begin',value),true);assert.equal(prompts,1);await files('end-file',{index:0,hash:crypto.createHash('sha256').digest('hex')});const result=await files('finish');assert.equal(result.count,1);assert.equal(completed.length,1);assert.equal(path.dirname(path.dirname(completed[0].files[0])),path.join(root,'downloads'));assert.equal(fs.readFileSync(completed[0].files[0],'utf8'),'');assert.equal(s.chatStore.history({conversation}).find(row=>row.id===value.message.id).attachment,result.attachment);
   prefs.autoAcceptFiles=false;await assert.rejects(files('begin',offer()),/declined/);assert.equal(prompts,2);
   await call('file-policy',{conversation,mode:'accept'});assert.equal(await files('begin',offer()),true);assert.equal(prompts,2);await files('cancel');
   prefs.autoAcceptFiles=true;await call('file-policy',{conversation,mode:'ask'});await assert.rejects(files('begin',offer()),/declined/);assert.equal(prompts,3);

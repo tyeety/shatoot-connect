@@ -20,10 +20,10 @@ class Transfers {
       if (entries.length > 1000 || total > LIMIT) throw new Error('Transfer limit: 1000 files and 10 GB.');
     };
     // A new local selection replaces old grants; the peer never chooses source paths.
-    this.sources.clear();
+    this.sources.clear(); this.selectedPaths=[];
     try { for (const file of paths) { const name = path.basename(file); if (names.has(name.toLowerCase())) throw new Error('Select files with distinct top-level names.'); names.add(name.toLowerCase()); await visit(file, name); } }
     catch (e) { this.sources.clear(); throw e; }
-    return entries;
+    this.selectedPaths=[...paths];return entries;
   }
   async read({ id, offset }) {
     const grant = this.sources.get(id);
@@ -67,6 +67,6 @@ class Transfers {
     await fs.rmdir(s.parts); this.completed = [...new Set(s.entries.map(e => path.join(s.folder, e.name.split('/')[0])))]; this.incoming = null; return this.completed;
   }
   async abort() { const s = this.incoming; this.incoming = null; if (s?.handle) await s.handle.close().catch(() => {}); if (s) { await fs.rm(s.parts, { recursive: true, force: true }); await fs.rm(s.folder, { recursive: true, force: true }); } }
-  async reset() { this.sources.clear(); this.completed = []; await this.abort(); }
+  async reset() { this.sources.clear(); this.selectedPaths=[];this.completed = []; await this.abort(); }
 }
 module.exports = { Transfers, safeRelative };

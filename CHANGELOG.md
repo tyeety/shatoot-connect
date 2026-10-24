@@ -13,6 +13,33 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.16.0 — 2026-10-24
+
+### Added
+
+- Automatic reconnection of known chats using discovered LAN routes or saved LAN/Internet routes, including while the main window stays in the tray. Selecting a conversation, sending queued text or sending files also establishes its connection automatically. Background retries are bounded and do not disable manual connection inputs.
+- Paste clipboard images into the message field to send them as ordinary verified PNG file transfers. Sent images remain in the local history cache; normal text paste remains available.
+- Open outgoing attachments from the original selected files/folders, and a dedicated remote-connect action plus a Material shortcut icon on saved computer cards.
+- Shared button press feedback, animated data refreshes, and local themed snackbars for action/update feedback.
+
+### Changed
+
+- Remove redundant chat/profile explanatory copy. Chat reconnect is automatic instead of requiring a Connect chat button. Static app text and images cannot be selected or dragged; editing and external file drops remain enabled.
+- Size the initial remote view to the largest native host image fitting the guest display work area. Later sessions reuse the last remote view size, bounded by the host resolution and guest work area. Preserve and restore the main window's previous bounds/maximized state.
+- Clicking an attachment explicitly opens its local file (or the containing directory for multiple files); files still never open automatically on reception.
+
+### Fixed
+
+- Incoming ordinary messages now use the shared bottom-right notification queue when their conversation is not actively focused. Duplicate delivery and messages read in the focused chat do not produce repeated notifications.
+- Keep update download progress visible on the main-window button, show download/install errors through local feedback, retain retry after a failed download and publish the installing state before restart.
+- Closing a remote viewing window ends its desktop session, releases input/capture state and then hides the app in the tray. Chats remain available.
+- Resolve simultaneous outgoing chat invitations deterministically instead of maintaining competing sessions. Sender file history now retains original paths, including empty selected folders.
+
+### Compatibility
+
+- An exact app-version match is not required. Desktop protocol 2 and the collaboration-v1 capability remain unchanged; compatible older clients/coordinators can still connect. Clipboard images use the existing file-transfer protocol. Peers must be reachable/running; saved Internet chats require their coordinator connection.
+- Settings, encrypted credentials, private names and existing chat history remain in the same Windows profile. Background chat is available while the application is in the tray, not after Quit completely.
+
 ## 0.15.0 — 2026-10-24
 
 ### Added

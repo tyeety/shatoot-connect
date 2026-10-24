@@ -19,6 +19,24 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await until(()=>owner.chatStore.filePolicy(conversation)==='accept');
   fs.writeFileSync(path.join(artifacts,'chat-file-settings-en.png'),(await chat.webContents.capturePage()).toPNG());
   const clear=()=>{for(let i=0;i<70&&notices.entries.size;i++){const record=[...notices.entries.values()].find(r=>!r.data.urgent);if(!record)break;record.finish(0)}};
+  clear();viewer.show();viewer.focus();await until(()=>!chat.isFocused());
+  await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Background text notification').then(()=>true)`);
+  await until(()=>[...notices.entries.values()].some(r=>r.owner===host&&r.data.detail==='Background text notification'));clear();
+  chat.show();chat.focus();await run(chat,"document.querySelector('#chat-text').focus();true");await until(()=>chat.isFocused()&&owner.chatViews?.get(chat.webContents.id)?.active);
+  await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Focused text message').then(()=>true)`);
+  await until(()=>owner.chatStore.history({conversation}).some(r=>r.text==='Focused text message'));
+  if([...notices.entries.values()].some(r=>r.owner===host&&r.data.detail==='Focused text message'))throw Error('Focused chat text generated a redundant notice');
+  if(!await run(chat,"(()=>{const dt=new DataTransfer();dt.setData('text/plain','plain paste');return document.querySelector('#chat-text').dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}))})()"))throw Error('Plain text paste was blocked');
+  await run(chat,"(()=>{const canvas=document.createElement('canvas');canvas.width=4;canvas.height=4;canvas.getContext('2d').fillRect(0,0,4,4);const bytes=Uint8Array.from(atob(canvas.toDataURL('image/png').split(',')[1]),c=>c.charCodeAt(0));const dt=new DataTransfer();dt.items.add(new File([bytes],'clipboard.png',{type:'image/png'}));document.querySelector('#chat-text').dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));return true})()");
+  const sentConversation=`p:${owner.identity.deviceId}`;
+  await until(()=>peer.chatStore.history({conversation:sentConversation}).some(r=>r.kind==='file'&&r.attachment));
+  const image=owner.chatStore.history({conversation}).find(r=>r.kind==='file'&&r.sender===owner.identity.deviceId);
+  if(!image?.attachment||!owner.chatStore.files(image.attachment)[0].includes('sent-images'))throw Error('Clipboard sender image is not retained in history');
+  const receivedImage=peer.chatStore.history({conversation:sentConversation}).find(r=>r.id===image.id);
+  if(!fs.readFileSync(peer.chatStore.files(receivedImage.attachment)[0]).subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))throw Error('Clipboard PNG integrity failed');
+  if(!await run(chat,"(()=>{const item=document.querySelector('.chat-message p');return !item.dispatchEvent(new Event('selectstart',{bubbles:true,cancelable:true}))&&getComputedStyle(document.querySelector('#chat-text')).userSelect==='text'})()"))throw Error('App text selection or editable fields regressed');
+  log('Background text notifies, focused text stays in chat, clipboard image round-trip and retained sender source passed');
+  clear();
   const send=async name=>{const file=path.join(artifacts,name);fs.writeFileSync(file,'Received content '+name);await run(viewer,`collaboration.sendFiles('p:${owner.identity.deviceId}','sources',${JSON.stringify([file])}).then(()=>true)`);await until(()=>owner.chatStore.history({conversation}).some(row=>row.text===name&&row.attachment));const row=owner.chatStore.history({conversation}).find(r=>r.text===name);const received=owner.chatStore.files(row.attachment)[0];if(fs.readFileSync(received,'utf8')!=='Received content '+name||path.dirname(path.dirname(received))!==app.getPath('downloads'))throw new Error('Received file integrity/Downloads destination failed');};
   clear();chat.show();chat.focus();await run(chat,"document.querySelector('#chat-search').value='non-matching search';document.querySelector('#chat-text').focus();true");await until(()=>chat.isFocused()&&owner.chatViews?.get(chat.webContents.id)?.active);
   await send('active-chat.txt');await until(()=>run(chat,"document.querySelector('#chat-messages').textContent.includes('active-chat.txt')"));
@@ -50,6 +68,10 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(host,"role='idle';api.desktopViewing(false);for(const track of document.querySelector('#remote-video').srcObject.getTracks())track.stop();document.querySelector('#remote-video').srcObject=null;updateControls();true");
   await run(host,`collaboration.close(collaboration.peer('${peer.identity.deviceId}'));true`);await until(()=>run(chat,"document.querySelector('#chat-peer-status').textContent===window.i18n.translate('Offline')"));
   if(!await run(chat,"!!document.querySelector('.chat-conversation .desktop-preview') && !!document.querySelector('.chat-conversation .profile-avatar')"))throw Error('Offline preview/avatar disappeared');
+  await run(viewer,'collaboration.nearby=[];collaboration.retries?.clear();collaboration.reconnectKnown().then(()=>true)');
+  await until(()=>run(host,`!!collaboration.peer('${peer.identity.deviceId}')`));
+  if(!await run(chat,"document.querySelector('#chat-reconnect').hidden"))throw Error('Automatic chat still requires Connect');
+  log('A saved LAN chat reconnects automatically without discovery or pressing Connect');
   for(const language of ['en','fa']){
     chat.setSize(680,520);await run(chat,`window.i18n.setLanguage('${language}');true`);await pause(150);
     if(!await run(chat,"(()=>{const group=document.querySelector('#chat-new-group').getBoundingClientRect(),list=document.querySelector('#chat-conversations').getBoundingClientRect(),form=document.querySelector('#chat-connect-form').getBoundingClientRect();return group.top>=form.bottom&&list.top>=group.bottom&&list.bottom<=innerHeight&&document.querySelector('.chat-conversation .profile-avatar').getBoundingClientRect().width>20})()"))throw Error('Chat sidebar overlaps/clips in '+language);

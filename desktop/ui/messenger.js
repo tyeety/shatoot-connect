@@ -16,7 +16,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   for(const event of ['focus','blur'])window.addEventListener(event,()=>reportView().catch(()=>{}));
   $('messenger-dialog').addEventListener('close',()=>reportView().catch(()=>{}));
   api.onChatFilesReceived(value=>{if(value.conversation!==selected||!$('messenger-dialog').open)return;const reading=document.hasFocus()&&$('messenger-dialog').contains(document.activeElement);if(reading&&$('chat-search').value){$('chat-search').value='';rows=[];selectionVersion++;}load(false).then(()=>{if(reading)$('chat-messages').scrollTop=$('chat-messages').scrollHeight;}).catch(error);});
-  const error = value => { $('chat-error').textContent = tr(value?.message || String(value)); };
+  const error = value => { $('chat-error').textContent = tr(value?.message || String(value));window.actionNotice?.(value?.message||String(value)); };
   const run = fn => async event => { event?.preventDefault(); try { $('chat-error').textContent = ''; await fn(event); } catch (e) { error(e); } };
   filePolicy.onchange=run(async()=>{const conversation=selected;await api.collaboration('file-policy',{conversation,mode:filePolicy.value});await engine.refresh();render();});
   function button(text, action, icon) { const b = document.createElement('button'); b.type = 'button'; b.className = icon ? 'icon-button' : 'small-button'; b.title = tr(text); b.setAttribute('aria-label', tr(text)); if (icon) { const i = document.createElement('span'); i.className = `mi ${icon}`; i.setAttribute('aria-hidden', 'true'); b.append(i); } else b.textContent = tr(text); b.onclick = run(action); return b; }
@@ -33,7 +33,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     catch(error){if(sequence===connectSequence)throw error;}
     finally{if(sequence===connectSequence){connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;}}
   }
-  async function select(id) { selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await reportView(); await load(false); publish(); }
+  async function select(id) { if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await reportView(); await load(false); publish(); }
   async function load(older = false) {
     if (!selected) return;
     const version = selectionVersion, id = selected, search = $('chat-search').value.trim();
@@ -52,14 +52,14 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       const meta = document.createElement('small'); const date = new Date(row.at); meta.textContent = new Intl.DateTimeFormat(window.i18n.language === 'fa' ? 'fa-IR' : 'en', { dateStyle: 'short', timeStyle: 'short' }).format(date);
       if (own) meta.textContent += ' · ' + tr(row.pending.length ? (row.kind === 'file' ? 'Not delivered to all recipients' : 'Queued') : row.status === 'delivered' ? 'Delivered' : 'Sent');
       item.append(name, text, meta);
-      if (row.attachment) item.append(button('Open received files', () => api.collaboration('open-attachment', { token: row.attachment }), 'folder'));
+      if (row.attachment) item.append(button(own?'Open sent files':'Open received files', () => api.collaboration('open-attachment', { token: row.attachment }), 'folder'));
       log.append(item);
     }
     if (scroll && nearBottom) log.scrollTop = log.scrollHeight;
   }
   function render(refreshHistory = false) {
     if (!engine) return;
-    const pending=connecting||(engine.connectAttempts?.size||engine.pendingConnections||0)>0;cancelConnect.hidden=!pending;$('chat-connect').disabled=pending;$('chat-address').disabled=pending;
+    const pending=connecting||(engine.connectAttempts?[...engine.connectAttempts].filter(a=>!a.background).length:engine.pendingConnections||0)>0;cancelConnect.hidden=!pending;$('chat-connect').disabled=pending;$('chat-address').disabled=pending;
     own.replaceChildren();const ownImage=document.createElement('img');ownImage.src=self.avatar||'assets/app-icon.png';ownImage.className='profile-avatar';ownImage.alt='';const ownName=document.createElement('span');ownName.textContent=self.name;own.append(ownImage,ownName);
     const list = $('chat-conversations'); list.replaceChildren();
     const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar:c.avatar,preview:c.preview,name:displayName(c),detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, name: g.name, status: 'Group' }))];
@@ -70,13 +70,13 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     $('chat-title').textContent = group?.name || displayName(peer) || tr('Select a conversation');
     $('chat-peer-status').textContent = group ? `${tr(group.owner === self.deviceId || online(group.owner) ? 'Group owner online' : 'Group owner offline')} · ${group.members.map(m => displayName(contact(m.deviceId))||displayName(m)).join(', ')}` : peer ? tr(online(peer.deviceId) ? 'Connected' : 'Offline') : '';
     $('chat-text').disabled = !selected; $('chat-send').disabled = !selected || busy; $('chat-send-files').disabled = !selected || busy;
-    $('chat-reconnect').hidden = !peer || online(peer.deviceId); $('chat-disconnect').hidden = !peer || !online(peer.deviceId);
+    $('chat-reconnect').hidden = true; $('chat-disconnect').hidden = !peer || !online(peer.deviceId);
     $('chat-progress').textContent = selected && progress.get(selected) || '';
     fileSetting.hidden=!selected;filePolicy.value=engine.catalog.filePolicies?.[selected]||'inherit';
     if (refreshHistory && $('messenger-dialog').open && selected && rows.length <= 100) { clearTimeout(historyTimer); historyTimer = setTimeout(() => load(false).catch(error), 80); }
   }
   function renderDiscovery(value) {
-    discovery = value;
+    discovery = value;if(!detached){engine.nearby=value.peers;engine.reconnectKnown().catch(()=>{});}
     const list = $('network-list'); list.replaceChildren(); $('network-empty').hidden = value.peers.length > 0;
     $('discovery-status').textContent = `${value.peers.length} · ${tr('Nearby computers')} · ${value.interfaces.length} ${tr('network interfaces')}`;
     if (value.errors.length) { $('discovery-status').textContent += ' · ' + tr('Discovery is limited; check firewall or VPN LAN access.'); $('discovery-status').title = value.errors.join('\n'); }
@@ -89,7 +89,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     render();publish();
   }
   function publish() { if (!detached && engine) api.chatPublish(snapshot()); }
-  function snapshot() { return { self, pendingConnections:engine.connectAttempts?.size||0,catalog: engine.catalog, connected: engine.connected(), language: window.i18n.language, discovery, selected, progress: [...progress] }; }
+  function snapshot() { return { self, pendingConnections:engine.connectAttempts?[...engine.connectAttempts].filter(a=>!a.background).length:0,catalog: engine.catalog, connected: engine.connected(), language: window.i18n.language, discovery, selected, progress: [...progress] }; }
   engine = new window.CollaborationClient({ api, self, internet, ensureInternet, changed: () => { render(true); publish(); }, error, progress: value => { const text = tr(value.text) + (Number.isInteger(value.percent) ? ` ${value.percent}%` : ''); progress.set(value.conversation, text); if (selected === value.conversation) $('chat-progress').textContent = text; publish(); } });
   if (!detached) api.onChatCommand(async (operation, args) => { if (operation === 'snapshot') return snapshot(); if (operation === 'close') { engine.close(engine.peer(args[0])); return; } const result = await engine[operation](...args); return operation === 'connect' ? { peer: result.peer } : result; });
   window.collaboration = engine;
@@ -102,6 +102,13 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('chat-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
   $('chat-older').onclick = run(() => load(true));
   $('chat-compose').onsubmit = run(async () => { const text = $('chat-text').value; await engine.send(selected, text); $('chat-text').value = ''; await load(false); $('chat-messages').scrollTop = $('chat-messages').scrollHeight; });
+  $('chat-text').addEventListener('paste',async event=>{try{
+    const image=[...(event.clipboardData?.items||[])].find(item=>item.kind==='file'&&item.type.startsWith('image/'));
+    if(!image||!selected)return;event.preventDefault();const file=image.getAsFile();if(!file)return;
+    if(file.size>10*1024**2)throw new Error('Clipboard image is too large.');
+    const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Invalid clipboard image.'));reader.readAsDataURL(file);});
+    await files('clipboard-image',data);
+  }catch(e){error(e);}});
   $('chat-text').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-compose').requestSubmit(); } };
   async function files(operation = 'pick', value) { if (busy) throw new Error('A file transfer is already in progress.'); busy = true; render(); try { await engine.sendFiles(selected, operation, value); } finally { busy = false; render(); } }
   $('chat-send-files').onclick = run(() => files());
@@ -123,7 +130,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   };
   $('chat-new-group').onclick=run(()=>groupEditor());$('chat-edit-group').onclick=run(()=>groupEditor(engine.group(selected.slice(2))));
   $('chat-group-form').onsubmit = async event => { event.preventDefault(); $('chat-create-group').disabled = true; try { const group = await engine.createGroup($('chat-group-name').value.trim(), [...document.querySelectorAll('#chat-group-members input:checked')].map(i => i.value),editingGroup?.id); $('chat-group-dialog').close(); await select(`g:${group.id}`); } catch (e) { $('chat-group-error').textContent = tr(e.message); } finally { $('chat-create-group').disabled = false; } };
-  engine.ready.then(render).catch(error); api.discovery().then(renderDiscovery).catch(error);
+  if(!detached)setInterval(()=>engine.reconnectKnown().catch(()=>{}),15000);
+  engine.ready.then(()=>{render();if(!detached)engine.reconnectKnown().catch(()=>{});}).catch(error); api.discovery().then(renderDiscovery).catch(error);
   window.addEventListener('shatoot-language-change', () => { renderDiscovery(discovery); renderMessages(false);publish(); });
   return { engine, open, select, start, renderDiscovery, snapshot };
 };

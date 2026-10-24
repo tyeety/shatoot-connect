@@ -4,15 +4,15 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)
 
-## Version 0.15.0
+## Version 0.16.0
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.15.0-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.15.0-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.15.0-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.16.0-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.16.0-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.16.0-win-x64.zip` | Coordinator, runtime and service manager |
 
-Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. Remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
+Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. An exact application version match is not required: remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
 ## Features
 
@@ -32,9 +32,9 @@ Setup checks the OS/architecture, destination, write access, destination/TEMP di
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.15.0-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.15.0-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.15.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.16.0-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.16.0-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.16.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.
@@ -67,7 +67,7 @@ Independent guest input uses window messages without moving the physical host po
 
 Keyboard layouts synchronize in both directions with versioned conflict resolution and restoration when control ends. Focus the remote video to capture supported shortcuts; leaving it releases capture. `Ctrl+Shift+F12` disconnects locally. Interface language is independent of keyboard language. Elevated windows, UAC/secure desktops, `Ctrl+Alt+Delete`, pre-login/locked desktops, audio and arbitrary raw hardware input are not supported.
 
-Outgoing desktop connections show **Cancel connection** throughout validation, approval and video negotiation. The Internet settings and chat connection form have their own cancel controls. Cancelling a pending chat leaves established chats intact.
+Closing the remote-view window disconnects the desktop session before hiding the app to the tray. The first remote view fits the native host image to the guest work area; later views reuse the last size within those limits, restoring the original main-window geometry on disconnect. Outgoing desktop connections show **Cancel connection** throughout validation, approval and video negotiation. The Internet settings and chat connection form have their own cancel controls. Cancelling a pending chat leaves established chats intact.
 
 Local nicknames are shared between saved/recent/nearby computer cards and chat lists, titles, message history and group-member labels. The name button in a private chat changes your local nickname; it does not change the remote profile published to other people. The self-profile chip opens your own display-name/photo settings. Chat lists always show a profile picture or default icon.
 
@@ -75,7 +75,7 @@ Computer cards retain a small JPEG thumbnail of the last desktop you received in
 
 ## Private chat and history
 
-Open **Chats and files**, enter an Internet ID/private LAN IP or click a nearby device's chat button. Ordinary messages connect without a recipient approval prompt by default. Settings > Chat and files can restore explicit chat approval. Chat needs no desktop password and grants no screen, mouse, keyboard or clipboard access. ID chat requires both devices on the same updated coordinator; LAN chat needs no coordinator/STUN/TURN.
+Open **Chats and files**, enter an Internet ID/private LAN IP or click a nearby device's chat button. Known chats reconnect automatically on startup and periodically, preferring a discovered LAN route and falling back to the saved LAN/Internet route. Selecting a contact or sending text/files also connects without a separate Connect click. Offline text remains queued. Ordinary messages connect without a recipient approval prompt by default. Settings > Chat and files can restore explicit chat approval. Chat needs no desktop password and grants no screen, mouse, keyboard or clipboard access. ID chat requires both devices on the same updated coordinator; LAN chat needs no coordinator/STUN/TURN.
 
 A separate reliable WebRTC data connection carries messages/files. The coordinator sees invitation and ICE/SDP signaling, not their contents. Direct traffic bypasses the coordinator; optional TURN relays encrypted transport and consumes relay bandwidth. The messenger runs in a separate window. Closing either main/chat UI keeps the background engine and connected sessions alive in the tray; use the tray or Show main window to restore the UI. Quit completely in Settings > Application or the tray exits the process and ends sessions; **Disconnect chat** does not end a desktop session.
 
@@ -95,7 +95,7 @@ The owner is an intended group participant and can read/forward messages. This i
 
 Use messenger **Send files** or drag local files onto a conversation. Files are received automatically by default. Settings > Chat and files > **Ask before receiving files** enables approval globally, including desktop-session files. Each private or group chat has its own **Incoming files** selector: use the global setting, always receive automatically, or always ask. Overrides persist across reconnects/restarts and do not change another chat's policy. Explicit existing global preferences are preserved. Files never open automatically; path/size/hash checks still apply. Group-owner uploads fan out to members; member uploads go to the owner and then other online members, following each recipient's file-acceptance setting. All intended recipients must be connected for a new group upload. Offline file forwarding is not automatic; a received owner copy remains in history/Downloads for manual use later.
 
-Messenger transfer neither reads nor changes the system clipboard. An attachment's folder button reveals the received file instead of executing it. New transfers use unique `Receive-*` folders directly under the Windows **Downloads** folder, preserving names without overwriting earlier batches. Existing attachment locations remain valid. Relative paths, file order, length and SHA-256 hashes are validated. Partial receives are cleaned on error/disconnect. Limits are 1,000 entries / 10 GiB per batch; symbolic links and unsafe Windows paths are rejected. Chunks use bounded acknowledgement/backpressure and low-priority data channels. Incomplete file deliveries remain visibly undelivered; file selections are not silently retried after restart.
+Paste a clipboard image into the message field to send it through the existing file-transfer protocol as a PNG (up to 10 MB); normal text paste is unchanged. The local sent-image cache is retained for chat history. Clicking an attachment opens the received file or the original sent file; multiple selections open their containing directory. A source that has been moved/deleted reports an error. Original source paths and attachment tokens are never sent to peers. Incoming text/file notices appear in the shared bottom-right queue only when their conversation is not actively focused. Keeping the app in the tray retains chat delivery; Quit completely stops it. New transfers use unique `Receive-*` folders directly under the Windows **Downloads** folder, preserving names without overwriting earlier batches. Existing attachment locations remain valid. Relative paths, file order, length and SHA-256 hashes are validated. Partial receives are cleaned on error/disconnect. Limits are 1,000 entries / 10 GiB per batch; symbolic links and unsafe Windows paths are rejected. Chunks use bounded acknowledgement/backpressure and low-priority data channels. Incomplete file deliveries remain visibly undelivered; file selections are not silently retried after restart.
 
 Approved **desktop control** sessions have a separate clipboard channel for Unicode text and Explorer files/folders in both directions. A file drop on remote video transfers, clicks the target and pastes; it is not arbitrary OLE drop support. Clipboard failure after completed delivery does not discard received files. Rich text/image clipboard formats are not synchronized. Chat alone never grants this clipboard permission.
 
@@ -115,7 +115,7 @@ LAN IP connections automatically select **LAN · Ultra**, preserving available d
 
 Settings > Application controls **Remember the last password for each computer** (on by default). The last entered password is stored with Windows encryption, keyed by LAN IP/port or by Internet ID plus coordinator address. Default LAN port 8788 and an omitted port refer to the same cache entry. Typing an address fills its own password; stale asynchronous lookups cannot overwrite a different address or a user-entered password. Turning the setting off deletes the automatic cache and disables autofill. Explicitly saved computers retain their own credentials. Clearing connection history removes recent rows without deleting saved computers or chat history. History stores connection metadata, not plaintext passwords.
 
-The app adopts Shatoot's purple palette (#7400a8 / #9f38d7) on dark surfaces with larger type and a redesigned multi-resolution Windows icon. Static UI text/images do not select or drag; text inputs remain editable/selectable and external file drops still work. Enter activates the matching connection/server/password/profile action; chat/group forms retain normal Enter submission.
+The app adopts Shatoot's purple palette (#7400a8 / #9f38d7) on dark surfaces with larger type and a redesigned multi-resolution Windows icon. All buttons provide press feedback; refreshed lists animate and settings/update actions report through a local snackbar. Static UI text/images do not select or drag; text inputs remain editable/selectable and external file drops still work. Enter activates the matching connection/server/password/profile action; chat/group forms retain normal Enter submission.
 
 Closing the main window hides it to the tray even without an open chat. **Quit completely** is available in Settings > Application and the tray. Packaged clients enable startup with Windows by default and open in the tray using the installed/portable executable; the Application tab can turn startup off. Source/smoke runs never modify real Windows startup. A signed-in desktop session is still required; this is not pre-login or post-logout desktop service support.
 

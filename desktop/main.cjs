@@ -178,9 +178,9 @@ function chatFilesReceived(s,record,files){
     if(win.isVisible()&&!win.isMinimized()&&win.isFocused()&&view?.active&&view.conversation===record.conversation)reading=true;
     win.webContents.send('chat-files-received',{conversation:record.conversation,id:record.id});
   }
-  if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa';notices.toast(s.win,fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`,{detail:files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads'});}
+  if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa';notices.toast(s.win,files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500)});}
 }
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route)=>{rememberComputer(peer,route);computerChanged();}, received:chatFilesReceived });
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route)=>{rememberComputer(peer,route);computerChanged();}, received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
 ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active});});
 ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message);});
 function configureStartup(enabled){
@@ -189,16 +189,17 @@ function configureStartup(enabled){
 }
 function refreshTray(s){if(!tray||!s)return;const fa=s.language==='fa';tray.setContextMenu(Menu.buildFromTemplate([{label:'Shatoot Connect',click:()=>showMain(s)},{label:fa?'چت و فایل‌ها':'Chats and files',click:()=>openChat(s)},{label:fa?'نمایش پنل اتصال‌ها':'Show connection panels',click:()=>{for(const state of states.values())if(state.captureAllowed){state.overlayHidden=false;showHostOverlay(state);}}},{type:'separator'},{label:fa?'خروج کامل':'Quit completely',click:()=>{quitting=true;app.quit();}}]));}
 ipcMain.handle('lifecycle',(e,operation,value)=>{const s=state(e);if(operation==='startup'){if(typeof value!=='boolean')throw new Error('Invalid startup setting.');return configureStartup(value);}if(operation==='quit'){quitting=true;setTimeout(()=>app.quit(),50);return;}if(operation==='panels'){for(const state of states.values())if(state.captureAllowed){state.overlayHidden=false;showHostOverlay(state);}return;}throw new Error('Invalid application setting.');});
+ipcMain.handle('remote-window-closed',e=>{const s=state(e);if(e.sender!==s.win.webContents)throw new Error('Invalid remote window.');s.outgoingDesktop=false;s.win.hide();});
 ipcMain.handle('fit-video',(e,size)=>{
   const s=state(e);if(s.owner)return;
-  if(!size){s.videoSizing=null;s.win.setAspectRatio(0);if(s.normalBounds){s.win.setMinimumSize(Math.min(1000,s.normalBounds.width),Math.min(720,s.normalBounds.height));s.win.setBounds(s.normalBounds);s.normalBounds=null;}return;}
+  if(!size){if(s.videoSizing&&!s.win.isMaximized()&&!s.win.isFullScreen())saveSettings({remoteWindowSize:{width:s.win.getContentBounds().width,height:s.win.getContentBounds().height}});s.videoSizing=null;s.win.setAspectRatio(0);if(s.normalBounds){s.win.setMinimumSize(Math.min(1000,s.normalBounds.width),Math.min(720,s.normalBounds.height));s.win.setBounds(s.normalBounds);s.normalBounds=null;if(s.normalMaximized)s.win.maximize();s.normalMaximized=false;}return;}
   if(!Number.isFinite(size.width)||!Number.isFinite(size.height)||size.width<1||size.height<1||size.width>32768||size.height>32768)return;
   const work=screen.getDisplayMatching(s.win.getBounds()).workArea,ratio=size.width/size.height;
-  if(!s.normalBounds)s.normalBounds=s.win.getBounds();
+  if(!s.normalBounds){s.normalMaximized=s.win.isMaximized();s.normalBounds=s.win.getNormalBounds();if(s.normalMaximized)s.win.unmaximize();}
   const frameHeight=s.win.getBounds().height-s.win.getContentBounds().height,frameWidth=s.win.getBounds().width-s.win.getContentBounds().width;
   const extraHeight=Number.isFinite(size.extraHeight)?Math.max(0,Math.min(250,size.extraHeight)):82,extraWidth=Number.isFinite(size.extraWidth)?Math.max(0,Math.min(80,size.extraWidth)):16;
-  let width=Math.min(s.normalBounds.width-frameWidth,work.width-frameWidth-24),height=Math.round((width-extraWidth)/ratio+extraHeight);
-  if(height+frameHeight>work.height-24){height=work.height-frameHeight-24;width=Math.round((height-extraHeight)*ratio+extraWidth);}
+  const previous=settings().remoteWindowSize;let width=Math.min(size.width+extraWidth,previous?.width||Infinity,work.width-frameWidth-24),height=Math.round((width-extraWidth)/ratio+extraHeight);
+  const maxHeight=Math.min(work.height-frameHeight-24,previous?.height||Infinity,size.height+extraHeight);if(height>maxHeight){height=maxHeight;width=Math.round((height-extraHeight)*ratio+extraWidth);}
   s.videoSizing={ratio,extraHeight,extraWidth};s.win.setMinimumSize(Math.min(640,width),Math.min(360,height));if(!s.win.isFullScreen()&&!s.win.isMaximized()){s.win.setContentSize(Math.round(width),Math.round(height));const bounds=s.win.getBounds();s.win.setPosition(Math.round(Math.max(work.x+12,Math.min(bounds.x,work.x+work.width-bounds.width-12))),Math.round(Math.max(work.y+12,Math.min(bounds.y,work.y+work.height-bounds.height-12))));}
 });
 function hostReply(s, message) {
@@ -270,7 +271,7 @@ ipcMain.handle('update', async (e, operation) => {
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
   const proc = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', worker, '-ParentId', String(process.pid), '-Package', update.file, '-Target', executable, '-Digest', update.asset.digest, '-Version',update.asset.version,'-ReadyToken',crypto.randomUUID(),'-CacheDirectory',update.directory, ...(process.env.PORTABLE_EXECUTABLE_FILE ? ['-Portable'] : [])], { detached: true, windowsHide: true, stdio: 'ignore' });
   await new Promise((resolve, reject) => { proc.once('spawn', resolve); proc.once('error', reject); }); proc.unref();
-  quitting = true; setTimeout(() => app.quit(), 300); return { state: 'installing' };
+  update.emit({state:'installing'});quitting = true; setTimeout(() => app.quit(), 300); return { state: 'installing' };
 });
 ipcMain.handle('firewall-repair', async e => { state(e); if (smoke) return true; return require('./firewall.cjs').repairFirewall(app.getPath('exe')); });
 ipcMain.handle('chat-preferences', (e, value) => { state(e); if (!value || typeof value.autoAcceptFiles !== 'boolean' || typeof value.requireChatApproval !== 'boolean') throw new Error('Invalid chat settings.'); saveSettings({ autoAcceptFiles: value.autoAcceptFiles, requireChatApproval: value.requireChatApproval }); return value; });
@@ -351,7 +352,7 @@ function createWindow() {
   win.webContents.setWebRTCIPHandlingPolicy('default');
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
-  win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); } });
+  win.on('close', event => { if (!quitting) { event.preventDefault(); if(s.outgoingDesktop){win.webContents.send('remote-window-close');return;} win.hide(); } });
   win.on('closed', () => { for (const child of states.values()) if (child.owner === s) closeExtraHost(child); s.chatWindow?.destroy(); collaborationHost.close(s); s.discovery?.close(); for (const ws of s.lanSockets?.values() || []) ws.terminate(); hideHostOverlay(s); release(s); s.keyboardMonitor?.stdin.end(); s.helper?.stdin.end(); s.directSocket?.close(); s.directService?.close(); states.delete(contentsId); });
   win.loadFile(path.join(__dirname, 'ui/index.html'));
   return win;
@@ -658,7 +659,7 @@ app.whenReady().then(async () => {
   if (!smoke) for (const record of preferences.list()) if (record.shortcut && fs.existsSync(path.join(app.getPath('desktop'), preferences.shortcutName(record.id)))) { try { createFavoriteShortcut(record.id); } catch {} }
   if (smoke) {
     setTimeout(() => { smokeLog('Watchdog timeout'); app.exit(1); }, 240000).unref();
-    const run=process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,dialog,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
+    const run=process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,dialog,update,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
     run(win).catch(error => { smokeLog(error.stack); console.error(error); app.exit(1); });
   }
 });

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { ChatStore } = require('./chat-store.cjs');
 const { Transfers } = require('./transfers.cjs');
 const { UUID } = require('./discovery.cjs');
-function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {} }) {
+function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {}, messageReceived = () => {} }) {
   function store(s) {
     if (!s.identity) throw new Error('The device is not initialized.');
     return s.chatStore ||= new ChatStore({ file: path.join(app.getPath('userData'), `chat-${s.identity.deviceId}.dat`), self: s.identity.deviceId,
@@ -32,9 +32,9 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
         message: fa ? `پیوستن به گروه ${group.name}؟` : `Join ${group.name}?`, detail: `${decorateComputer(g.peer).displayName||g.peer.name}\n${group.members.slice(0,10).map(m => m.name).join(', ')}` }); return result.response === 1; }
       finally { s.chatPrompt = false; }
     }
-    if (op === 'append') return history.append(value.message, value.outgoing === true);
+    if (op === 'append') { const result=history.append(value.message,value.outgoing===true);if(!value.outgoing&&!result.duplicate&&result.message.kind==='text')messageReceived(s,result.message);return result; }
     if (op === 'delivered') { if (!UUID.test(value.id) || !UUID.test(value.peer)) throw new Error('Invalid receipt.'); return history.delivered(value.id, value.peer); }
-    if (op === 'open-attachment') { const files = history.files(value.token); if (!fs.existsSync(files[0])) throw new Error('The received file was moved or deleted.'); shell.showItemInFolder(files[0]); return; }
+    if (op === 'open-attachment') { const files = history.files(value.token); if (!fs.existsSync(files[0])) throw new Error('The file was moved or deleted.'); const error=await shell.openPath(files.length===1?files[0]:path.dirname(files[0]));if(error)throw new Error(error);return; }
     if (op === 'approve' || op === 'grant') {
       if (!UUID.test(value.session) || !UUID.test(value.peer?.deviceId) || typeof value.peer.name !== 'string' || value.peer.name.length > 60) throw new Error('Invalid chat request.');
       if (op === 'approve' && settings().requireChatApproval === true) {
@@ -65,6 +65,19 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if (op === 'pick') { const picked = await dialog.showOpenDialog(s.chatWindow || s.win, { properties: ['openFile', 'multiSelections'] }); return picked.canceled ? [] : g.send.offer(picked.filePaths); }
     if (op === 'sources') return g.send.offer(value);
     if (op === 'received-sources') return g.send.offer(history.files(value));
+    if(op==='clipboard-image') {
+      if(typeof value!=='string'||value.length>14*1024**2||!/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(value))throw new Error('Invalid clipboard image.');
+      const image=require('electron').nativeImage.createFromDataURL(value);if(image.isEmpty())throw new Error('Invalid clipboard image.');
+      const png=image.toPNG();if(png.length>10*1024**2)throw new Error('Clipboard image is too large.');
+      const directory=path.join(app.getPath('userData'),'sent-images');await fs.promises.mkdir(directory,{recursive:true});
+      const file=path.join(directory,`Image-${require('node:crypto').randomUUID()}.png`);await fs.promises.writeFile(file,png,{flag:'wx'});
+      try{return await g.send.offer([file]);}catch(error){await fs.promises.unlink(file).catch(()=>{});throw error;}
+    }
+    if(op==='attach-sources') {
+      const message=history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation&&m.sender===s.identity.deviceId&&m.kind==='file');
+      if(!message)throw new Error('Invalid outgoing attachment.');
+      return history.attachment(message.conversation,message.id,g.send.selectedPaths||[]);
+    }
     if (op === 'read') return g.send.read(value);
     if (op === 'begin') {
       if (!Array.isArray(value?.entries) || value.entries.length > 1000 || !value.message || value.message.kind !== 'file' || !UUID.test(value.message.id)) throw new Error('Invalid file offer.');

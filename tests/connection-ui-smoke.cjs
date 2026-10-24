@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),{WebSocketServer}=require('ws');
-module.exports=async({host,states,app,dialog,log,artifacts})=>{
+module.exports=async({host,states,app,dialog,update,log,artifacts})=>{
   const run=code=>host.webContents.executeJavaScript(code),pause=ms=>new Promise(r=>setTimeout(r,ms));
   const until=async fn=>{for(let i=0;i<400;i++){if(await fn())return;await pause(50)}throw Error('Connection UI timed out: '+fn.toString())};
   await until(()=>run('window.shatootconnectReady===true'));
@@ -55,6 +55,18 @@ module.exports=async({host,states,app,dialog,log,artifacts})=>{
     log('Coordinator and chat waiting states cancel through actual buttons without leftover sessions');
     await run("document.querySelector('#messenger-dialog').close();true");
     for(const language of ['en','fa']){await run(`window.i18n.setLanguage('${language}');true`);await pause(100);fs.writeFileSync(path.join(artifacts,`connections-${language}.png`),(await host.webContents.capturePage()).toPNG())}
+    update.emit({state:'available',version:'99.0.0'});await until(()=>run("!document.querySelector('#update-notice').hidden"));
+    update.emit({state:'downloading',percent:37});await until(()=>run("!document.querySelector('#update-notice').hidden && document.querySelector('#update-notice').textContent.includes('37%') && document.querySelector('#update-notice').disabled"));
+    update.emit({state:'error',error:'Update network interrupted'});await until(()=>run("!document.querySelector('#action-snackbar').hidden && document.querySelector('#action-snackbar').textContent.includes('Update network interrupted')"));
+    update.emit({state:'current',version:'0.0.0'});
+    log('Update progress stays visible outside Settings and a failed update reports its error');
+    if(!await run("!!document.querySelector('.favorite-actions .mi.shortcut') && !!document.querySelector('.favorite-actions .mi.screen_share')"))throw Error('Saved computer actions omitted shortcut/connect icons');
+    await run("window.sentEnd=[];role='viewer';sessionRoute='lan-viewer';directSocket={readyState:1,send:value=>sentEnd.push(JSON.parse(value)),close:()=>{}};updateControls();api.fitVideo({width:3840,height:2160}).then(()=>true)");
+    const initial=host.getContentBounds();host.setContentSize(720,440);await run('api.fitVideo(null).then(()=>true)');await run('api.fitVideo({width:3840,height:2160}).then(()=>true)');
+    const remembered=host.getContentBounds();if(remembered.width>722||remembered.height>442||initial.width<remembered.width)throw Error('Remote window did not respect last size/available display');
+    host.close();await until(()=>run("role==='idle' && sentEnd.some(m=>m.type==='end-session')"));await until(()=>!host.isVisible());
+    if(states.get(host.webContents.id).outgoingDesktop)throw Error('Closed remote window retained viewer state');
+    log('Remote close sends end-session and hides only after cleanup; initial display fit and remembered geometry passed');
     if(states.get(host.webContents.id).captureAllowed)throw Error('Connection fixture unexpectedly granted capture');
     console.log('SHATOOTCONNECT_CONNECTION_UI_SMOKE passed');app.quit();
   }finally{for(const ws of clients)ws.terminate();server.close()}
