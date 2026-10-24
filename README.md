@@ -4,13 +4,13 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)
 
-## Version 0.14.0
+## Version 0.14.1
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.14.0-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.14.0-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.14.0-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.14.1-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.14.1-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.14.1-win-x64.zip` | Coordinator, runtime and service manager |
 
 Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. Remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
@@ -32,9 +32,9 @@ Setup checks the OS/architecture, destination, write access, destination/TEMP di
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.14.0-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.14.0-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.14.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.14.1-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.14.1-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.14.1-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.

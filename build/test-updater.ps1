@@ -17,7 +17,7 @@ public class NewUpdateFixture { public static void Main(string[] args) {
  if(!String.IsNullOrEmpty(ready)&&!String.IsNullOrEmpty(token))File.WriteAllText(ready,"{\"token\":\""+token+"\",\"version\":\"0.14.0\",\"executable\":\""+executable.Replace("\\","\\\\")+"\"}");
 } }' -OutputAssembly $newExe -OutputType WindowsApplication
     Add-Type -TypeDefinition 'public class FailedUpdateFixture {public static void Main(){System.Environment.Exit(1);}}' -OutputAssembly $badExe -OutputType WindowsApplication
-    $target=Join-Path $testRoot 'Shatoot Connect.exe';Copy-Item -LiteralPath $oldExe -Destination $target
+    $target=Join-Path $testRoot ('Shatoot '+[char]0x0645+'.exe');Copy-Item -LiteralPath $oldExe -Destination $target
     $settingsFile=Join-Path $testRoot 'connection.json';$historyFile=Join-Path $testRoot 'chat-encrypted.dat'
     [IO.File]::WriteAllText($settingsFile,'settings-preserved');[IO.File]::WriteAllText($historyFile,'history-preserved')
     $obsolete=Join-Path $cache 'ShatootConnect-Setup-0.12.0-win-x64.exe';[IO.File]::WriteAllText($obsolete,'obsolete cached setup')
@@ -46,10 +46,10 @@ public class NewUpdateFixture { public static void Main(string[] args) {
     Write-Output 'Ready-confirmed replacement, old-version cleanup, startup-failure rollback, invalid-digest refusal and profile preservation passed.'
     $launcherDir=Join-Path $testRoot 'stable launcher';$script=Join-Path $workspaceRoot 'desktop/launcher.ps1';[IO.Directory]::CreateDirectory($launcherDir)|Out-Null
     Copy-Item -LiteralPath $script -Destination (Join-Path $launcherDir 'launcher.ps1')
-    @{target=$target;version='0.14.0'}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $launcherDir 'launcher.json') -Encoding utf8
+    [IO.File]::WriteAllText((Join-Path $launcherDir 'launcher.json'),(@{target=$target;version='0.14.0'}|ConvertTo-Json))
     $linkFile=Join-Path $testRoot 'Shatoot Connect.lnk';$shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut($linkFile);$link.TargetPath=(Get-Command powershell.exe).Source;$link.Arguments="-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $launcherDir 'launcher.ps1')`"";$link.Save();$linkHash=Get-Sha256 $linkFile
-    $moved=Join-Path $testRoot 'Another version.exe';Copy-Item -LiteralPath $target -Destination $moved
-    @{target=$moved;version='0.15.0'}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $launcherDir 'launcher.json') -Encoding utf8
+    $moved=Join-Path $testRoot ('Another '+[char]0x0641+' version.exe');Copy-Item -LiteralPath $target -Destination $moved
+    [IO.File]::WriteAllText((Join-Path $launcherDir 'launcher.json'),(@{target=$moved;version='0.15.0'}|ConvertTo-Json))
     Start-Process -FilePath $linkFile -WindowStyle Hidden
     $marker=[IO.Path]::ChangeExtension($moved,'.started');for($i=0;$i -lt 100 -and !(Test-Path -LiteralPath $marker);$i++){Start-Sleep -Milliseconds 100}
     if(!(Test-Path -LiteralPath $marker) -or (Get-Sha256 $linkFile) -ne $linkHash){throw 'Stable desktop shortcut failed after executable/version path changed.'}

@@ -46,7 +46,7 @@ try {
     $startup=Start-Process -FilePath $Target -ArgumentList "--update-token=$ReadyToken" -WorkingDirectory ([IO.Path]::GetDirectoryName($Target)) -WindowStyle Hidden -PassThru
     $deadline=[DateTime]::UtcNow.AddSeconds(60);$ready=$false
     while([DateTime]::UtcNow -lt $deadline){
-        if(Test-Path -LiteralPath $readyFile){try{$ack=Get-Content -LiteralPath $readyFile -Raw|ConvertFrom-Json;if($ack.token -eq $ReadyToken -and $ack.version -eq $Version -and [IO.Path]::GetFullPath($ack.executable).Equals($Target,[StringComparison]::OrdinalIgnoreCase)){$ready=$true;break}}catch{}}
+        if(Test-Path -LiteralPath $readyFile){try{$ack=Get-Content -LiteralPath $readyFile -Raw -Encoding UTF8|ConvertFrom-Json;if($ack.token -eq $ReadyToken -and $ack.version -eq $Version -and [IO.Path]::GetFullPath($ack.executable).Equals($Target,[StringComparison]::OrdinalIgnoreCase)){$ready=$true;break}}catch{}}
         $startup.Refresh();if($startup.HasExited){break};Start-Sleep -Milliseconds 200
     }
     if(!$ready){throw 'The updated application did not confirm successful startup.'}

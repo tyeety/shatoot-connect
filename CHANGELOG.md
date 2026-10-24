@@ -13,7 +13,7 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
-## 0.14.0 — 2026-10-24
+## 0.14.1 — 2026-10-24
 
 ### Added
 
@@ -26,6 +26,16 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 - Successful updates delete their previous executable backup and downloaded/obsolete update packages after the new client confirms startup. Portable startup failure restores the working executable. Settings, credentials, chat history and received files remain untouched.
 - Startup also removes recognized backup files left by older updaters; unknown files and manually downloaded executables outside the updater cache are preserved.
+
+### Fixed
+
+- Windows PowerShell reads launcher manifests and update-startup acknowledgements explicitly as UTF-8, including files without a byte-order mark. Real Windows fixtures exercise Persian executable paths and an unchanged desktop shortcut across version changes.
+
+## 0.14.0 — 2026-10-24
+
+### Changed
+
+- Validation build superseded by 0.14.1 before publication. Its changes are documented in the 0.14.1 entry.
 
 ## 0.13.0 — 2026-10-24
 

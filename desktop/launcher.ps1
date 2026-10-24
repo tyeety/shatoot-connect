@@ -1,7 +1,7 @@
 param([string]$Favorite, [switch]$StartInTray)
 $ErrorActionPreference='Stop'
 try {
-    $record=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'launcher.json') -Raw | ConvertFrom-Json
+    $record=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'launcher.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     $target=[IO.Path]::GetFullPath($record.target)
     if (![IO.File]::Exists($target) -or [IO.Path]::GetExtension($target) -ne '.exe') { throw 'The application was moved. Open the current Shatoot Connect executable once to repair its shortcuts.' }
     $arguments=@()
