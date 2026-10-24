@@ -50,14 +50,14 @@ const preferences = new (require('./preferences.cjs').ClientPreferences)({ read:
   encrypt: text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows credential encryption is unavailable.'); return safeStorage.encryptString(text).toString('base64'); },
   decrypt: text => safeStorage.decryptString(Buffer.from(text, 'base64')) });
 function computerChanged(){for(const s of states.values())for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed())win.webContents.send('computer-cards-changed');}
-function rememberComputer(peer,route){preferences.rememberComputer(peer,route);}
+function rememberComputer(peer,route,preview=false){preferences.rememberComputer({...peer,preview:preview?peer.preview:undefined},route);}
 function decorateDiscovery(value){return {...value,peers:value.peers.map(peer=>preferences.decorate(peer))};}
 ipcMain.handle('computer-card',(e,operation,value={})=>{
   state(e);
   if(operation==='resolve')return preferences.decorate(value.peer,value.route);
   if(operation==='remember'){rememberComputer(value.peer||{},value.route||{});computerChanged();return preferences.decorate(value.peer,value.route);}
   if(operation==='rename'){const result=preferences.renameComputer(value.peer,value.name);computerChanged();return result;}
-  if(operation==='preview'){const s=state(e);if(!s.outgoingDesktop)throw new Error('A received desktop session is required.');rememberComputer({...value.peer,preview:value.preview},value.route);computerChanged();return;}
+  if(operation==='preview'){const s=state(e);if(!s.outgoingDesktop)throw new Error('A received desktop session is required.');rememberComputer({...value.peer,preview:value.preview},value.route,true);computerChanged();return;}
   throw new Error('Invalid computer card operation.');
 });
 ipcMain.on('desktop-viewing',(e,value)=>{state(e).outgoingDesktop=value===true;});
@@ -274,7 +274,7 @@ ipcMain.handle('update', async (e, operation) => {
 });
 ipcMain.handle('firewall-repair', async e => { state(e); if (smoke) return true; return require('./firewall.cjs').repairFirewall(app.getPath('exe')); });
 ipcMain.handle('chat-preferences', (e, value) => { state(e); if (!value || typeof value.autoAcceptFiles !== 'boolean' || typeof value.requireChatApproval !== 'boolean') throw new Error('Invalid chat settings.'); saveSettings({ autoAcceptFiles: value.autoAcceptFiles, requireChatApproval: value.requireChatApproval }); return value; });
-ipcMain.handle('profile-save', (e, value) => { const s = state(e); if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !require('../shared/profile.cjs').STATUSES.includes(value.status)) throw new Error('Enter a profile name and status.'); const next = { ...profile(), name: value.name.trim(), status: value.status }; saveSettings({ profile: next }); if (s.discovery) { s.discovery.name = next.name; s.discovery.status = next.status; s.discovery.refresh(); } s.directSocket?.send(JSON.stringify({ type: 'profile', ...next })); return next; });
+ipcMain.handle('profile-save', (e, value) => { const s = state(e); if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !require('../shared/profile.cjs').STATUSES.includes(value.status)) throw new Error('Enter a profile name and status.'); const next = { ...profile(), name: value.name.trim(), status: value.status }; saveSettings({ profile: next }); if (s.discovery) { s.discovery.name = next.name; s.discovery.status = next.status; s.discovery.refresh(); } if(s.directSocket?.readyState===1)s.directSocket.send(JSON.stringify({type:'profile',...next})); return next; });
 async function readProfilePhoto(file) {
   const mime={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'}[path.extname(file).toLowerCase()];
   if(!mime)throw new Error('This photo could not be opened.');
