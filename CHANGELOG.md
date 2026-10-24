@@ -13,6 +13,20 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.13.0 — 2026-10-24
+
+### Added
+
+- Persistent file-reception overrides for each private/group chat: inherit the global preference, receive automatically, or ask before receiving. The global default is automatic reception; existing explicit choices are retained.
+- File-completion notices consider the actual selected conversation, native window visibility/focus and focus inside the chat tool. A focused chat renders its new attachment directly; other cases receive a desktop notice, including tray/background use.
+- A common bottom-right notification stack/queue with critical-request priority, safe prompt expiry, host-panel space reservation and display-change reflow. Passive notices provide Hide, wait during system idle, fade after active reading time and pause on hover.
+- Notification clock/activity/queue tests and a focused Electron/actual WebRTC file-transfer test covering global/per-chat UI, Downloads bytes, active/background/different chats, Hide, fade and English/Persian layouts.
+
+### Changed
+
+- New chat and desktop file transfers use unique Receive-* folders directly under Windows Downloads, preserving previous files and existing attachment references.
+- The global ask-before-receiving setting also applies to desktop-control file offers. File validation, integrity checks and separate desktop permissions remain enforced.
+
 ## 0.12.1 — 2026-10-21
 
 ### Fixed

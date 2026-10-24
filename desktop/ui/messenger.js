@@ -4,8 +4,17 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   let engine, selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
   let editingGroup;
   const progress = new Map();
+  const fileSetting=document.createElement('label');fileSetting.className='chat-file-setting';fileSetting.hidden=true;
+  const fileCaption=document.createElement('span');fileCaption.textContent=tr('Incoming files');const filePolicy=document.createElement('select');filePolicy.id='chat-file-policy';filePolicy.setAttribute('aria-label',tr('Incoming files'));
+  for(const[value,text]of [['inherit','Use global setting'],['accept','Receive automatically'],['ask','Ask before receiving files']]){const option=document.createElement('option');option.value=value;option.textContent=tr(text);filePolicy.append(option);}fileSetting.append(fileCaption,filePolicy);document.querySelector('.chat-thread-heading').after(fileSetting);
+  function reportView(){return api.chatView({conversation:selected,active:!!selected&&$('messenger-dialog').open&&document.hasFocus()&&$('messenger-dialog').contains(document.activeElement)});}
+  for(const event of ['focusin','focusout','visibilitychange'])document.addEventListener(event,()=>queueMicrotask(()=>reportView().catch(()=>{})));
+  for(const event of ['focus','blur'])window.addEventListener(event,()=>reportView().catch(()=>{}));
+  $('messenger-dialog').addEventListener('close',()=>reportView().catch(()=>{}));
+  api.onChatFilesReceived(value=>{if(value.conversation!==selected||!$('messenger-dialog').open)return;const reading=document.hasFocus()&&$('messenger-dialog').contains(document.activeElement);if(reading&&$('chat-search').value){$('chat-search').value='';rows=[];selectionVersion++;}load(false).then(()=>{if(reading)$('chat-messages').scrollTop=$('chat-messages').scrollHeight;}).catch(error);});
   const error = value => { $('chat-error').textContent = tr(value?.message || String(value)); };
   const run = fn => async event => { event?.preventDefault(); try { $('chat-error').textContent = ''; await fn(event); } catch (e) { error(e); } };
+  filePolicy.onchange=run(async()=>{const conversation=selected;await api.collaboration('file-policy',{conversation,mode:filePolicy.value});await engine.refresh();render();});
   function button(text, action, icon) { const b = document.createElement('button'); b.type = 'button'; b.className = icon ? 'icon-button' : 'small-button'; b.title = tr(text); b.setAttribute('aria-label', tr(text)); if (icon) { const i = document.createElement('span'); i.className = `mi ${icon}`; i.setAttribute('aria-hidden', 'true'); b.append(i); } else b.textContent = tr(text); b.onclick = run(action); return b; }
   function open() { if (!detached && !window.shatootconnectSmoke) { api.openChat(); return; } if (!$('messenger-dialog').open) $('messenger-dialog').showModal(); render(); }
   function contact(id) { return engine.catalog.contacts.find(c => c.deviceId === id); }
@@ -15,7 +24,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     open(); $('chat-error').textContent = tr('Waiting for chat approval…');
     const s = await engine.connect(destination); $('chat-error').textContent = ''; await select(`p:${s.peer.deviceId}`); return s;
   }
-  async function select(id) { selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await load(false); publish(); }
+  async function select(id) { selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await reportView(); await load(false); publish(); }
   async function load(older = false) {
     if (!selected) return;
     const version = selectionVersion, id = selected, search = $('chat-search').value.trim();
@@ -51,6 +60,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     $('chat-text').disabled = !selected; $('chat-send').disabled = !selected || busy; $('chat-send-files').disabled = !selected || busy;
     $('chat-reconnect').hidden = !peer || online(peer.deviceId); $('chat-disconnect').hidden = !peer || !online(peer.deviceId);
     $('chat-progress').textContent = selected && progress.get(selected) || '';
+    fileSetting.hidden=!selected;filePolicy.value=engine.catalog.filePolicies?.[selected]||'inherit';
     if (refreshHistory && $('messenger-dialog').open && selected && rows.length <= 100) { clearTimeout(historyTimer); historyTimer = setTimeout(() => load(false).catch(error), 80); }
   }
   function renderDiscovery(value) {

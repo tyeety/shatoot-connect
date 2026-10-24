@@ -50,7 +50,7 @@ window.SessionExchange = class {
     if (this.closed || this.channel.readyState !== 'open') return Promise.reject(new Error('File channel is closed.'));
     const id = ++this.next;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('File exchange timed out.')); }, 30000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('File exchange timed out.')); }, op === 'begin' ? 120000 : 30000);
       this.pending.set(id, { resolve, reject, timer });
       try { this.send({ id, op, value }); } catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });

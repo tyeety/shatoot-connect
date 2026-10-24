@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell, nativeImage, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell, nativeImage, Tray, Menu, powerMonitor } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
@@ -123,6 +123,7 @@ function showHostOverlay(s) {
     alwaysOnTop: true, skipTaskbar: true, focusable: false, show: false, transparent: true, backgroundColor: '#00000000',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   s.overlay = overlay;
+  notices.reserve(overlay);
   syncCursorExclusions(s);
   overlay.on('closed', () => { if (s.overlay === overlay && s.captureAllowed) disconnectHost(s); });
   overlay.setContentProtection(true);
@@ -149,8 +150,18 @@ function state(event) {
   if (!s || event.senderFrame !== event.sender.mainFrame) throw new Error('Unauthorized IPC');
   return s;
 }
-const notices=require('./notifications.cjs').createNotifications({BrowserWindow,ipcMain,screen,language:()=>settings().language==='fa'?'fa':'en'});
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options)}, shell, smoke, settings });
+const notices=require('./notifications.cjs').createNotifications({BrowserWindow,ipcMain,screen,language:()=>settings().language==='fa'?'fa':'en',activity:()=>!app.isReady()||smoke||powerMonitor.getSystemIdleTime()<30});
+function chatFilesReceived(s,record,files){
+  let reading=false;
+  for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed()){
+    const view=s.chatViews?.get(win.webContents.id);
+    if(win.isVisible()&&!win.isMinimized()&&win.isFocused()&&view?.active&&view.conversation===record.conversation)reading=true;
+    win.webContents.send('chat-files-received',{conversation:record.conversation,id:record.id});
+  }
+  if(!reading){const fa=s.language==='fa';notices.toast(s.win,fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`,{detail:files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads'});}
+}
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, received:chatFilesReceived });
+ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active});});
 ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message);});
 function configureStartup(enabled){
   if(!smoke && app.isPackaged)app.setLoginItemSettings({name:'Shatoot Connect',openAtLogin:enabled,path:process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),args:['--start-in-tray']});
@@ -202,7 +213,7 @@ function openChat(s) {
   if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show(); s.chatWindow.focus(); return; }
   const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor: '#0a0e17', title: 'Shatoot Connect · Chats', autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   s.chatWindow = win; win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
-  win.on('closed', () => { s.chatWindow = null; });
+  const chatContentsId=win.webContents.id;win.on('closed', () => { s.chatViews?.delete(chatContentsId);s.chatWindow = null; });
   win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
 }
 ipcMain.handle('chat-open', e => openChat(state(e)));
@@ -293,7 +304,7 @@ ipcMain.handle('config', e => {
   try { if (saved.serverKeys?.[endpoint]) serverKey = safeStorage.decryptString(Buffer.from(saved.serverKeys[endpoint], 'base64')); } catch {}
   s.sharedCursor = saved.sharedCursor === true; s.showGuestCursor = saved.showGuestCursor !== false;
   const pendingFavorite = launchFavorite; launchFavorite = null;
-  return { rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles === true, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
+  return { rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles !== false, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
 });
 ipcMain.handle('internet-enabled', (e,value)=>{state(e);if(typeof value!=='boolean')throw new Error('Invalid connection mode.');saveSettings({internetEnabled:value});return value;});
 ipcMain.handle('show-guest-cursor', (e,value)=>{const s=state(e);if(typeof value!=='boolean')throw new Error('Invalid cursor setting.');saveSettings({showGuestCursor:value});s.showGuestCursor=value;if(!value)hideGuestCursor(s);return value;});
@@ -526,7 +537,7 @@ ipcMain.handle('exchange', async (e, operation, value) => {
   if (operation === 'viewer-start') { s.exchangeAllowed = true; return; }
   if (operation === 'stop') { s.exchangeAllowed = false; await s.transfers?.reset(); s.clipboardProc?.stdin.end(); s.clipboardProc = null; return; }
   if (!s.control && !s.exchangeAllowed) throw new Error('Clipboard and files require an active control session.');
-  s.transfers ||= new (require('./transfers.cjs').Transfers)(path.join(app.getPath('downloads'), 'Shatoot Connect'));
+  s.transfers ||= new (require('./transfers.cjs').Transfers)(app.getPath('downloads'));
   const transfers = s.transfers;
   switch (operation) {
     case 'clipboard-read': { const data = await nativeClipboard(s, { op: 'read' }); return { seq: data.seq, text: data.text, files: !!data.files.length, supported: data.supported }; }
@@ -535,7 +546,14 @@ ipcMain.handle('exchange', async (e, operation, value) => {
     case 'pick': { const result = await dialog.showOpenDialog(s.win, { properties: ['openFile', 'multiSelections'] }); return result.canceled ? [] : transfers.offer(result.filePaths); }
     case 'sources': return transfers.offer(value);
     case 'read': return transfers.read(value);
-    case 'begin': return transfers.begin(value);
+    case 'begin': {
+      if(settings().autoAcceptFiles===false&&!smoke){
+        if(s.filePrompt)throw new Error('Another incoming file offer is awaiting approval.');s.filePrompt=true;
+        try{const fa=s.language==='fa',answer=await notices.showMessageBox(s.win,{type:'question',message:fa?'دریافت فایل‌های این اتصال؟':'Receive files from this connection?',detail:'Downloads',buttons:fa?['رد','دریافت فایل‌ها']:['Decline','Receive files'],cancelId:0});if(answer.response!==1)throw new Error('File offer declined.');}finally{s.filePrompt=false;}
+      }
+      if(!s.control&&!s.exchangeAllowed)throw new Error('Clipboard and files require an active control session.');
+      return transfers.begin(value);
+    }
     case 'write': return transfers.write(value);
     case 'end-file': return transfers.endFile(value);
     case 'finish': { const files = await transfers.finish(); try { const result = await nativeClipboard(s, { op: 'write', files }); return { seq: result.seq, count: files.length, clipboardReady:true }; } catch { return { count:files.length, clipboardReady:false }; } }
@@ -548,6 +566,7 @@ ipcMain.handle('exchange', async (e, operation, value) => {
 app.whenReady().then(async () => {
   smokeLog('app ready');
   if (smoke) saveSettings({ favorites: [], connectionHistory:[], connectionPasswords:{}, rememberPasswords:true, fixedPassword: null, language: 'en' });
+  if(smoke&&process.argv.includes('--chat-notification-smoke'))saveSettings({internetEnabled:false,autoAcceptFiles:true});
   // Electron 44 checks `media` as part of desktop capture. The only media API in
   // our trusted, CSP-locked renderer is getDisplayMedia; its handler denies audio.
   const capturePermission = (wc, permission) => {
@@ -574,7 +593,8 @@ app.whenReady().then(async () => {
   if (!smoke) for (const record of preferences.list()) if (record.shortcut && fs.existsSync(path.join(app.getPath('desktop'), preferences.shortcutName(record.id)))) { try { createFavoriteShortcut(record.id); } catch {} }
   if (smoke) {
     setTimeout(() => { smokeLog('Watchdog timeout'); app.exit(1); }, 240000).unref();
-    runSmoke(win).catch(error => { smokeLog(error.stack); console.error(error); app.exit(1); });
+    const run=process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
+    run(win).catch(error => { smokeLog(error.stack); console.error(error); app.exit(1); });
   }
 });
 app.on('window-all-closed', () => app.quit());

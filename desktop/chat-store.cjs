@@ -64,7 +64,14 @@ class ChatStore {
     return this.change(data => { const token = crypto.randomUUID(); data.attachments[token] = { conversation, message, files }; return token; });
   }
   list() {
-    const data = this.load(); return { contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => m.conversation === id).at(-1) })) };
+    const data = this.load(); return { filePolicies: {...data.filePolicies}, contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => m.conversation === id).at(-1) })) };
+  }
+  filePolicy(conversation, mode) {
+    const data=this.load();
+    if(typeof conversation!=='string'||!/^([pg]):[a-f0-9-]{36}$/i.test(conversation)||!(conversation.startsWith('p:')?data.contacts[conversation.slice(2)]:data.groups[conversation.slice(2)]))throw new Error('Unknown conversation.');
+    if(mode===undefined)return data.filePolicies?.[conversation]||'inherit';
+    if(!['inherit','ask','accept'].includes(mode))throw new Error('Invalid file reception setting.');
+    return this.change(next=>{next.filePolicies||={};if(mode==='inherit')delete next.filePolicies[conversation];else next.filePolicies[conversation]=mode;return mode;});
   }
   history({ conversation, before = Number.MAX_SAFE_INTEGER, search = '', limit = 100 } = {}) {
     if (typeof conversation !== 'string' || typeof search !== 'string' || search.length > 200 || !Number.isSafeInteger(before)) throw new Error('Invalid history query.');

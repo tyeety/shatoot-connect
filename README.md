@@ -87,9 +87,9 @@ The owner is an intended group participant and can read/forward messages. This i
 
 ## Files and clipboard
 
-Use messenger **Send files** or drag local files onto a conversation. By default incoming batches ask for approval. Enable Settings > Chat and files > Accept incoming files automatically to save them without repeated prompts. Files never open automatically; path/size/hash checks still apply. Group-owner uploads fan out to members; member uploads go to the owner and then other online members, following each recipient's file-acceptance setting. All intended recipients must be connected for a new group upload. Offline file forwarding is not automatic; a received owner copy remains in history/Downloads for manual use later.
+Use messenger **Send files** or drag local files onto a conversation. Files are received automatically by default. Settings > Chat and files > **Ask before receiving files** enables approval globally, including desktop-session files. Each private or group chat has its own **Incoming files** selector: use the global setting, always receive automatically, or always ask. Overrides persist across reconnects/restarts and do not change another chat's policy. Explicit existing global preferences are preserved. Files never open automatically; path/size/hash checks still apply. Group-owner uploads fan out to members; member uploads go to the owner and then other online members, following each recipient's file-acceptance setting. All intended recipients must be connected for a new group upload. Offline file forwarding is not automatic; a received owner copy remains in history/Downloads for manual use later.
 
-Messenger transfer neither reads nor changes the system clipboard. An attachment's folder button reveals the received file instead of executing it. Unique folders under `Downloads\Shatoot Connect\Chat` preserve names and never overwrite prior batches. Relative paths, file order, length and SHA-256 hashes are validated. Partial receives are cleaned on error/disconnect. Limits are 1,000 entries / 10 GiB per batch; symbolic links and unsafe Windows paths are rejected. Chunks use bounded acknowledgement/backpressure and low-priority data channels. Incomplete file deliveries remain visibly undelivered; file selections are not silently retried after restart.
+Messenger transfer neither reads nor changes the system clipboard. An attachment's folder button reveals the received file instead of executing it. New transfers use unique `Receive-*` folders directly under the Windows **Downloads** folder, preserving names without overwriting earlier batches. Existing attachment locations remain valid. Relative paths, file order, length and SHA-256 hashes are validated. Partial receives are cleaned on error/disconnect. Limits are 1,000 entries / 10 GiB per batch; symbolic links and unsafe Windows paths are rejected. Chunks use bounded acknowledgement/backpressure and low-priority data channels. Incomplete file deliveries remain visibly undelivered; file selections are not silently retried after restart.
 
 Approved **desktop control** sessions have a separate clipboard channel for Unicode text and Explorer files/folders in both directions. A file drop on remote video transfers, clicks the target and pastes; it is not arbitrary OLE drop support. Clipboard failure after completed delivery does not discard received files. Rich text/image clipboard formats are not synchronized. Chat alone never grants this clipboard permission.
 
@@ -113,7 +113,7 @@ The app adopts Shatoot's purple palette (#7400a8 / #9f38d7) on dark surfaces wit
 
 Closing the main window hides it to the tray even without an open chat. **Quit completely** is available in Settings > Application and the tray. Packaged clients enable startup with Windows by default and open in the tray using the installed/portable executable; the Application tab can turn startup off. Source/smoke runs never modify real Windows startup. A signed-in desktop session is still required; this is not pre-login or post-logout desktop service support.
 
-Application notifications use the app theme in the lower-left screen corner. Screen invitations use topmost critical approval windows without granting access until a valid action is chosen. Urgent requests take precedence over informational toasts; concurrent prompts queue with bounded expiry. Native file/folder pickers, Windows elevation and installer dialogs remain OS dialogs. A host can hide its connection panel without disconnecting guests, then restore panels from Settings or the tray. Emergency disconnect remains available.
+All application notifications share a themed bottom-right stack and queue. Up to three are visible within the screen work area; visible host panels reserve space. Critical approvals take priority without losing queued informational notices. File completion appears directly in the selected chat when that chat tool has keyboard focus (including the separate chat window with main UI hidden); otherwise it produces a desktop notice. Passive notices have **Hide**, remain while the system is idle, and fade after about 6.5 seconds of activity; hovering pauses dismissal. Required-action prompts retain a bounded, safe-decline expiry. Native file/folder pickers, Windows elevation and installer dialogs remain OS dialogs. A host can hide its connection panel without disconnecting guests, then restore panels from Settings or the tray. Emergency disconnect remains available.
 
 Windowed viewing fits the received display aspect ratio and measured controls/chrome, caps size to the current work area, and preserves the ratio during manual resize. Ending viewing restores normal main-window dimensions. Fullscreen continues to apply to the video panel.
 
@@ -145,6 +145,7 @@ npm run build:native
 npm start
 npm test
 npm run test:smoke
+npm run test:chat-ui
 npm run check:release
 npm run dist
 npm run test:packaged
@@ -154,6 +155,8 @@ npm run dist:server
 ```
 
 `test:smoke` requires an interactive, unlocked desktop. It uses isolated profiles/downloads and auto-approves prompts only in unpackaged development; native remote input injection stays disabled. It checks real WebRTC desktop video, standalone ID/LAN messaging, three-peer groups, offline queues, DPAPI persistence and bidirectional/group file contents. This does not prove acceptance on two physical PCs, a real VPN/Internet/CDN path or service logout/reboot.
+
+`test:chat-ui` is a focused Electron/real LAN WebRTC test with isolated profiles/Downloads. It verifies global/per-chat controls, actual received bytes, focused-chat notification suppression, background/different-chat notices, Hide and fade, plus both language layouts. It requires an interactive Windows desktop but does not capture its screen or inject remote input. Notification unit tests use a controlled activity/clock source to verify idle retention, hover pauses, priority, queuing, display changes and non-overlap.
 
 `test:installer` requires `release/win-unpacked` and an account with no existing installation/app shortcuts. A guarded fixture tests invalid/occupied/unwritable destinations, running-app refusal, fresh install, downgrade refusal, locked upgrade/removal, repair, uninstall and personal-data preservation, then cleans up. CI runs protocol/store/network tests and builds native components. A service-based CI runner does not establish interactive desktop-capture acceptance.
 

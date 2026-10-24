@@ -13,3 +13,4 @@
 .sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .viewing #messenger-dialog header{display:block}
 @media(max-width:1050px){.messenger-grid{grid-template-columns:210px 1fr}.chat-compose-actions small{display:none}.chat-compose-actions #chat-send{margin-inline-start:auto}header .breadcrumb{font-size:10px}}
+.chat-file-setting{display:flex;gap:10px;align-items:center;margin:0;flex-shrink:0;font-size:12px}.chat-file-setting select{width:230px;max-width:65%;height:32px;margin:0;font-size:12px}

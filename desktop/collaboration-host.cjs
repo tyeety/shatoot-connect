@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { ChatStore } = require('./chat-store.cjs');
 const { Transfers } = require('./transfers.cjs');
 const { UUID } = require('./discovery.cjs');
-function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings }) {
+function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, received = () => {} }) {
   function store(s) {
     if (!s.identity) throw new Error('The device is not initialized.');
     return s.chatStore ||= new ChatStore({ file: path.join(app.getPath('userData'), `chat-${s.identity.deviceId}.dat`), self: s.identity.deviceId,
@@ -16,6 +16,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     const s = state(event), history = store(s);
     if (op === 'list') return history.list();
     if (op === 'history') return history.history(value);
+    if (op === 'file-policy') return history.filePolicy(value.conversation,value.mode);
     if (op === 'pending') return history.pending(value.peer);
     if (op === 'contact') {
       const route = value.route;
@@ -43,17 +44,18 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
           const fa = s.language === 'fa';
           const result = smoke ? { response: 1 } : await dialog.showMessageBox(s.chatWindow || s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'پذیرش چت'] : ['Decline', 'Accept chat'], defaultId: 0, cancelId: 0,
             message: fa ? `${value.peer.name} درخواست گفت‌وگو دارد.` : `${value.peer.name} wants to chat.`,
-            detail: fa ? 'این اجازه فقط برای چت است. هر دریافت فایل جداگانه تأیید می‌شود؛ دسترسی به صفحه، موس یا کیبورد داده نمی‌شود.' : 'Chat permission only. Each incoming file batch needs separate approval. This does not share your screen, mouse or keyboard.' });
+            detail: fa ? 'این اجازه فقط برای چت است. دریافت فایل از تنظیمات سراسری یا همین چت پیروی می‌کند؛ دسترسی به صفحه، موس یا کیبورد داده نمی‌شود.' : 'Chat permission only. File reception follows global or per-chat settings. This does not share your screen, mouse or keyboard.' });
           if (result.response !== 1) return false;
         } finally { s.chatPrompt = false; }
       }
       s.chatGrants ||= new Map();
       if (s.chatGrants.size >= 16 && !s.chatGrants.has(value.session)) throw new Error('Chat connection limit reached.');
-      if (!s.chatGrants.has(value.session)) s.chatGrants.set(value.session, { peer: value.peer, send: new Transfers(path.join(app.getPath('downloads'), 'Shatoot Connect', 'Chat')), receive: new Transfers(path.join(app.getPath('downloads'), 'Shatoot Connect', 'Chat')) });
+      if (!s.chatGrants.has(value.session)) s.chatGrants.set(value.session, { peer: value.peer, send: new Transfers(app.getPath('downloads')), receive: new Transfers(app.getPath('downloads')) });
       return true;
     }
     if (op === 'end') {
       const g = s.chatGrants?.get(value.session); s.chatGrants?.delete(value.session);
+      if(g?.promptOwner)dialog.cancelFor?.(g.promptOwner,`file:${value.session}`);
       if (g) await Promise.allSettled([g.send.reset(), g.receive.reset()]); return;
     }
     throw new Error('Invalid chat operation.');
@@ -66,24 +68,28 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if (op === 'read') return g.send.read(value);
     if (op === 'begin') {
       if (!Array.isArray(value?.entries) || value.entries.length > 1000 || !value.message || value.message.kind !== 'file' || !UUID.test(value.message.id)) throw new Error('Invalid file offer.');
-      if (g.receive.incoming || s.chatFilePrompt) throw new Error('Another incoming file offer is awaiting approval.');
+      if (g.receive.incoming || g.prompt) throw new Error('Another incoming file offer is awaiting approval.');
       const conversation = value.message.conversation;
       if (conversation === `p:${g.peer.deviceId}`) { if (value.message.sender !== g.peer.deviceId) throw new Error('Invalid file sender.'); }
       else {
         const group = history.load().groups[String(conversation).slice(2)];
         if (!conversation?.startsWith('g:') || !group || !group.members.some(m => m.deviceId === value.message.sender) || (group.owner !== g.peer.deviceId && (group.owner !== s.identity.deviceId || value.message.sender !== g.peer.deviceId))) throw new Error('Invalid group file offer.');
       }
-      s.chatFilePrompt = true;
+      g.prompt = true;g.promptOwner=s.chatWindow||s.win;
       try {
         const count = value.entries.length, bytes = value.entries.reduce((total, file) => total + (Number.isSafeInteger(file.size) && file.size >= 0 ? file.size : 0), 0);
         if (bytes > 10 * 1024 ** 3) throw new Error('Transfer limit: 10 GB.');
         const fa = s.language === 'fa';
-        const result = smoke || settings().autoAcceptFiles === true ? { response: 1 } : await dialog.showMessageBox(s.chatWindow || s.win, { type: 'question', title: 'Shatoot Connect', buttons: fa ? ['رد', 'دریافت فایل‌ها'] : ['Decline', 'Receive files'], defaultId: 0, cancelId: 0,
+        const policy=history.filePolicy(conversation),accept=policy==='accept'||(policy==='inherit'&&settings().autoAcceptFiles!==false);
+        const result = smoke || accept ? { response: 1 } : await dialog.showMessageBox(g.promptOwner, { type: 'question', priority:`file:${session}`, title: 'Shatoot Connect', buttons: fa ? ['رد', 'دریافت فایل‌ها'] : ['Decline', 'Receive files'], defaultId: 0, cancelId: 0,
           message: fa ? `دریافت ${count} فایل از ${g.peer.name}؟` : `Receive ${count} files from ${g.peer.name}?`,
-          detail: `${Math.ceil(bytes / 1024)} KB\n${value.entries.slice(0, 6).map(e => typeof e.name === 'string' ? e.name.slice(0, 150) : '').join('\n')}\nDownloads / Shatoot Connect / Chat` });
+          detail: `${Math.ceil(bytes / 1024)} KB\n${value.entries.slice(0, 6).map(e => typeof e.name === 'string' ? e.name.slice(0, 150) : '').join('\n')}\nDownloads` });
         if (result.response !== 1) throw new Error('File offer declined.');
-        await g.receive.begin(value.entries); g.message = value.message; return true;
-      } finally { s.chatFilePrompt = false; }
+        if(grant(s,session)!==g)throw new Error('Chat permission is required.');
+        await g.receive.begin(value.entries);
+        if(s.chatGrants?.get(session)!==g){await g.receive.abort();throw new Error('Chat permission is required.');}
+        g.message = value.message; return true;
+      } finally { g.prompt = false;g.promptOwner=null; }
     }
     if (op === 'write') return g.receive.write(value);
     if (op === 'end-file') return g.receive.endFile(value);
@@ -91,6 +97,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
       const files = await g.receive.finish(), message = g.message; g.message = null;
       const record = history.append(message).message;
       const attachment = history.attachment(record.conversation, record.id, files);
+      received(s,record,files);
       return { count: files.length, attachment };
     }
     if (op === 'cancel') { g.message = null; await g.receive.abort(); return; }

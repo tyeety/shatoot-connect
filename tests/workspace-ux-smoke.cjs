@@ -6,7 +6,7 @@ module.exports=async({host,states,notices,screen,wait,log,artifacts})=>{
   const popup=[...notices.entries.values()][0].win;
   await wait(popup,"document.querySelectorAll('#notice-actions button').length===3");
   for(let i=0;i<30&&!popup.isVisible();i++)await new Promise(resolve=>setTimeout(resolve,50));
-  const area=screen.getPrimaryDisplay().workArea,bounds=popup.getBounds();if(!popup.isAlwaysOnTop()||bounds.x!==area.x+16||bounds.y+bounds.height>area.y+area.height)throw new Error('Urgent notification is not visible in the bottom-left screen corner');
+  const area=screen.getPrimaryDisplay().workArea,bounds=popup.getBounds();if(!popup.isAlwaysOnTop()||bounds.x+bounds.width!==area.x+area.width-16||bounds.y+bounds.height>area.y+area.height)throw new Error('Urgent notification is not visible in the bottom-right screen corner');
   fs.writeFileSync(path.join(artifacts,'urgent-notification.png'),(await popup.webContents.capturePage()).toPNG());
   await popup.webContents.executeJavaScript("document.querySelector('#notice-actions button').click();true");
   if((await request).response!==0||states.get(host.webContents.id).captureAllowed)throw new Error('Declining a notification granted screen access');
