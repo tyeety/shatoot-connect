@@ -13,7 +13,7 @@ window.installClientSettings = (config, profileChanged) => {
   }
   const firewall = document.createElement('button'); firewall.id = 'repair-firewall'; firewall.className = 'small-button'; firewall.textContent = tr('Repair Windows Firewall access'); $('settings-lan').append(firewall);
   const firewallHint = document.createElement('p'); firewallHint.className = 'footnote'; firewallHint.textContent = tr('Requests Windows administrator permission. Allows this app on private and domain LAN networks; you can retry after cancelling.'); $('settings-lan').append(firewallHint);
-  const run = fn => async () => { try { await fn();window.actionNotice?.('Done'); } catch (error) { $('settings-status').textContent = tr(error.message);window.actionNotice?.(error.message); } };
+  const run = fn => async event => { const control=event?.currentTarget;try { await window.withActionFeedback(control,fn); } catch (error) { $('settings-status').textContent = tr(error.message);window.actionNotice?.(error.message); } };
   $('remember-passwords').checked=config.rememberPasswords;$('startup-enabled').checked=config.startupEnabled;
   $('remember-passwords').onchange=run(async()=>{config.rememberPasswords=await api.connections('remember',$('remember-passwords').checked);if(!config.rememberPasswords)document.getElementById('remote-password').value='';});
   $('startup-enabled').onchange=run(async()=>{config.startupEnabled=await api.lifecycle('startup',$('startup-enabled').checked);});

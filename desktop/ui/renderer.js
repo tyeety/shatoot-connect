@@ -47,7 +47,7 @@ api.onDirect(message => {
   messageQueue = messageQueue.then(() => dispatch(message, 'lan-host')).catch(e => { stopSession(true); status(e.message, true); });
 });
 api.onHostSignalOut(message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); });
-function guarded(fn) { return async (...args) => { try { await fn(...args); } catch (e) { if(e.name==='AbortError')return;const message=(e.message||String(e)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,''); status(message, true); toast(message); } }; }
+function guarded(fn) { return async (...args) => { try { await window.withActionFeedback(args[0]?.currentTarget,()=>fn(...args)); } catch (e) { if(e.name==='AbortError')return;const message=(e.message||String(e)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,''); status(message, true); toast(message); } }; }
 function updateControls() {
   api.desktopViewing(role==='viewer');
   const busy = { type: 'hosting-busy', busy: role !== 'idle' || requestPending }; if (socket?.readyState === WebSocket.OPEN && registered) socket.send(JSON.stringify(busy)); if (window.shatootconnectDirect) api.directSend(busy);
