@@ -2,7 +2,7 @@
 window.installMessenger = ({ api, self, internet, ensureInternet, remote, detached = false }) => {
   const $ = id => document.getElementById(id), tr = text => window.i18n.translate(text);
   let engine, selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
-  let editingGroup;
+  let editingGroup,connecting=false,connectSequence=0;
   const progress = new Map();
   const fileSetting=document.createElement('label');fileSetting.className='chat-file-setting';fileSetting.hidden=true;
   const fileCaption=document.createElement('span');fileCaption.textContent=tr('Incoming files');const filePolicy=document.createElement('select');filePolicy.id='chat-file-policy';filePolicy.setAttribute('aria-label',tr('Incoming files'));
@@ -16,13 +16,18 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   const run = fn => async event => { event?.preventDefault(); try { $('chat-error').textContent = ''; await fn(event); } catch (e) { error(e); } };
   filePolicy.onchange=run(async()=>{const conversation=selected;await api.collaboration('file-policy',{conversation,mode:filePolicy.value});await engine.refresh();render();});
   function button(text, action, icon) { const b = document.createElement('button'); b.type = 'button'; b.className = icon ? 'icon-button' : 'small-button'; b.title = tr(text); b.setAttribute('aria-label', tr(text)); if (icon) { const i = document.createElement('span'); i.className = `mi ${icon}`; i.setAttribute('aria-hidden', 'true'); b.append(i); } else b.textContent = tr(text); b.onclick = run(action); return b; }
+  const cancelConnect=document.createElement('button');cancelConnect.id='chat-cancel-connect';cancelConnect.type='button';cancelConnect.className='small-button stop';cancelConnect.textContent=tr('Cancel connection');cancelConnect.hidden=true;$('chat-connect-form').append(cancelConnect);
+  cancelConnect.onclick=run(async()=>{connectSequence++;connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;$('chat-error').textContent=tr('Connection cancelled.');await engine.cancelPending();});
   function open() { if (!detached && !window.shatootconnectSmoke) { api.openChat(); return; } if (!$('messenger-dialog').open) $('messenger-dialog').showModal(); render(); }
   function contact(id) { return engine.catalog.contacts.find(c => c.deviceId === id); }
   function online(id) { return !!engine.peer(id); }
   function routeFor(id) { const nearby = discovery.peers.find(p => p.deviceId === id); if (nearby?.endpoints.length) return { type: 'lan', address: nearby.endpoints[0], deviceId: id, name: nearby.name }; const saved = contact(id); return saved?.route ? { ...saved.route, deviceId: id, name: saved.name } : null; }
   async function start(destination) {
-    open(); $('chat-error').textContent = tr('Waiting for chat approval…');
-    const s = await engine.connect(destination); $('chat-error').textContent = ''; await select(`p:${s.peer.deviceId}`); return s;
+    if(connecting)return;const sequence=++connectSequence;connecting=true;cancelConnect.hidden=false;$('chat-connect').disabled=true;$('chat-address').disabled=true;
+    open();$('chat-error').textContent=tr('Waiting for chat approval…');
+    try{const s=await engine.connect(destination);if(sequence!==connectSequence)return;$('chat-error').textContent='';await select('p:'+s.peer.deviceId);return s;}
+    catch(error){if(sequence===connectSequence)throw error;}
+    finally{if(sequence===connectSequence){connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;}}
   }
   async function select(id) { selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await reportView(); await load(false); publish(); }
   async function load(older = false) {
@@ -50,6 +55,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   }
   function render(refreshHistory = false) {
     if (!engine) return;
+    const pending=connecting||(engine.connectAttempts?.size||engine.pendingConnections||0)>0;cancelConnect.hidden=!pending;$('chat-connect').disabled=pending;$('chat-address').disabled=pending;
     const list = $('chat-conversations'); list.replaceChildren();
     const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar: c.avatar, name: c.name, detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, name: g.name, status: 'Group' }))];
     for (const item of items) { const b = document.createElement('button'); b.className = 'chat-conversation'; b.type = 'button'; b.setAttribute('aria-pressed', String(item.id === selected)); const name = document.createElement('b'), status = document.createElement('small'); name.textContent = item.name; status.textContent = tr(item.status) + (item.detail ? ' · ' + item.detail : ''); if (item.avatar) { const image = document.createElement('img'); image.src = item.avatar; image.className = 'profile-avatar'; image.alt = ''; b.append(image); } b.append(name, status); b.onclick = run(() => select(item.id)); list.append(b); }
@@ -77,7 +83,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     render();publish();
   }
   function publish() { if (!detached && engine) api.chatPublish(snapshot()); }
-  function snapshot() { return { self, catalog: engine.catalog, connected: engine.connected(), language: window.i18n.language, discovery, selected, progress: [...progress] }; }
+  function snapshot() { return { self, pendingConnections:engine.connectAttempts?.size||0,catalog: engine.catalog, connected: engine.connected(), language: window.i18n.language, discovery, selected, progress: [...progress] }; }
   engine = new window.CollaborationClient({ api, self, internet, ensureInternet, changed: () => { render(true); publish(); }, error, progress: value => { const text = tr(value.text) + (Number.isInteger(value.percent) ? ` ${value.percent}%` : ''); progress.set(value.conversation, text); if (selected === value.conversation) $('chat-progress').textContent = text; publish(); } });
   if (!detached) api.onChatCommand(async (operation, args) => { if (operation === 'snapshot') return snapshot(); if (operation === 'close') { engine.close(engine.peer(args[0])); return; } const result = await engine[operation](...args); return operation === 'connect' ? { peer: result.peer } : result; });
   window.collaboration = engine;

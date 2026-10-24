@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('shatootconnect', {
+  appReady: () => ipcRenderer.invoke('app-ready'),
   update: operation => ipcRenderer.invoke('update', operation),
   onUpdate: callback => ipcRenderer.on('update-status', (_event, value) => callback(value)),
   repairFirewall: () => ipcRenderer.invoke('firewall-repair'),

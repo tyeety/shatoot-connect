@@ -48,12 +48,18 @@ const preferences = new (require('./preferences.cjs').ClientPreferences)({ read:
   encrypt: text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows credential encryption is unavailable.'); return safeStorage.encryptString(text).toString('base64'); },
   decrypt: text => safeStorage.decryptString(Buffer.from(text, 'base64')) });
 let launchFavorite = process.argv.find(value => /^--connect-saved=[a-f0-9-]{36}$/.test(value))?.split('=')[1];
+let stableLauncher;
+function getLauncher(){
+  if(!stableLauncher){stableLauncher=new(require('./launcher.cjs').Launcher)({directory:path.join(app.getPath('userData'),'launcher'),icon:path.join(process.resourcesPath,'app-icon.ico'),powershell:path.join(process.env.SystemRoot||'C:\\Windows','System32/WindowsPowerShell/v1.0/powershell.exe')});stableLauncher.register(process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),app.getVersion());}
+  return stableLauncher;
+}
 function createFavoriteShortcut(id) {
   const record = preferences.get(id);
   const executable = process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe');
   const target = path.join(app.getPath('desktop'), preferences.shortcutName(id));
   const args = `${app.isPackaged ? '' : `"${path.resolve(__dirname, '..')}" `}--connect-saved=${id}`;
-  if (!shell.writeShortcutLink(target, fs.existsSync(target) ? 'update' : 'create', { target: executable, cwd: path.dirname(executable), args, description: `Shatoot Connect: ${record.name}`, icon: executable, iconIndex: 0 })) throw new Error('Desktop shortcut could not be created.');
+  const link=app.isPackaged?getLauncher().link({favorite:id}):{target:executable,cwd:path.dirname(executable),args,icon:executable,iconIndex:0};
+  if (!shell.writeShortcutLink(target, fs.existsSync(target) ? 'update' : 'create', { ...link,description: `Shatoot Connect: ${record.name}` })) throw new Error('Desktop shortcut could not be created.');
   preferences.markShortcut(id); return target;
 }
 function identity() {
@@ -208,6 +214,14 @@ ipcMain.handle('host-init', e => { const s = state(e); if (!s.owner) throw new E
 ipcMain.on('host-send', (e, message) => { const s = state(e); if (!s.owner || !message || !['desktop-accept','desktop-reject','desktop-signal','desktop-end'].includes(message.type) || JSON.stringify(message).length > 110000) return; if (['desktop-accept','desktop-signal'].includes(message.type) && !s.captureAllowed) return; hostReply(s,message); if (['desktop-reject','desktop-end'].includes(message.type)) closeExtraHost(s); });
 ipcMain.handle('host-sessions-stop', e => { const owner = state(e); for (const s of states.values()) if (s.owner === owner) closeExtraHost(s); });
 const chatPending = new Map();
+ipcMain.handle('app-ready',e=>{
+  const s=state(e);if(smoke||!app.isPackaged||s.owner||s.readyAnnounced)return;s.readyAnnounced=true;
+  const launcher=getLauncher();launcher.repair(app.getPath('desktop'),shell);
+  for(const record of preferences.list())if(record.shortcut&&fs.existsSync(path.join(app.getPath('desktop'),preferences.shortcutName(record.id))))createFavoriteShortcut(record.id);
+  const token=process.argv.find(arg=>/^--update-token=[a-f0-9-]{36}$/.test(arg))?.split('=')[1];
+  if(token){fs.mkdirSync(update.directory,{recursive:true});const file=path.join(update.directory,token+'.ready.json');fs.writeFileSync(file+'.tmp',JSON.stringify({token,version:app.getVersion(),executable:process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),pid:process.pid}));fs.renameSync(file+'.tmp',file);}
+  else{fs.mkdirSync(update.directory,{recursive:true});const worker=path.join(update.directory,'update-worker.ps1');fs.copyFileSync(path.join(__dirname,'update-worker.ps1'),worker);const child=spawn(launcher.powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',worker,'-CleanupOnly','-Target',process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),'-Version',app.getVersion(),'-CacheDirectory',update.directory],{windowsHide:true,detached:true,stdio:'ignore'});child.on('error',()=>{});child.unref();}
+});
 function showMain(s) { if (s.win.isDestroyed()) return; s.win.show(); if (s.win.isMinimized()) s.win.restore(); s.win.focus(); }
 function openChat(s) {
   if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show(); s.chatWindow.focus(); return; }
@@ -221,7 +235,7 @@ ipcMain.handle('show-main', e => showMain(state(e)));
 ipcMain.handle('chat-close', e => state(e).chatWindow?.close());
 ipcMain.handle('chat-call', (e, operation, args = []) => {
   const s = state(e);
-  if (s.chatWindow?.webContents !== e.sender || !['snapshot','refresh','connect','send','sendFiles','close','createGroup'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
+  if (s.chatWindow?.webContents !== e.sender || !['snapshot','refresh','connect','cancelPending','send','sendFiles','close','createGroup'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
   const id = crypto.randomUUID();
   return new Promise((resolve,reject) => { const timer = setTimeout(() => { chatPending.delete(id); reject(new Error('Chat operation timed out.')); }, operation === 'sendFiles' ? 1800000 : 75000); chatPending.set(id, { s, resolve, reject, timer }); s.win.webContents.send('chat-command', { id, operation, args }); });
 });
@@ -238,7 +252,7 @@ ipcMain.handle('update', async (e, operation) => {
   const executable = process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe');
   if (process.env.PORTABLE_EXECUTABLE_FILE) fs.accessSync(path.dirname(executable), fs.constants.W_OK);
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const proc = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', worker, '-ParentId', String(process.pid), '-Package', update.file, '-Target', executable, '-Digest', update.asset.digest, ...(process.env.PORTABLE_EXECUTABLE_FILE ? ['-Portable'] : [])], { detached: true, windowsHide: true, stdio: 'ignore' });
+  const proc = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', worker, '-ParentId', String(process.pid), '-Package', update.file, '-Target', executable, '-Digest', update.asset.digest, '-Version',update.asset.version,'-ReadyToken',crypto.randomUUID(),'-CacheDirectory',update.directory, ...(process.env.PORTABLE_EXECUTABLE_FILE ? ['-Portable'] : [])], { detached: true, windowsHide: true, stdio: 'ignore' });
   await new Promise((resolve, reject) => { proc.once('spawn', resolve); proc.once('error', reject); }); proc.unref();
   quitting = true; setTimeout(() => app.quit(), 300); return { state: 'installing' };
 });
@@ -335,7 +349,7 @@ ipcMain.handle('connections', (e, operation, value) => {
 ipcMain.handle('favorite-delete', async (e, id) => {
   state(e); preferences.get(id);
   const shortcut = path.join(app.getPath('desktop'), preferences.shortcutName(id));
-  if (fs.existsSync(shortcut)) { const link = shell.readShortcutLink(shortcut); if (link.args.includes(`--connect-saved=${id}`)) await shell.trashItem(shortcut); }
+  if (fs.existsSync(shortcut)) { const link = shell.readShortcutLink(shortcut); if (link.args.includes(`--connect-saved=${id}`)||link.args.includes(`-Favorite ${id}`)) await shell.trashItem(shortcut); }
   preferences.remove(id); return preferences.list();
 });
 ipcMain.handle('favorite-shortcut', (e, id) => { state(e); return createFavoriteShortcut(id); });
@@ -566,7 +580,7 @@ ipcMain.handle('exchange', async (e, operation, value) => {
 app.whenReady().then(async () => {
   smokeLog('app ready');
   if (smoke) saveSettings({ favorites: [], connectionHistory:[], connectionPasswords:{}, rememberPasswords:true, fixedPassword: null, language: 'en' });
-  if(smoke&&process.argv.includes('--chat-notification-smoke'))saveSettings({internetEnabled:false,autoAcceptFiles:true});
+  if(smoke&&(process.argv.includes('--chat-notification-smoke')||process.argv.includes('--connection-ui-smoke')))saveSettings({internetEnabled:false,autoAcceptFiles:true});
   // Electron 44 checks `media` as part of desktop capture. The only media API in
   // our trusted, CSP-locked renderer is getDisplayMedia; its handler denies audio.
   const capturePermission = (wc, permission) => {
@@ -593,7 +607,7 @@ app.whenReady().then(async () => {
   if (!smoke) for (const record of preferences.list()) if (record.shortcut && fs.existsSync(path.join(app.getPath('desktop'), preferences.shortcutName(record.id)))) { try { createFavoriteShortcut(record.id); } catch {} }
   if (smoke) {
     setTimeout(() => { smokeLog('Watchdog timeout'); app.exit(1); }, 240000).unref();
-    const run=process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
+    const run=process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
     run(win).catch(error => { smokeLog(error.stack); console.error(error); app.exit(1); });
   }
 });
@@ -681,6 +695,8 @@ async function runSmoke(host) {
   await wait(viewer, '!!window.shatootconnectReady');
   smokeLog('viewer ready');
   await viewer.webContents.executeJavaScript(`document.querySelector('#server-url').value=${JSON.stringify(credentials.endpoint)};document.querySelector('#remote-id').value=${JSON.stringify(credentials.id)};document.querySelector('#remote-password').value=${JSON.stringify(credentials.password)};document.querySelector('#quick-save').click(); true`, true);
+  await wait(viewer, "!!document.querySelector('#save-computer-form')");
+  await viewer.webContents.executeJavaScript("document.querySelector('#save-computer-form').requestSubmit();true");
   await wait(viewer, "document.querySelectorAll('.favorite-connect').length > 0");
   const favorite = preferences.list().find(record => record.address === credentials.id.replace(/\s/g,''));
   const shortcut = await viewer.webContents.executeJavaScript(`window.shatootconnect.favoriteShortcut(${JSON.stringify(favorite.id)})`);

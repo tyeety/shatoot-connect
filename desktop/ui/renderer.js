@@ -6,6 +6,7 @@ let config, socket, connectPromise, role = 'idle', stream, pc, sender, controlCh
 let iceServers = [], candidates = [], peerGeneration = 0, allowedControl = false, statsTimer, joinTimer, previousStats;
 let profileName = 'speed', pointerFrame = 0, latestPointer, toastTimer, currentStats = {};
 let requestPending = false, messageQueue = Promise.resolve();
+let outgoingAttempt=null,serverAttempt=null;
 let registered = false, incomingEnabled = true, registrationWanted = true, internetId = '', reconnectTimer, reconnectAttempts = 0, forceRelay = false, requestSerial = 0;
 const iceErrors = [];
 let directSocket, sessionRoute = 'server', serverIce = [], serverRelay = false;
@@ -44,7 +45,7 @@ api.onDirect(message => {
   messageQueue = messageQueue.then(() => dispatch(message, 'lan-host')).catch(e => { stopSession(true); status(e.message, true); });
 });
 api.onHostSignalOut(message => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); });
-function guarded(fn) { return async (...args) => { try { await fn(...args); } catch (e) { const message=(e.message||String(e)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,''); status(message, true); toast(message); } }; }
+function guarded(fn) { return async (...args) => { try { await fn(...args); } catch (e) { if(e.name==='AbortError')return;const message=(e.message||String(e)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,''); status(message, true); toast(message); } }; }
 function updateControls() {
   const busy = { type: 'hosting-busy', busy: role !== 'idle' || requestPending }; if (socket?.readyState === WebSocket.OPEN && registered) socket.send(JSON.stringify(busy)); if (window.shatootconnectDirect) api.directSend(busy);
   const hosting = incomingEnabled && (registered || !!window.shatootconnectDirect);
@@ -52,6 +53,7 @@ function updateControls() {
   $('host-start').hidden = hosting; $('host-stop').hidden = !hosting;
   $('host-start').disabled = role !== 'idle'; $('screen-select').disabled = role !== 'idle';
   $('join').disabled = role !== 'idle'; $('join-label').textContent = tr(role === 'joining' ? 'در انتظار تأیید میزبان…' : 'اتصال به دستگاه');
+  $('cancel-connection').hidden=!outgoingAttempt;$('cancel-server').hidden=!serverAttempt;
   $('shared-cursor').disabled = role !== 'idle';
   $('unattended').disabled = role !== 'idle' || requestPending || !config?.fixedPassword; $('fixed-password').disabled = role !== 'idle' || requestPending; $('save-fixed-password').disabled = role !== 'idle' || requestPending;
   for (const button of document.querySelectorAll('.favorite-connect')) button.disabled = role !== 'idle' || requestPending;
@@ -71,14 +73,19 @@ function scheduleReconnect() {
   const delay = Math.min(15000, 700 * 2 ** Math.min(reconnectAttempts++, 5)) + Math.random() * 500;
   reconnectTimer = setTimeout(() => { if (role === 'idle' && !window.shatootconnectDirect) status('در حال تلاش مجدد برای اتصال به سرور…'); connect().catch(e => { if (!window.shatootconnectDirect && role === 'idle') status(e.message, true); scheduleReconnect(); }); }, delay);
 }
-async function connect() {
+function connect() {
+  if(connectPromise)return connectPromise;
+  if(socket?.readyState===WebSocket.OPEN)return Promise.resolve();
+  const attempt=new window.ConnectionAttempt();serverAttempt=attempt;updateControls();
+  const pending=connectServer(attempt).finally(()=>{if(serverAttempt===attempt)serverAttempt=null;if(connectPromise===pending)connectPromise=null;updateControls();});
+  connectPromise=pending;return pending;
+}
+async function connectServer(attempt) {
   if (config?.internetEnabled === false) throw new Error(tr('Internet server is disabled. Enter a LAN IP or enable it in Settings.'));
-  if (connectPromise) return connectPromise;
-  if (socket?.readyState === WebSocket.OPEN) return;
-  const endpoint = await api.validateEndpoint($('server-url').value.trim());
+  const endpoint = await attempt.wait(api.validateEndpoint($('server-url').value.trim()));
   $('server-url').value = endpoint;
   serverState(false, 'در حال اتصال…');
-  connectPromise = new Promise((resolve, reject) => {
+  return attempt.wait(new Promise((resolve, reject) => {
     const ws = new WebSocket(endpoint); socket = ws;
     let connectionError = '';
     const timeout = setTimeout(() => { ws.close(); reject(new Error('سرور پاسخ نداد. نشانی و دسترسی شبکه را بررسی کنید.')); }, 20000);
@@ -118,9 +125,9 @@ async function connect() {
       updateControls();
       scheduleReconnect();
     };
-  }).finally(() => { connectPromise = null; });
-  return connectPromise;
+  }));
 }
+$('cancel-server').onclick=()=>{const attempt=serverAttempt;if(!attempt)return;const previous=socket;socket=null;registered=false;serverAttempt=null;connectPromise=null;registrationWanted=false;clearTimeout(reconnectTimer);attempt.cancel();previous?.close();serverState(false,'Connection cancelled.');updateControls();status('Connection cancelled.');};
 async function onMessage(m) {
   if (m.type === 'ice') {
     iceServers = Array.isArray(m.iceServers) ? m.iceServers : []; forceRelay = m.forceRelay === true;
@@ -156,9 +163,12 @@ async function onMessage(m) {
       stopSession(false); status(e.message, true);
     });
   } else if (m.type === 'accepted' && role === 'joining') {
+    const generation=peerGeneration;
     if(connectionAttempt)renderHistory(await api.connections('connected',connectionAttempt));
+    if(generation!==peerGeneration||role!=='joining')return;
     allowedControl = m.control === true; role = 'viewer';
     if (allowedControl) await api.exchange('viewer-start');
+    if(generation!==peerGeneration||role!=='viewer'){api.exchange('stop').catch(()=>{});return;}
     createPeer(); showSession(); status('در حال برقراری اتصال مستقیم…'); updateControls();
   } else if (m.type === 'peer-ready' && role === 'host') {
     createPeer(); showSession();
@@ -220,6 +230,7 @@ function createPeer() {
     if (pc !== active || generation !== peerGeneration) return;
     if (active.connectionState === 'connected') {
       clearTimeout(joinTimer);
+      outgoingAttempt=null;updateControls();
       status(role === 'host' ? 'مهمان متصل است. برای قطع فوری Ctrl + Shift + F12 را بزنید.' : 'متصل شد؛ برای ارسال موس و کیبورد، روی تصویر کلیک کنید.');
       startStats();
     } else if (active.connectionState === 'failed') {
@@ -313,6 +324,7 @@ async function exitVideoFullscreen() {
   finally { await api.exitFullscreen().catch(() => {}); }
 }
 function closePeer() {
+  const attempt=outgoingAttempt;outgoingAttempt=null;attempt?.cancel();
   api.fitVideo(null).catch(()=>{});
   guestCursorPosition=null; keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); exchange?.close(); exchange = null;
   keyboardEpoch++; guestKeyboardLayout = ''; layoutSync = null; hostCursor = null; $('host-cursor').hidden = true;
@@ -503,46 +515,46 @@ $('host-stop').onclick = () => {
   if (socket?.readyState === WebSocket.OPEN) send({ type: 'unregister' });
   registered = false; internetId = ''; renderHostCredentials(); updateControls(); status('اتصال ورودی متوقف شد.');
 };
-async function joinTarget() {
-  if (role !== 'idle') return;
-  const id = $('remote-id').value.replace(/\s/g, '');let password = $('remote-password').value;
-  if(!password&&config.rememberPasswords){password=await api.connections('recall',{address:id,endpoint:$('server-url').value});$('remote-password').value=password;}
-  connectionAttempt={address:id,password,endpoint:$('server-url').value,serverKey:$('server-key').value};
-  await api.connections('attempt',connectionAttempt);
-  if (id.includes('.') || id.includes(':')) {
-    if (!password) throw new Error(tr('Enter the host LAN password.'));
-    const endpoint = await api.directEndpoint(id);
-    $('quality').value = 'lan'; profileName = 'lan';
-    role = 'joining'; sessionRoute = 'lan-viewer'; iceServers = []; forceRelay = false; updateControls();
-    try {
-      await new Promise((resolve, reject) => {
-        const ws = new window.LANSocket(endpoint); directSocket = ws;
-        joinTimer = setTimeout(() => { reject(new Error(tr('LAN connection timed out. Check the IP address and Windows firewall.'))); stopSession(true); }, 60000);
-        ws.onerror = () => reject(new Error(tr('Cannot reach the LAN host. Check its IP and allow TCP 8788 in Windows firewall.')));
-        ws.onclose = () => { if (directSocket === ws) { reject(new Error(tr('LAN connection closed.'))); stopSession(false); } };
-        ws.onmessage = event => {
-          if (directSocket !== ws) return;
-          let message; try { message = JSON.parse(event.data); } catch { return; }
-          if (message.type === 'ready') {
-            if (!message.direct || message.service !== 'ShatootConnect' || message.protocol !== 2) { reject(new Error(tr('This address is not a direct LAN listener.'))); ws.close(); return; }
-            ws.send(JSON.stringify({ type: 'join', id: 'direct', password, name: config.name })); resolve(); return;
+async function joinTarget(record) {
+  if(role!=='idle'||outgoingAttempt)return;
+  const attempt=new window.ConnectionAttempt();outgoingAttempt=attempt;role='joining';updateControls();
+  joinTimer=setTimeout(()=>{if(outgoingAttempt!==attempt)return;stopSession(true);status('زمان انتظار اتصال تمام شد؛ تأیید میزبان و تنظیمات شبکه را بررسی کنید.',true);},60000);
+  try{
+    if(record?.endpoint){
+      if(config.internetEnabled===false){config.internetEnabled=await attempt.wait(api.internetEnabled(true));$('internet-enabled').checked=true;}
+      if(record.endpoint!==$('server-url').value||record.serverKey!==$('server-key').value){
+        clearTimeout(reconnectTimer);serverAttempt?.cancel();serverAttempt=null;connectPromise=null;
+        const previous=socket;socket=null;previous?.close();registered=false;
+        $('server-url').value=record.endpoint;$('server-key').value=record.serverKey||'';registrationWanted=true;
+      }
+    }
+    const id=$('remote-id').value.replace(/\s/g,'');let password=$('remote-password').value;
+    if(!password&&config.rememberPasswords){password=await attempt.wait(api.connections('recall',{address:id,endpoint:$('server-url').value}));$('remote-password').value=password;}
+    connectionAttempt={address:id,password,endpoint:$('server-url').value,serverKey:$('server-key').value};
+    await attempt.wait(api.connections('attempt',connectionAttempt));
+    if(id.includes('.')||id.includes(':')){
+      if(!password)throw new Error(tr('Enter the host LAN password.'));
+      const endpoint=await attempt.wait(api.directEndpoint(id));$('quality').value='lan';profileName='lan';sessionRoute='lan-viewer';iceServers=[];forceRelay=false;
+      await attempt.wait(new Promise((resolve,reject)=>{
+        const ws=new window.LANSocket(endpoint);directSocket=ws;
+        ws.onerror=()=>reject(new Error(tr('Cannot reach the LAN host. Check its IP and allow TCP 8788 in Windows firewall.')));
+        ws.onclose=()=>{if(directSocket===ws&&!attempt.cancelled){reject(new Error(tr('LAN connection closed.')));stopSession(false);}};
+        ws.onmessage=event=>{
+          if(directSocket!==ws||attempt.cancelled)return;let message;try{message=JSON.parse(event.data)}catch{return}
+          if(message.type==='ready'){
+            if(!message.direct||message.service!=='ShatootConnect'||message.protocol!==2){reject(new Error(tr('This address is not a direct LAN listener.')));ws.close();return;}
+            ws.send(JSON.stringify({type:'join',id:'direct',password,name:config.name}));resolve();return;
           }
-          messageQueue = messageQueue.then(() => dispatch(message, 'lan-viewer')).catch(e => { stopSession(true); status(e.message, true); });
+          messageQueue=messageQueue.then(()=>{if(!attempt.cancelled)return dispatch(message,'lan-viewer')}).catch(e=>{if(!attempt.cancelled){stopSession(true);status(e.message,true)}});
         };
-      });
-      status('درخواست ارسال شد؛ منتظر تأیید میزبان هستیم.');
-    } catch (e) { stopSession(false); throw e; }
-    return;
-  }
-  if (!/^\d{9}$/.test(id) || !password) throw new Error('شناسهٔ ۹ رقمی و رمز میزبان را وارد کنید.');
-  role = 'joining'; updateControls();
-  try {
-    await connect(); send({ type: 'join', id, password, name: config.name });
-    $('session-panel').hidden = false; $('video-stage').hidden = true;
-    $('session-title').textContent = 'در انتظار تأیید میزبان'; $('control-label').textContent = '';
-    joinTimer = setTimeout(() => { stopSession(true); status('زمان انتظار اتصال تمام شد؛ تأیید میزبان و تنظیمات شبکه را بررسی کنید.', true); }, 60000);
-  } catch (e) { stopSession(false); throw e; }
+      }));status('درخواست ارسال شد؛ منتظر تأیید میزبان هستیم.');return;
+    }
+    if(!/^\d{9}$/.test(id)||!password)throw new Error('شناسهٔ ۹ رقمی و رمز میزبان را وارد کنید.');
+    await attempt.wait(connect());attempt.check();send({type:'join',id,password,name:config.name});
+    $('session-panel').hidden=false;$('video-stage').hidden=true;$('session-title').textContent='در انتظار تأیید میزبان';$('control-label').textContent='';
+  }catch(error){if(attempt.cancelled||outgoingAttempt!==attempt)return;stopSession(false);throw error;}
 }
+$('cancel-connection').onclick=()=>{if(!outgoingAttempt)return;stopSession(true);status('Connection cancelled.');};
 $('join').onclick = guarded(joinTarget);
 function renderFavorites(records) {
   config.favorites = records;
@@ -555,9 +567,9 @@ function renderFavorites(records) {
     const address = document.createElement('small'); address.textContent = record.address; address.dir = 'ltr';
     connectButton.append(name, address); connectButton.onclick = guarded(() => connectFavorite(record.id));
     const actions = document.createElement('div'); actions.className = 'favorite-actions';
-    for (const [icon, title, action] of [['person','Rename saved computer',()=>{const input=document.createElement('input');input.className='favorite-rename';input.maxLength=60;input.value=record.name;connectButton.replaceWith(input);input.focus();input.select();input.onkeydown=guarded(async event=>{if(event.key==='Escape'){renderFavorites(config.favorites);return;}if(event.key==='Enter'){event.preventDefault();const saved=await api.favoriteGet(record.id);renderFavorites(await api.favoriteSave({...saved,name:input.value}));}});}],['desktop_windows', 'Create desktop shortcut', async () => { await api.favoriteShortcut(record.id); toast('Desktop shortcut created.'); }], ['close', 'Delete saved connection', async () => renderFavorites(await api.favoriteDelete(record.id))]]) {
+    for (const [icon, title, action] of [['person','Rename saved computer',async()=>saveComputer(await api.favoriteGet(record.id))],['desktop_windows', 'Create desktop shortcut', async () => { await api.favoriteShortcut(record.id); toast('Desktop shortcut created.'); }], ['close', 'Delete saved connection', async () => renderFavorites(await api.favoriteDelete(record.id))]]) {
       const button = document.createElement('button'); button.className = 'icon-button'; button.title = tr(title); button.setAttribute('aria-label', tr(title));
-      const image = document.createElement('span'); image.className = `mi ${icon}`; image.setAttribute('aria-hidden', 'true'); button.append(image); button.onclick = guarded(action); actions.append(button);
+      const image = document.createElement('span'); image.className = `mi ${icon}`; image.setAttribute('aria-hidden', 'true'); button.append(image);if(title==='Rename saved computer'){button.classList.add('rename-computer');const label=document.createElement('span');label.textContent=tr('Rename');button.append(label);} button.onclick = guarded(action); actions.append(button);
     }
     row.append(connectButton, actions); list.append(row);
   }
@@ -569,25 +581,33 @@ async function connectFavorite(id) {
 }
 async function connectRecord(record) {
   if(role!=='idle')throw new Error('End the current session first.');
-  if(record.endpoint && config.internetEnabled===false){config.internetEnabled=true;$('internet-enabled').checked=true;await api.internetEnabled(true);}
-  if (record.endpoint && (record.endpoint !== $('server-url').value || record.serverKey !== $('server-key').value)) {
-    clearTimeout(reconnectTimer);
-    if (socket) { const old = socket; socket = null; old.close(); }
-    registered = false;
-    if (connectPromise) await connectPromise.catch(() => {});
-    $('server-url').value = record.endpoint; $('server-key').value = record.serverKey; registrationWanted = true;
-    await connect();
+  $('remote-id').value=record.address;$('remote-password').value=record.password||'';
+  if(record.password)return joinTarget(record);
+  if(record.endpoint){
+    if(config.internetEnabled===false){config.internetEnabled=await api.internetEnabled(true);$('internet-enabled').checked=true;}
+    if(record.endpoint!==$('server-url').value||record.serverKey!==$('server-key').value){
+      clearTimeout(reconnectTimer);serverAttempt?.cancel();serverAttempt=null;connectPromise=null;
+      const previous=socket;socket=null;previous?.close();registered=false;
+      $('server-url').value=record.endpoint;$('server-key').value=record.serverKey||'';registrationWanted=true;updateControls();
+    }
   }
-  $('remote-id').value = record.address; $('remote-password').value = record.password || '';
-  if(record.password)await joinTarget(); else {$('remote-password').focus();toast('Enter the password to connect.');}
+  $('remote-password').focus();toast('Enter the password to connect.');
 }
-$('quick-save').onclick = guarded(async () => {
-  renderFavorites(await api.favoriteSave({ address: $('remote-id').value, password: $('remote-password').value, endpoint: $('server-url').value, serverKey: $('server-key').value }));
-  toast('Connection saved securely.');
-});
+async function saveComputer(value){
+  let modal=$('save-computer-dialog');
+  if(!modal){modal=document.createElement('dialog');modal.id='save-computer-dialog';modal.innerHTML='<form id="save-computer-form"><h2>Save computer</h2><label for="saved-computer-name">Computer nickname</label><input id="saved-computer-name" maxlength="60" required autocomplete="off"><p id="save-computer-error" class="status-line error"></p><div class="inline-setting"><button type="submit" class="small-button">Save</button><button type="button" id="cancel-save-computer" class="small-button">Cancel</button></div></form>';document.body.append(modal);}
+  if(modal.open)return;
+  $('saved-computer-name').value=value.name||config.favorites?.find(r=>r.address===value.address)?.name||value.address||'';$('save-computer-error').textContent='';
+  modal.showModal();$('saved-computer-name').focus();$('saved-computer-name').select();
+  return new Promise(resolve=>{
+    modal.onclose=()=>resolve(false);$('cancel-save-computer').onclick=()=>modal.close();
+    $('save-computer-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter||event.target.querySelector('button[type="submit"]');button.disabled=true;try{renderFavorites(await api.favoriteSave({...value,name:$('saved-computer-name').value}));modal.close();toast('Connection saved securely.');resolve(true);}catch(error){$('save-computer-error').textContent=(error.message||String(error)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'');}finally{button.disabled=false;}};
+  });
+}
+$('quick-save').onclick=guarded(()=>saveComputer({address:$('remote-id').value,password:$('remote-password').value,endpoint:$('server-url').value,serverKey:$('server-key').value}));
 function renderHistory(records){
   const list=$('connection-history'); list.replaceChildren(); $('history-empty').hidden=records.length>0;
-  for(const record of records){const row=document.createElement('div');row.className='history-row';const reconnect=document.createElement('button');reconnect.className='history-connect';const name=document.createElement('b'),detail=document.createElement('small');name.textContent=record.name;detail.textContent=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{dateStyle:'short',timeStyle:'short'}).format(record.at);reconnect.append(name,detail);reconnect.onclick=guarded(async()=>connectRecord(await api.connections('get',record.id)));const save=document.createElement('button');save.className='icon-button';save.title=tr('Save computer');save.setAttribute('aria-label',save.title);const icon=document.createElement('span');icon.className='mi person';save.append(icon);save.onclick=guarded(async()=>{renderFavorites(await api.connections('save',record.id));toast('Connection saved securely.');});row.append(reconnect,save);list.append(row);}
+  for(const record of records){const row=document.createElement('div');row.className='history-row';const reconnect=document.createElement('button');reconnect.className='history-connect';const name=document.createElement('b'),detail=document.createElement('small');name.textContent=record.name;detail.textContent=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{dateStyle:'short',timeStyle:'short'}).format(record.at);reconnect.append(name,detail);reconnect.onclick=guarded(async()=>connectRecord(await api.connections('get',record.id)));const save=document.createElement('button');save.className='icon-button';save.title=tr('Save computer');save.setAttribute('aria-label',save.title);const icon=document.createElement('span');icon.className='mi person';save.append(icon);save.onclick=guarded(async()=>saveComputer(await api.connections('get',record.id)));row.append(reconnect,save);list.append(row);}
 }
 let recallTimer;
 $('remote-id').addEventListener('input',()=>{const revision=++recallRevision;clearTimeout(recallTimer);$('remote-password').value='';const address=$('remote-id').value,endpoint=$('server-url').value;if(!config?.rememberPasswords)return;recallTimer=setTimeout(async()=>{try{const password=await api.connections('recall',{address,endpoint});if(revision===recallRevision && role==='idle' && $('remote-id').value===address && $('server-url').value===endpoint && !$('remote-password').value)$('remote-password').value=password;}catch{}},180);});
@@ -700,7 +720,7 @@ $('language').onchange = guarded(async () => { window.i18n.setLanguage(await api
   const sources = await api.sources(); $('screen-select').replaceChildren();
   for (const source of sources) { const option = document.createElement('option'); option.value = source.id; option.textContent = source.name; $('screen-select').append(option); }
   if (!sources.length) status('نمایشگری شناسایی نشد.', true);
-  updateControls(); window.shatootconnectReady = true;
+  updateControls(); await api.appReady(); window.shatootconnectReady = true;
   api.directListener().then(info => {
     renderDirectInfo(info);
   }).catch(e => { $('direct-addresses').textContent = tr('LAN listener unavailable: ') + e.message; });

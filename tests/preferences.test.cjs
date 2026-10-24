@@ -10,6 +10,11 @@ function fixture() {
     validateDirect: address => { if (!/^192\.168\.\d+\.\d+(?::\d+)?$/.test(address)) throw Error('Invalid LAN IP'); return address; } };
   return { preferences: new ClientPreferences(options), storage: () => stored };
 }
+test('a chosen computer nickname survives resaving credentials and keeps the shortcut identity',()=>{
+  const{preferences}=fixture();const id=preferences.save({name:'دفتر مرکزی',address:'192.168.1.10',password:'secret'});preferences.markShortcut(id);const shortcut=preferences.shortcutName(id);
+  preferences.save({address:'192.168.1.10',password:'new-secret'});assert.equal(preferences.get(id).name,'دفتر مرکزی');
+  preferences.save({...preferences.get(id),name:'حسابداری'});assert.equal(preferences.get(id).name,'حسابداری');assert.equal(preferences.get(id).password,'new-secret');assert.equal(preferences.shortcutName(id),shortcut);
+});
 test('fixed credentials and favorites are stored only through the encryption boundary', () => {
   const { preferences, storage } = fixture();
   preferences.setFixedPassword('fixed-secret-123');

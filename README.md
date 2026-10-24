@@ -4,13 +4,13 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)
 
-## Version 0.12.0
+## Version 0.14.0
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.12.0-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.12.0-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.12.0-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.14.0-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.14.0-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.14.0-win-x64.zip` | Coordinator, runtime and service manager |
 
 Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. Remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
@@ -27,14 +27,14 @@ Builds go to `release/`. Binaries belong in GitHub Release assets, not source co
 
 Windows 10/11 or Windows Server 2016+ x64 is required. Run Setup, select English/Persian, current-user/all-user scope and a dedicated local **Shatoot Connect** folder. Current-user installation normally needs no administrator access; all-user installation requests elevation. Desktop/Start menu shortcuts and a Windows Installed apps entry are created.
 
-Setup checks the OS/architecture, destination, write access, destination/TEMP disk space, accidental downgrades and running application processes. It rejects unrelated nonempty directories, network destinations and a junction at the final folder. Close the app before upgrading; Setup does not terminate active sessions. The payload uses forced installer CRC, checked ZIP extraction and SHA-256 verification of every packaged file before successful registration. Locked-file upgrade/removal errors stop the operation and attempt to restore the previous files.
+Setup checks the OS/architecture, destination, write access, destination/TEMP disk space, accidental downgrades and running application processes. It rejects unrelated nonempty directories, network destinations and a junction at the final folder. Close the app before upgrading; Setup does not terminate active sessions. The payload uses forced installer CRC, checked 7z extraction and SHA-256 verification of every packaged file before successful registration. Locked-file upgrade/removal errors stop the operation and attempt to restore the previous files.
 
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.12.0-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.12.0-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.12.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.14.0-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.14.0-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.14.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.
@@ -61,11 +61,13 @@ No coordinator, Internet ID, STUN or TURN is used. **Settings → Internet serve
 
 Set a fixed password of 8–128 characters in **Host and access**. Empty restores random passwords. Passwords are DPAPI-encrypted and never placed in desktop shortcut arguments. Fixed credentials apply to coordinator registration and the direct listener. **Allow unattended access with fixed password** is off by default; enabling it permits authenticated fixed-password view/control/file sessions without a further host dialog. Clearing the password disables it.
 
-Save computer on the connection form needs only an ID/IP; a nickname is optional. Recent connections records up to 200 approved connection attempts with time and reuse count. Reconnect or save directly from each history row; rename saved entries inline with Enter. The obsolete Saved computers settings tab has been removed. Saved computers keep name, ID/IP, server endpoint and an optional encrypted password. One click reconnects if credentials are available, otherwise the password input receives focus. App-created shortcuts contain only a local record identifier. Keep a portable executable available until its shortcuts have migrated to the installed version.
+Save computer on the connection form needs only an ID/IP; a nickname is optional. Recent connections records up to 200 approved connection attempts with time and reuse count. Reconnect or save directly from each history row; choose a nickname in the save dialog or use the visible Rename action. Enter submits the dialog; renaming preserves credentials and shortcut identity. The obsolete Saved computers settings tab has been removed. Saved computers keep name, ID/IP, server endpoint and an optional encrypted password. One click reconnects if credentials are available, otherwise the password input receives focus. App-created shortcuts contain only a local record identifier. Desktop shortcuts use a stable launcher in the Windows profile and follow the latest opened version, including a changed executable path. Known older shortcuts migrate when the app opens. Open a moved executable once to register its new location.
 
 Independent guest input uses window messages without moving the physical host pointer. Some raw-input apps/nonclient gestures require the optional **Allow guest to move my cursor** setting. The small always-on-top host panel provides disconnect and remains visible when minimized; guest clicks target the underlying app. A click-through overlay draws the guest pointer. Capture exclusion depends on Windows support; older Windows can include it in video.
 
 Keyboard layouts synchronize in both directions with versioned conflict resolution and restoration when control ends. Focus the remote video to capture supported shortcuts; leaving it releases capture. `Ctrl+Shift+F12` disconnects locally. Interface language is independent of keyboard language. Elevated windows, UAC/secure desktops, `Ctrl+Alt+Delete`, pre-login/locked desktops, audio and arbitrary raw hardware input are not supported.
+
+Outgoing desktop connections show **Cancel connection** throughout validation, approval and video negotiation. The Internet settings and chat connection form have their own cancel controls. Cancelling a pending chat leaves established chats intact.
 
 ## Private chat and history
 
@@ -95,7 +97,7 @@ Approved **desktop control** sessions have a separate clipboard channel for Unic
 
 ## Updates, profile and availability
 
-The packaged client checks the latest stable GitHub Release at startup and every six hours. Settings > Updates also provides a manual check. **Update and restart** downloads the matching installed/portable Windows x64 package, checks its exact length and GitHub asset SHA-256 digest, then runs the update worker after the old process exits. A failed/corrupt download leaves the running app untouched. Installed editions use the existing installer/installation folder; portable editions replace the original executable and keep one `.previous` backup. Updating never deletes the Windows user profile, encrypted passwords, favorites or chat database. Keep the same Windows account so DPAPI data remains readable. Updating restarts the client and ends active sessions/transfers. Source/dev launches cannot install updates. Version 0.10.0 needs one manual upgrade to acquire the updater. Server service upgrades still use the separate server package.
+The packaged client checks the latest stable GitHub Release at startup and every six hours. Settings > Updates also provides a manual check. **Update and restart** downloads the matching installed/portable Windows x64 package, checks its exact length and GitHub asset SHA-256 digest, then runs the update worker after the old process exits. A failed/corrupt download leaves the running app untouched. Installed editions use the existing installer/installation folder; portable editions replace the original executable and keep a `.previous` backup until the new client confirms successful startup. Successful startup removes that backup, the downloaded package and obsolete updater-cache packages. Portable startup failure restores the working executable. Startup also cleans recognized backups left by older updaters; manually downloaded copies outside the updater cache are preserved. Updating never deletes the Windows user profile, encrypted passwords, favorites or chat database. Keep the same Windows account so DPAPI data remains readable. Updating restarts the client and ends active sessions/transfers. Source/dev launches cannot install updates. Version 0.10.0 needs one manual upgrade to acquire the updater. Server service upgrades still use the separate server package.
 
 Profile and status settings support a display name, cropped local PNG/JPEG/WebP photo, and Available, Busy, Away, Do not disturb or Appear offline. These are per-device identities, not centralized user accounts. Photos are stored as bounded PNG thumbnails; LAN neighbors retrieve the public profile locally and connected chat peers receive updates over WebRTC. The selected status is advisory; it does not disable hosting or disconnect peers. Display names/photos do not prove identity. Do not disturb does not revoke incoming-message permission.
 
@@ -160,7 +162,7 @@ npm run dist:server
 
 `test:installer` requires `release/win-unpacked` and an account with no existing installation/app shortcuts. A guarded fixture tests invalid/occupied/unwritable destinations, running-app refusal, fresh install, downgrade refusal, locked upgrade/removal, repair, uninstall and personal-data preservation, then cleans up. CI runs protocol/store/network tests and builds native components. A service-based CI runner does not establish interactive desktop-capture acceptance.
 
-`test:updater` exercises portable executable replacement, rollback-copy preservation and actual restart with an isolated Windows fixture. For an optional real GitHub metadata/download/hash check without installation, run `node_modules/.bin/electron.cmd tests/update-network.cjs --download`. Windows update checks use Electron networking so system proxy settings apply.
+`test:updater` exercises portable replacement, readiness-confirmed cleanup, startup-failure rollback, legacy backup cleanup, profile preservation and an unchanged Windows shortcut opening a newer executable in an isolated fixture. `npm run test:connection-ui` exercises actual stalled desktop/coordinator/chat transports, cancellation/retry and computer naming without capturing the desktop. For an optional real GitHub metadata/download/hash check without installation, run `node_modules/.bin/electron.cmd tests/update-network.cjs --download`. Windows update checks use Electron networking so system proxy settings apply.
 
 `test:packaged` executes the final portable launcher in Electron's Node mode and verifies its extracted payload hash, without opening the personal profile. Release CI also passes `--ui` on a clean Windows runner to open the packaged renderer with an isolated profile and check both language layouts and SVG loading. Keep `nsis.useZip` disabled: installer and portable builds share an archive cache, while the default portable extractor expects 7z.
 

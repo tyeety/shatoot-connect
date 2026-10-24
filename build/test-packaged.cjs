@@ -48,7 +48,8 @@ async function main() {
     if (ui) {
       const profile = path.join(fixture, 'profile'); fs.mkdirSync(profile);
       fs.writeFileSync(path.join(profile, 'connection.json'), JSON.stringify({ internetEnabled: false, startupEnabled: false, language: 'en', profile: { name: 'Packaged launch test' } }));
-      launch([`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { ELECTRON_RUN_AS_NODE: null });
+      const updateToken=crypto.randomUUID();
+      launch([`--update-token=${updateToken}`,`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { ELECTRON_RUN_AS_NODE: null });
       const activePort = path.join(profile, 'DevToolsActivePort');
       await until(() => { if (child.launchError) throw child.launchError; if (child.exitCode !== null) throw new Error(`Packaged UI closed on startup (${child.exitCode}): ${child.output}`); return fs.existsSync(activePort); }, 90000);
       const port = fs.readFileSync(activePort, 'utf8').split('\n')[0];
@@ -67,6 +68,10 @@ async function main() {
       try {
         await until(() => evaluate('window.shatootconnectReady === true'));
         if (!await evaluate(`window.shatootconnect.config().then(c => c.version === '${version}' && c.internetEnabled === false && c.startupEnabled === false && c.name === 'Packaged launch test')`)) throw new Error('Packaged UI did not load its isolated profile/version.');
+        const ack=JSON.parse(fs.readFileSync(path.join(profile,'updates',updateToken+'.ready.json'),'utf8'));
+        const launcher=JSON.parse(fs.readFileSync(path.join(profile,'launcher/launcher.json'),'utf8'));
+        if(ack.token!==updateToken||ack.version!==version||path.resolve(ack.executable)!==executable||launcher.target!==executable||launcher.version!==version||!fs.existsSync(path.join(profile,'launcher/launcher.ico')))throw new Error('Packaged update-readiness acknowledgement/stable launcher did not match the final executable.');
+        console.log('Final portable confirmed update readiness and registered its stable launcher/icon.');
         for (const language of ['en', 'fa']) {
           const errors = await evaluate(`(async()=>{
             window.i18n.setLanguage('${language}'); document.body.classList.add('viewing'); document.querySelector('#session-panel').hidden=false;

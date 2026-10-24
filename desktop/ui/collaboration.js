@@ -4,7 +4,7 @@
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   class CollaborationClient {
     constructor({ api, self, internet, ensureInternet, changed = () => {}, error = () => {}, progress = () => {} }) {
-      Object.assign(this, { api, self, internet, ensureInternet, changed, error, progress }); this.sessions = new Map(); this.fileQueue = Promise.resolve(); this.catalog = { contacts: [], groups: [], conversations: [] }; this.ready = this.refresh();
+      Object.assign(this, { api, self, internet, ensureInternet, changed, error, progress }); this.sessions = new Map(); this.connectAttempts=new Set(); this.fileQueue = Promise.resolve(); this.catalog = { contacts: [], groups: [], conversations: [] }; this.ready = this.refresh();
     }
     async refresh() { this.catalog = await this.api.collaboration('list'); this.notify(); }
     notify() { this.changed(); }
@@ -17,34 +17,36 @@
       s.promise = new Promise((resolve, reject) => { s.resolve = resolve; s.reject = reject; }); s.promise.catch(() => {});
       s.timer = setTimeout(() => this.close(s, 'Chat invitation timed out.'), 65000); this.sessions.set(id, s); this.notify(); return s;
     }
-    async connect(destination) {
-      await this.ready;
+    async connect(destination){const attempt=new window.ConnectionAttempt();this.connectAttempts.add(attempt);this.notify();try{return await this.connectDestination(destination,attempt);}finally{this.connectAttempts.delete(attempt);this.notify();}}
+    cancelPending(){for(const attempt of this.connectAttempts)attempt.cancel();for(const s of [...this.sessions.values()])if(s.outgoingAttempt&&s.channel?.readyState!=='open')this.close(s,'Connection cancelled.');}
+    async connectDestination(destination,attempt) {
+      await attempt.wait(this.ready);
       if (destination.deviceId && this.peer(destination.deviceId)) return this.peer(destination.deviceId);
-      const pending = [...this.sessions.values()].find(s => !s.closed && destination.deviceId && s.peer?.deviceId === destination.deviceId); if (pending) return pending.promise;
+      const pending = [...this.sessions.values()].find(s => !s.closed && destination.deviceId && s.peer?.deviceId === destination.deviceId); if (pending) return attempt.wait(pending.promise);
       const id = crypto.randomUUID(); let route;
       if (destination.type === 'lan') {
-        const endpoint = await this.api.directEndpoint(destination.address), ws = new window.LANSocket(endpoint);
+        const endpoint = await attempt.wait(this.api.directEndpoint(destination.address)), ws = new window.LANSocket(endpoint);
         route = { type: 'lan', address: destination.address, send: data => ws.send(JSON.stringify(data)), socket: ws };
-        const s = this.session(id, route, destination.deviceId ? { deviceId: destination.deviceId, name: destination.name || 'Computer' } : null);
+        const s = this.session(id, route, destination.deviceId ? { deviceId: destination.deviceId, name: destination.name || 'Computer' } : null); s.outgoingAttempt=attempt;
         ws.onerror = () => this.close(s, 'LAN connection failed. Check the address, firewall and VPN LAN access.');
         ws.onclose = () => this.close(s, 'Chat connection closed.');
         ws.onmessage = event => {
-          let message; try { message = JSON.parse(event.data); } catch { return; }
+          if(s.closed||attempt.cancelled)return;let message; try { message = JSON.parse(event.data); } catch { return; }
           if (message.type === 'ready') {
             if (!message.features?.includes('collaboration-v1') || !message.direct) { this.close(s, 'Update Shatoot Connect on the other computer.'); return; }
             route.send({ type: 'collab-request', session: id, target: 'direct', ...this.self });
           } else if (message.type?.startsWith('collab-')) this.receive(message, route);
         };
-        return s.promise;
+        return attempt.wait(s.promise);
       }
-      await this.ensureInternet();
-      for (let n = 0; !this.internet().registered && n < 100; n++) await pause(100);
+      await attempt.wait(this.ensureInternet());
+      for (let n = 0; !this.internet().registered && n < 100; n++) await attempt.wait(pause(100));
       const context = this.internet();
       if (!context.registered || !context.supported) throw new Error('Update and connect to the Internet server to chat by ID.');
       if (destination.endpoint && destination.endpoint !== context.endpoint) throw new Error('Connect to this contact’s saved server in Settings first.');
       const address = String(destination.address).replace(/\s/g, ''); if (!/^\d{9}$/.test(address)) throw new Error('Enter a 9-digit ID or a LAN IP.');
       route = { type: 'id', address, endpoint: context.endpoint, send: context.send };
-      const s = this.session(id, route, destination.deviceId ? { deviceId: destination.deviceId, name: destination.name || 'Computer' } : null);
+      const s = this.session(id, route, destination.deviceId ? { deviceId: destination.deviceId, name: destination.name || 'Computer' } : null); s.outgoingAttempt=attempt;
       route.send({ type: 'collab-request', session: id, target: address, ...this.self }); return s.promise;
     }
     receive(message, route) {

@@ -47,11 +47,11 @@ class ClientPreferences {
     const { password = '', serverKey = '' } = value || {};
     const {address:target,endpoint}=this.destination(value);
     if(value.name!=null&&typeof value.name!=='string')throw new Error('Enter a valid computer name and password.');
-    const name=value.name?.trim()||target;
-    if (typeof name !== 'string' || name.length > 60 || typeof password !== 'string' || password.length > 128 || typeof serverKey !== 'string' || serverKey.length > 256) throw new Error('Enter a valid computer name and password.');
-    const direct=!endpoint;
     const favorites = this.read().favorites || [];
     const existing = favorites.find(record => record.address === target && record.endpoint === endpoint);
+    const name=value.name?.trim()||existing?.name||target;
+    if (typeof name !== 'string' || name.length > 60 || typeof password !== 'string' || password.length > 128 || typeof serverKey !== 'string' || serverKey.length > 256) throw new Error('Enter a valid computer name and password.');
+    const direct=!endpoint;
     if (!existing && favorites.length >= 100) throw new Error('You can save up to 100 connections.');
     const record = { id: existing?.id || crypto.randomUUID(), name, address: target, endpoint, password: password ? this.encrypt(password) : existing?.password || null, serverKey: !direct && serverKey ? this.encrypt(serverKey) : existing?.serverKey || null, shortcut: existing?.shortcut || false, shortcutFile: existing?.shortcutFile || null };
     this.write({ favorites: [...favorites.filter(item => item.id !== record.id), record] }); return record.id;

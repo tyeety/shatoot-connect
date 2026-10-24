@@ -13,6 +13,20 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.14.0 — 2026-10-24
+
+### Added
+
+- A stable Windows desktop launcher follows the latest opened version, including saved-computer shortcuts. Known app shortcuts migrate automatically; saved passwords stay out of shortcut arguments. Opening an older executable cannot redirect shortcuts away from a newer available version.
+- A name dialog when saving computers from the connection form or history, and a visible Rename action. Renaming or resaving a computer preserves its encrypted credentials and shortcut identity.
+- Cancel controls for outgoing desktop connections, coordinator handshakes and pending chat connections, including stalled validation and approval. Cancelled work cannot restart a connection after a late asynchronous result; existing chats remain connected.
+- Real Windows updater/shortcut fixtures and focused Electron UI checks for stalled transports, cancellation/retry and Persian computer nicknames.
+
+### Changed
+
+- Successful updates delete their previous executable backup and downloaded/obsolete update packages after the new client confirms startup. Portable startup failure restores the working executable. Settings, credentials, chat history and received files remain untouched.
+- Startup also removes recognized backup files left by older updaters; unknown files and manually downloaded executables outside the updater cache are preserved.
+
 ## 0.13.0 — 2026-10-24
 
 ### Added
