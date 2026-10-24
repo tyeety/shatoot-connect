@@ -13,7 +13,7 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
-## 0.18.0 — 2026-10-24
+## 0.18.1 — 2026-10-24
 
 ### Added
 
@@ -32,6 +32,12 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 - Desktop protocol 2 and the existing coordinator remain compatible; no exact application version match is required. Synchronized message edit/delete requires version 0.18.0 or newer on each participant, including the group owner. Older clients still exchange ordinary messages/files; pending changes wait for a capable peer. Existing credentials, settings, contacts and chat history are retained.
 - Desktop previews become available after viewing an approved remote desktop; chat alone does not grant screenshot access. Deleting a message removes it from the synchronized app history view, not from already exported/copied content or files on disk.
+
+## 0.18.0 — 2026-10-24
+
+### Build status
+
+- Internal candidate only; no release was published. Installed-update verification exposed test assumptions about stable shortcuts and first-launch device identity initialization. Version 0.18.1 contains the same application changes with corrected preservation checks.
 
 ## 0.17.1 — 2026-10-24
 
