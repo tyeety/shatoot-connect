@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell, nativeImage, Tray, Menu, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell, Tray, Menu, powerMonitor } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
@@ -259,10 +259,44 @@ ipcMain.handle('update', async (e, operation) => {
 ipcMain.handle('firewall-repair', async e => { state(e); if (smoke) return true; return require('./firewall.cjs').repairFirewall(app.getPath('exe')); });
 ipcMain.handle('chat-preferences', (e, value) => { state(e); if (!value || typeof value.autoAcceptFiles !== 'boolean' || typeof value.requireChatApproval !== 'boolean') throw new Error('Invalid chat settings.'); saveSettings({ autoAcceptFiles: value.autoAcceptFiles, requireChatApproval: value.requireChatApproval }); return value; });
 ipcMain.handle('profile-save', (e, value) => { const s = state(e); if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !require('../shared/profile.cjs').STATUSES.includes(value.status)) throw new Error('Enter a profile name and status.'); const next = { ...profile(), name: value.name.trim(), status: value.status }; saveSettings({ profile: next }); if (s.discovery) { s.discovery.name = next.name; s.discovery.status = next.status; s.discovery.refresh(); } s.directSocket?.send(JSON.stringify({ type: 'profile', ...next })); return next; });
+async function readProfilePhoto(file) {
+  const mime={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'}[path.extname(file).toLowerCase()];
+  if(!mime)throw new Error('This photo could not be opened.');
+  if((await fs.promises.stat(file)).size>10*1024**2)throw new Error('Choose a profile photo smaller than 10 MB.');
+  const bytes=await fs.promises.readFile(file);
+  if(bytes.length>10*1024**2)throw new Error('Choose a profile photo smaller than 10 MB.');
+  // Chromium decodes AVIF/WebP/GIF; keep the existing small, static PNG wire format.
+  const decoder=new BrowserWindow({show:false,skipTaskbar:true,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,offscreen:true}});
+  decoder.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  decoder.webContents.on('will-navigate',event=>event.preventDefault());
+  let timer;
+  try {
+    return await Promise.race([(async()=>{
+      await decoder.loadURL('data:text/html,'+encodeURIComponent('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; object-src \'none\'; base-uri \'none\'">'));
+      return decoder.webContents.executeJavaScript(`(async()=>{
+        const bytes=Uint8Array.from(atob(${JSON.stringify(bytes.toString('base64'))}),c=>c.charCodeAt(0));
+        const image=await createImageBitmap(new Blob([bytes],{type:${JSON.stringify(mime)}}));
+        try{
+          const side=Math.min(image.width,image.height),canvas=document.createElement('canvas');
+          for(const size of [64,48]){
+            canvas.width=canvas.height=size;const context=canvas.getContext('2d');context.imageSmoothingQuality='high';
+            context.drawImage(image,(image.width-side)/2,(image.height-side)/2,side,side,0,0,size,size);
+            const avatar=canvas.toDataURL('image/png');if(avatar.length<=24000)return avatar;
+          }
+          throw new Error('Choose a smaller profile photo.');
+        }finally{image.close();}
+      })()`);
+    })(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Photo decoding timed out.')),15000)})]);
+  }catch{throw new Error('This photo could not be opened.');}
+  finally{clearTimeout(timer);if(!decoder.isDestroyed())decoder.destroy();}
+}
 ipcMain.handle('profile-photo', async (e, remove) => {
-  const s = state(e); let avatar = '';
-  if (!remove) { const chosen = await dialog.showOpenDialog(s.win, { filters: [{ name: 'Profile photo', extensions: ['png', 'jpg', 'jpeg', 'webp'] }], properties: ['openFile'] }); if (chosen.canceled) return profile(); if (fs.statSync(chosen.filePaths[0]).size > 10 * 1024 ** 2) throw new Error('Choose a profile photo smaller than 10 MB.'); const input = nativeImage.createFromPath(chosen.filePaths[0]); if (input.isEmpty()) throw new Error('This photo could not be opened.'); const size = input.getSize(), side = Math.min(size.width, size.height); let image = input.crop({ x: Math.floor((size.width-side)/2), y: Math.floor((size.height-side)/2), width: side, height: side }).resize({ width: 64, height: 64 }); avatar = image.toDataURL(); if (avatar.length > 24000) { image = image.resize({ width: 48, height: 48 }); avatar = image.toDataURL(); } if (avatar.length > 24000) throw new Error('Choose a smaller profile photo.'); }
-  const next = { ...profile(), avatar }; saveSettings({ profile: next }); return next;
+  const s=state(e);let avatar='';
+  if(!remove){
+    const chosen=await dialog.showOpenDialog(s.win,{filters:[{name:'Profile photo',extensions:['png','jpg','jpeg','avif','webp','gif']}],properties:['openFile']});
+    if(chosen.canceled)return profile();avatar=await readProfilePhoto(chosen.filePaths[0]);
+  }
+  const next={...profile(),avatar};saveSettings({profile:next});return next;
 });
 ipcMain.handle('lan-open', (event, id, endpoint) => {
   const s = state(event);
@@ -607,7 +641,7 @@ app.whenReady().then(async () => {
   if (!smoke) for (const record of preferences.list()) if (record.shortcut && fs.existsSync(path.join(app.getPath('desktop'), preferences.shortcutName(record.id)))) { try { createFavoriteShortcut(record.id); } catch {} }
   if (smoke) {
     setTimeout(() => { smokeLog('Watchdog timeout'); app.exit(1); }, 240000).unref();
-    const run=process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
+    const run=process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,dialog,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
     run(win).catch(error => { smokeLog(error.stack); console.error(error); app.exit(1); });
   }
 });

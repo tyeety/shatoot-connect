@@ -4,13 +4,13 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)
 
-## Version 0.14.1
+## Version 0.14.2
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.14.1-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.14.1-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.14.1-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.14.2-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.14.2-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.14.2-win-x64.zip` | Coordinator, runtime and service manager |
 
 Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. Remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
@@ -32,9 +32,9 @@ Setup checks the OS/architecture, destination, write access, destination/TEMP di
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.14.1-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.14.1-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.14.1-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.14.2-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.14.2-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.14.2-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.
@@ -99,7 +99,7 @@ Approved **desktop control** sessions have a separate clipboard channel for Unic
 
 The packaged client checks the latest stable GitHub Release at startup and every six hours. Settings > Updates also provides a manual check. **Update and restart** downloads the matching installed/portable Windows x64 package, checks its exact length and GitHub asset SHA-256 digest, then runs the update worker after the old process exits. A failed/corrupt download leaves the running app untouched. Installed editions use the existing installer/installation folder; portable editions replace the original executable and keep a `.previous` backup until the new client confirms successful startup. Successful startup removes that backup, the downloaded package and obsolete updater-cache packages. Portable startup failure restores the working executable. Startup also cleans recognized backups left by older updaters; manually downloaded copies outside the updater cache are preserved. Updating never deletes the Windows user profile, encrypted passwords, favorites or chat database. Keep the same Windows account so DPAPI data remains readable. Updating restarts the client and ends active sessions/transfers. Source/dev launches cannot install updates. Version 0.10.0 needs one manual upgrade to acquire the updater. Server service upgrades still use the separate server package.
 
-Profile and status settings support a display name, cropped local PNG/JPEG/WebP photo, and Available, Busy, Away, Do not disturb or Appear offline. These are per-device identities, not centralized user accounts. Photos are stored as bounded PNG thumbnails; LAN neighbors retrieve the public profile locally and connected chat peers receive updates over WebRTC. The selected status is advisory; it does not disable hosting or disconnect peers. Display names/photos do not prove identity. Do not disturb does not revoke incoming-message permission.
+Profile and status settings support a display name, cropped local PNG/JPEG/AVIF/WebP/GIF photo (up to 10 MB; animated GIFs use their first frame), and Available, Busy, Away, Do not disturb or Appear offline. These are per-device identities, not centralized user accounts. Photos are stored as bounded PNG thumbnails; LAN neighbors retrieve the public profile locally and connected chat peers receive updates over WebRTC. The selected status is advisory; it does not disable hosting or disconnect peers. Display names/photos do not prove identity. Do not disturb does not revoke incoming-message permission.
 
 Settings > LAN > **Repair Windows Firewall access** requests Windows administrator permission and can be retried after cancellation or a missing initial firewall prompt. It repairs this executable's local inbound block rules and creates LAN/discovery/WebRTC allowances restricted to local subnets on Private/Domain profiles; it does not disable the firewall, bypass organization policies, change VPN routes or allow public Internet inbound access. On a Public-profile LAN, mark the trusted network Private or ask its administrator. Source/dev runs target their Electron executable; packaged runs target the installed/portable executable.
 

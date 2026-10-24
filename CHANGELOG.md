@@ -13,6 +13,17 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.14.2 — 2026-10-24
+
+### Added
+
+- Profile photo selection accepts AVIF, WebP and GIF alongside PNG/JPEG. Chromium decodes the actual source image before square cropping and thumbnail conversion; animated GIFs use their first frame.
+
+### Fixed
+
+- WebP no longer depends on nativeImage's PNG/JPEG decoder despite appearing in the file picker. All accepted formats normalize to the existing bounded PNG avatar format, preserving compatibility with LAN discovery, chat and earlier servers/clients.
+- Real Electron UI tests cover AVIF, WebP, animated GIF first-frame selection, PNG/JPEG, center cropping, preview, persisted profile data and malformed-image rejection. Photo decoding has a timeout and always disposes its hidden sandboxed window; the 10 MB input limit remains enforced.
+
 ## 0.14.1 — 2026-10-24
 
 ### Added
