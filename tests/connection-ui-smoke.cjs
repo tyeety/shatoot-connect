@@ -41,4 +41,3 @@ module.exports=async({host,states,app,log,artifacts})=>{
     console.log('SHATOOTCONNECT_CONNECTION_UI_SMOKE passed');app.quit();
   }finally{for(const ws of clients)ws.terminate();server.close()}
 };
-
