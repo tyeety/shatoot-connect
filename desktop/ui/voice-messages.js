@@ -11,7 +11,7 @@ window.installVoiceMessages = ({api,conversation,available,send,error}) => {
   let recording=null,starting=false,generation=0,sending=false;
   function sync(){
     record.disabled=starting||sending||(!recording&&!available());record.classList.toggle('voice-recording',!!recording);
-    icon.className=`mi ${recording?'stop':'mic'}`;caption.textContent=tr(recording?'Send voice':'Record voice');record.title=caption.textContent;
+    icon.className=`mi ${recording?'voice_stop':'mic'}`;caption.textContent=tr(recording?'Send voice':'Record voice');record.title=caption.textContent;
     cancel.hidden=!recording&&!starting;cancel.title=tr('Cancel recording');cancel.setAttribute('aria-label',cancel.title);
     clock.hidden=!recording;
   }

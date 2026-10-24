@@ -39,6 +39,10 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"document.querySelector('#chat-record-voice').click();true");await until(()=>run(chat,"document.querySelector('#chat-record-voice').classList.contains('voice-recording')"));
   await run(chat,"document.querySelector('#chat-cancel-voice').click();true");await until(()=>run(chat,"lastVoiceStream.getTracks().every(t=>t.readyState==='ended')"));await pause(200);
   if(peer.chatStore.history({conversation:voiceConversation}).filter(r=>/^Voice-.*\.webm$/.test(r.text)).length!==1)throw Error('Cancelled voice was sent');
+  await run(chat,"window.originalRecorderStart=MediaRecorder.prototype.start;MediaRecorder.prototype.start=function(){throw new Error('Recorder start fixture')};document.querySelector('#chat-record-voice').click();true");
+  await until(()=>run(chat,"document.querySelector('#chat-error').textContent.includes('Microphone unavailable') && !document.querySelector('#chat-record-voice').disabled"));
+  if(!await run(chat,"lastVoiceStream.getTracks().every(t=>t.readyState==='ended') && !document.querySelector('#chat-record-voice').classList.contains('voice-recording')"))throw Error('Recorder-start failure leaked microphone/UI state');
+  await run(chat,"MediaRecorder.prototype.start=originalRecorderStart;document.querySelector('#chat-error').textContent='';true");
   if(!await run(chat,"getComputedStyle(document.querySelector('#chat-record-voice')).cursor==='pointer' && getComputedStyle(document.querySelector('#chat-record-voice .mi')).cursor==='pointer'"))throw Error('Button or icon cursor is not a hand');
   log('Real MediaRecorder/fake microphone voice encoded, transferred and decoded in chat; cancel released microphone; camera and unsolicited recording stayed denied');
   clear();viewer.show();viewer.focus();await until(()=>!chat.isFocused());
