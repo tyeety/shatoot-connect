@@ -24,3 +24,5 @@ body *{-webkit-user-select:none!important;user-select:none!important}body input,
 .action-pending{cursor:progress;animation:action-pending .85s ease-in-out infinite}@keyframes action-pending{50%{opacity:.55}}@media(prefers-reduced-motion:reduce){.action-pending{animation:none;outline:1px solid #b272dc}}
 
 #update-notice{max-width:220px;min-width:110px;flex:0 1 220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.server-indicator{min-width:0;flex:1}.server-indicator>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+button,button *,[role=button],[role=button] *{cursor:pointer!important}button:disabled,button:disabled *{cursor:not-allowed!important}.voice-recording{color:#ffbad1!important;border-color:#ff719f!important}.voice-clock{font-variant-numeric:tabular-nums;direction:ltr}.voice-player{display:block;width:min(300px,100%);height:36px;margin-top:7px}.voice-actions{display:inline-flex;align-items:center;gap:5px}.mi.mic{--mi:url('assets/icons/mic.svg')}.mi.play_arrow{--mi:url('assets/icons/play_arrow.svg')}.mi.stop{--mi:url('assets/icons/stop.svg')}.chat-compose-actions{flex-wrap:wrap}

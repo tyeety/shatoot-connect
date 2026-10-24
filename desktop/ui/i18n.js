@@ -2,6 +2,7 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+['ضبط ویس','Record voice'],['ارسال ویس','Send voice'],['لغو ضبط','Cancel recording'],['در حال ضبط…','Recording…'],['پخش ویس','Play voice'],['پیام صوتی','Voice message'],['میکروفن در دسترس نیست. دسترسی میکروفن را در تنظیمات ویندوز بررسی کنید.','Microphone unavailable. Check microphone access in Windows Settings.'],['این پیام صوتی در دسترس نیست.','This voice message is unavailable.'],['پیام صوتی معتبر نیست.','Invalid voice message.'],['ضبط ویس پشتیبانی نمی‌شود.','Voice recording is not supported.'],
 ['انجام شد','Done'],['باز کردن فایل‌های ارسالی','Open sent files'],['تصویر کلیپ‌بورد بیش از حد بزرگ است.','Clipboard image is too large.'],['تصویر کلیپ‌بورد معتبر نیست.','Invalid clipboard image.'],['این مخاطب آفلاین است.','This contact is offline.'],['فایل جابه‌جا یا حذف شده است.','The file was moved or deleted.'],
 ['لغو اتصال','Cancel connection'],['اتصال لغو شد.','Connection cancelled.'],['تغییر نام','Rename'],['لغو','Cancel'],
 ['فایل‌های ورودی','Incoming files'],['پیروی از تنظیم سراسری','Use global setting'],['دریافت خودکار','Receive automatically'],['پیش از دریافت فایل تأیید بگیر','Ask before receiving files'],['پیش‌فرض خاموش است. هر چت می‌تواند تنظیم جدا داشته باشد. فایل‌ها بدون باز شدن در Downloads ذخیره می‌شوند.','Off by default. Each chat can override this setting. Files are saved in Downloads without opening them.'],['پنهان کردن','Hide'],['تنظیم دریافت فایل نامعتبر است.','Invalid file reception setting.'],

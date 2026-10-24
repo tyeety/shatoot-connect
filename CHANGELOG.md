@@ -13,6 +13,23 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.17.0 — 2026-10-24
+
+### Added
+
+- Record and send voice messages directly from private and group chats. Press Record voice to start, Send voice to finish/send, or Cancel recording to discard. A visible timer accompanies recording, with a five-minute limit and a bounded 10 MB payload.
+- Play voice messages inside chat bubbles using standard audio controls. Playback is loaded only on explicit Play, pauses other voice players, and retains its player when history refreshes. Sent voice originals remain available through encrypted history attachment references; received recordings follow the Downloads file-transfer destination and reception policy.
+- Microphone access is scoped to the requesting chat/main window and enabled only for a short startup interval after pressing Record. Camera access is not granted. Cancel, conversation changes and closing the chat release the recording stream; capture errors report a localized message.
+
+### Fixed
+
+- Enabled buttons and their nested icons/text consistently show the pointing-hand cursor throughout the application, including busy actions. Disabled buttons retain the unavailable cursor.
+
+### Compatibility
+
+- Voice messages are Opus audio in WebM files sent through the existing encrypted, hash-verified file-transfer channel. No coordinator/protocol upgrade or matching app version is required; older clients receive an ordinary WebM attachment. Inline voice playback/recording requires this client version. File recipients must be reachable/connected, including group recipients under the existing group-file rules.
+- Voice recording needs an available microphone and Windows microphone privacy permission. It is independent of screen/control permission and is not desktop audio sharing. No sound plays automatically on receipt. Existing settings, chat history and credentials are preserved.
+
 ## 0.16.0 — 2026-10-24
 
 ### Added

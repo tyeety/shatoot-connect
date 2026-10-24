@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const network = require('../shared/network.cjs');
 
 const smoke = !app.isPackaged && process.argv.includes('--smoke-test');
+if(smoke&&process.argv.includes('--chat-notification-smoke'))app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 if (smoke) { app.setPath('userData', path.join(__dirname, '../artifacts/smoke-profile')); const desktop = path.join(__dirname, '../artifacts/test-desktop'); fs.mkdirSync(desktop, { recursive: true }); app.setPath('desktop', desktop); const downloads = path.join(__dirname, '../artifacts/test-downloads'); fs.mkdirSync(downloads, { recursive: true }); app.setPath('downloads', downloads); }
 const smokeLog = text => {
   if (smoke) { fs.mkdirSync(path.join(__dirname, '../artifacts'), { recursive: true }); fs.appendFileSync(path.join(__dirname, '../artifacts/smoke.log'), `${new Date().toISOString()} ${text}\n`); }
@@ -178,9 +179,13 @@ function chatFilesReceived(s,record,files){
     if(win.isVisible()&&!win.isMinimized()&&win.isFocused()&&view?.active&&view.conversation===record.conversation)reading=true;
     win.webContents.send('chat-files-received',{conversation:record.conversation,id:record.id});
   }
-  if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa';notices.toast(s.win,files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500)});}
+  if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500)});}
 }
 const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route)=>{rememberComputer(peer,route);computerChanged();}, received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
+ipcMain.handle('voice-recording',(event,enabled)=>{
+  const s=state(event);if(s.owner||typeof enabled!=='boolean')throw new Error('Invalid microphone request.');
+  s.voicePermissions||=new Map();if(enabled)s.voicePermissions.set(event.sender.id,Date.now()+15000);else s.voicePermissions.delete(event.sender.id);
+});
 ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active});});
 ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message);});
 function configureStartup(enabled){
@@ -243,7 +248,7 @@ function openChat(s) {
   if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show(); s.chatWindow.focus(); return; }
   const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor: '#0a0e17', title: 'Shatoot Connect · Chats', autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   s.chatWindow = win; win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
-  const chatContentsId=win.webContents.id;win.on('closed', () => { s.chatViews?.delete(chatContentsId);s.chatWindow = null; });
+  const chatContentsId=win.webContents.id;win.on('closed', () => { s.chatViews?.delete(chatContentsId);s.voicePermissions?.delete(chatContentsId);s.chatWindow = null; });
   win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
 }
 ipcMain.handle('chat-open', e => openChat(state(e)));
@@ -633,15 +638,17 @@ app.whenReady().then(async () => {
   smokeLog('app ready');
   if (smoke) saveSettings({ favorites: [], connectionHistory:[], connectionPasswords:{},computerCards:{}, rememberPasswords:true, fixedPassword: null, language: 'en' });
   if(smoke&&(process.argv.includes('--chat-notification-smoke')||process.argv.includes('--connection-ui-smoke')))saveSettings({internetEnabled:false,autoAcceptFiles:true});
-  // Electron 44 checks `media` as part of desktop capture. The only media API in
-  // our trusted, CSP-locked renderer is getDisplayMedia; its handler denies audio.
-  const capturePermission = (wc, permission) => {
-    smokeLog(`permission ${permission}`);
-    const s = states.get(wc?.id);
-    return !!s && (permission === 'fullscreen' || (!!s.source && ['display-capture', 'media'].includes(permission)));
+  // Microphone access is a short, window-specific grant after pressing Record.
+  // Desktop capture keeps its independent source/approval checks and denies audio.
+  const capturePermission = (wc, permission, details={}) => {
+    const s=states.get(wc?.id)||[...states.values()].find(s=>s.chatWindow?.webContents===wc);
+    if(!s)return false;
+    const audioOnly=details.mediaType==='audio'||(details.mediaTypes?.length===1&&details.mediaTypes[0]==='audio');
+    if(permission==='media'&&audioOnly&&Date.now()<(s.voicePermissions?.get(wc.id)||0))return true;
+    return states.has(wc.id)&&(permission==='fullscreen'||(!!s.source&&['display-capture','media'].includes(permission)&&!audioOnly));
   };
-  session.defaultSession.setPermissionCheckHandler((wc, permission) => capturePermission(wc, permission));
-  session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => callback(capturePermission(wc, permission)));
+  session.defaultSession.setPermissionCheckHandler((wc,permission,_origin,details)=>capturePermission(wc,permission,details));
+  session.defaultSession.setPermissionRequestHandler((wc,permission,callback,details)=>callback(capturePermission(wc,permission,details)));
   session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
     const s = [...states.values()].find(s => s.win.webContents.mainFrame === request.frame);
     callback(s?.source && s.captureAllowed && !request.audioRequested ? { video: s.source } : null);

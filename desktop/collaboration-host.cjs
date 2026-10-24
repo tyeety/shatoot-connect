@@ -34,6 +34,13 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     }
     if (op === 'append') { const result=history.append(value.message,value.outgoing===true);if(!value.outgoing&&!result.duplicate&&result.message.kind==='text')messageReceived(s,result.message);return result; }
     if (op === 'delivered') { if (!UUID.test(value.id) || !UUID.test(value.peer)) throw new Error('Invalid receipt.'); return history.delivered(value.id, value.peer); }
+    if(op==='voice-data') {
+      const files=history.files(value.token);
+      if(files.length!==1||!/^Voice-[a-f0-9-]{36}\.webm$/i.test(path.basename(files[0])))throw new Error('This voice message is unavailable.');
+      const stat=await fs.promises.lstat(files[0]);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>10*1024**2)throw new Error('Invalid voice message.');
+      const bytes=await fs.promises.readFile(files[0]);if(bytes.length<4||bytes.length>10*1024**2||bytes.readUInt32BE(0)!==0x1a45dfa3)throw new Error('Invalid voice message.');
+      return bytes.toString('base64');
+    }
     if (op === 'open-attachment') { const files = history.files(value.token); if (!fs.existsSync(files[0])) throw new Error('The file was moved or deleted.'); const error=await shell.openPath(files.length===1?files[0]:path.dirname(files[0]));if(error)throw new Error(error);return; }
     if (op === 'approve' || op === 'grant') {
       if (!UUID.test(value.session) || !UUID.test(value.peer?.deviceId) || typeof value.peer.name !== 'string' || value.peer.name.length > 60) throw new Error('Invalid chat request.');
@@ -65,6 +72,14 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if (op === 'pick') { const picked = await dialog.showOpenDialog(s.chatWindow || s.win, { properties: ['openFile', 'multiSelections'] }); return picked.canceled ? [] : g.send.offer(picked.filePaths); }
     if (op === 'sources') return g.send.offer(value);
     if (op === 'received-sources') return g.send.offer(history.files(value));
+    if(op==='voice') {
+      if(typeof value!=='string'||value.length>14*1024**2||!/^data:audio\/webm(?:;codecs=opus)?;base64,[A-Za-z0-9+/]+=*$/.test(value))throw new Error('Invalid voice message.');
+      const bytes=Buffer.from(value.slice(value.indexOf(',')+1),'base64');
+      if(bytes.length<4||bytes.length>10*1024**2||bytes.readUInt32BE(0)!==0x1a45dfa3)throw new Error('Invalid voice message.');
+      const directory=path.join(app.getPath('userData'),'sent-voice');await fs.promises.mkdir(directory,{recursive:true});
+      const file=path.join(directory,`Voice-${require('node:crypto').randomUUID()}.webm`);await fs.promises.writeFile(file,bytes,{flag:'wx'});
+      try{return await g.send.offer([file]);}catch(error){await fs.promises.unlink(file).catch(()=>{});throw error;}
+    }
     if(op==='clipboard-image') {
       if(typeof value!=='string'||value.length>14*1024**2||!/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(value))throw new Error('Invalid clipboard image.');
       const image=require('electron').nativeImage.createFromDataURL(value);if(image.isEmpty())throw new Error('Invalid clipboard image.');

@@ -2,6 +2,7 @@
 window.installMessenger = ({ api, self, internet, ensureInternet, remote, detached = false }) => {
   const $ = id => document.getElementById(id), tr = text => window.i18n.translate(text);
   let engine, selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
+  let voice;
   let editingGroup,connecting=false,connectSequence=0;
   const progress = new Map();
   const displayName=peer=>peer?.displayName||peer?.name||'';
@@ -33,7 +34,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     catch(error){if(sequence===connectSequence)throw error;}
     finally{if(sequence===connectSequence){connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;}}
   }
-  async function select(id) { if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await reportView(); await load(false); publish(); }
+  async function select(id) { if(id!==selected)voice?.reset();if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await reportView(); await load(false); publish(); }
   async function load(older = false) {
     if (!selected) return;
     const version = selectionVersion, id = selected, search = $('chat-search').value.trim();
@@ -53,7 +54,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       if (own) meta.textContent += ' · ' + tr(row.pending.length ? (row.kind === 'file' ? 'Not delivered to all recipients' : 'Queued') : row.status === 'delivered' ? 'Delivered' : 'Sent');
       item.append(name, text, meta);
       if (row.attachment) item.append(button(own?'Open sent files':'Open received files', () => api.collaboration('open-attachment', { token: row.attachment }), 'folder'));
-      log.append(item);
+      voice?.attachment(item,row);log.append(item);
     }
     if (scroll && nearBottom) log.scrollTop = log.scrollHeight;
   }
@@ -70,7 +71,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     $('chat-title').textContent = group?.name || displayName(peer) || tr('Select a conversation');
     $('chat-peer-status').textContent = group ? `${tr(group.owner === self.deviceId || online(group.owner) ? 'Group owner online' : 'Group owner offline')} · ${group.members.map(m => displayName(contact(m.deviceId))||displayName(m)).join(', ')}` : peer ? tr(online(peer.deviceId) ? 'Connected' : 'Offline') : '';
     $('chat-text').disabled = !selected; $('chat-send').disabled = !selected || busy; $('chat-send-files').disabled = !selected || busy;
-    $('chat-reconnect').hidden = true; $('chat-disconnect').hidden = !peer || !online(peer.deviceId);
+    voice?.sync();$('chat-reconnect').hidden = true; $('chat-disconnect').hidden = !peer || !online(peer.deviceId);
     $('chat-progress').textContent = selected && progress.get(selected) || '';
     fileSetting.hidden=!selected;filePolicy.value=engine.catalog.filePolicies?.[selected]||'inherit';
     if (refreshHistory && $('messenger-dialog').open && selected && rows.length <= 100) { clearTimeout(historyTimer); historyTimer = setTimeout(() => load(false).catch(error), 80); }
@@ -111,6 +112,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   }catch(e){error(e);}});
   $('chat-text').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-compose').requestSubmit(); } };
   async function files(operation = 'pick', value) { if (busy) throw new Error('A file transfer is already in progress.'); busy = true; render(); try { await engine.sendFiles(selected, operation, value); } finally { busy = false; render(); } }
+  voice=window.installVoiceMessages({api,conversation:()=>selected,available:()=>!!selected&&!busy,send:(conversation,data)=>engine.sendFiles(conversation,'voice',data),error});
   $('chat-send-files').onclick = run(() => files());
   $('messenger-dialog').ondragover = event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = selected ? 'copy' : 'none'; } };
   $('messenger-dialog').ondrop = run(async event => { if (!selected || !event.dataTransfer.files.length) return; await files('drop', [...event.dataTransfer.files]); });

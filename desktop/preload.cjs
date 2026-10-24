@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   onLANSocket: callback => ipcRenderer.on('lan-socket', (_event, value) => callback(value)),
   discovery: () => ipcRenderer.invoke('discovery'),
   onDiscovery: callback => ipcRenderer.on('discovery', (_event, value) => callback(value)),
+  voiceRecording:enabled=>ipcRenderer.invoke('voice-recording',enabled),
   collaboration: (op, value) => ipcRenderer.invoke('collaboration', op, value),
   collaborationFiles: (session, op, value) => ipcRenderer.invoke('collaboration-files', session, op, value),
   collaborationDrop: (session, files) => ipcRenderer.invoke('collaboration-files', session, 'sources', files.map(file => webUtils.getPathForFile(file))),

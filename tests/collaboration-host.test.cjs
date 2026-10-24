@@ -15,6 +15,14 @@ test('automatic reception defaults on, global and per-chat policies override bot
   const attachment=await handlers.get('collaboration-files')({},session,'attach-sources',{id:sent.id,conversation});
   assert.deepEqual(s.chatStore.files(attachment),[source]);await call('open-attachment',{token:attachment});assert.deepEqual(opened,[source]);
   await assert.rejects(handlers.get('collaboration-files')({},session,'attach-sources',{id:text.id,conversation}),/Invalid outgoing/);
+  const voiceBytes=Buffer.from([0x1a,0x45,0xdf,0xa3,0x80,0x81,0x82,0x83]),voiceFiles=await handlers.get('collaboration-files')({},session,'voice','data:audio/webm;base64,'+voiceBytes.toString('base64'));
+  assert.match(voiceFiles[0].name,/^Voice-[a-f0-9-]+\.webm$/);
+  const voiceMessage={...sent,id:crypto.randomUUID(),text:voiceFiles[0].name};await call('append',{message:voiceMessage,outgoing:true});
+  const voiceToken=await handlers.get('collaboration-files')({},session,'attach-sources',{id:voiceMessage.id,conversation});
+  assert.equal(await call('voice-data',{token:voiceToken}),voiceBytes.toString('base64'));
+  await assert.rejects(call('voice-data',{token:attachment}),/unavailable/);
+  await assert.rejects(handlers.get('collaboration-files')({},session,'voice','data:audio/webm;base64,AAAA'),/Invalid voice/);
+  await assert.rejects(handlers.get('collaboration-files')({},session,'voice','data:text/html;base64,AAAA'),/Invalid voice/);
   prefs.requireChatApproval=true;assert.equal(await call('approve',{session:crypto.randomUUID(),peer}),false);assert.equal(prompts,1);
   const files=(op,value)=>handlers.get('collaboration-files')({},session,op,value),offer=()=>({entries:[{name:'safe.txt',size:0}],message:{id:crypto.randomUUID(),kind:'file',conversation,sender:peer.deviceId,name:peer.name,text:'safe.txt'}});
   const value=offer();assert.equal(await files('begin',value),true);assert.equal(prompts,1);await files('end-file',{index:0,hash:crypto.createHash('sha256').digest('hex')});const result=await files('finish');assert.equal(result.count,1);assert.equal(completed.length,1);assert.equal(path.dirname(path.dirname(completed[0].files[0])),path.join(root,'downloads'));assert.equal(fs.readFileSync(completed[0].files[0],'utf8'),'');assert.equal(s.chatStore.history({conversation}).find(row=>row.id===value.message.id).attachment,result.attachment);
