@@ -65,6 +65,16 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     await run(`api.connections('connected',{address:'${address}',name:'Saved computer'}).then(renderHistory)`);
     await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='true'"));
     if(!await run("document.querySelectorAll('#favorites-list>div').length===2 && !document.querySelector('#connection-history') && !!document.querySelector('.favorite-row .computer-kind.star_outline') && !!document.querySelector('.history-row .computer-kind.schedule') && document.querySelector('.rename-computer').textContent==='' && document.querySelectorAll('.connection-grid .muted').length===0"))throw Error('Combined computer list, markers, icon-only rename or removed helper text regressed');
+    await run("document.querySelector('.history-row .computer-pin').click();true");
+    await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='false'&&document.querySelector('#favorites-list>div .computer-pin')?.getAttribute('aria-pressed')==='true'"));await pause(200);
+    if(!await run("getComputedStyle(document.querySelector('.computer-pin[aria-pressed=true] .mi')).transform!=='none'"))throw Error('Pinned connection icon did not tilt');
+    await run(`api.connections('connected',{address:'${address}',name:'Saved computer'}).then(renderHistory)`);
+    if(!await run("document.querySelector('#favorites-list>div')?.dataset.saved==='false'"))throw Error('A new connection displaced the pinned computer');
+    await run("document.querySelector('.history-row .computer-pin').click();true");await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='true'"));
+    await run("document.querySelector('.favorite-row .computer-pin').click();true");await until(()=>run("document.querySelector('.favorite-row .computer-pin')?.getAttribute('aria-pressed')==='true'"));
+    if(!await run("(async()=>{const rows=await api.connections('computers');return rows[0].saved&&rows[0].pinned&&[...document.querySelectorAll('.favorite-actions button')].every(b=>b.getBoundingClientRect().right<=b.closest('.favorite-row,.history-row').getBoundingClientRect().right)})()"))throw Error('Saved pin persistence or card button layout regressed');
+    await run("document.querySelector('.favorite-row .computer-pin').click();true");await until(()=>run("document.querySelector('.favorite-row .computer-pin')?.getAttribute('aria-pressed')==='false'"));
+    log('Saved/recent connection pin buttons persist, tilt and stay above newer unpinned connections without clipping');
     for(let i=0;i<3;i++){
       greet=i===2;joined=false;
       await run("document.querySelector('.favorite-connect').click();true");

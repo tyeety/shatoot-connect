@@ -69,6 +69,7 @@ ipcMain.handle('computer-card',(e,operation,value={})=>{
   if(operation==='resolve')return preferences.decorate(value.peer,value.route);
   if(operation==='remember'){rememberComputer(value.peer||{},value.route||{});computerChanged();return preferences.decorate(value.peer,value.route);}
   if(operation==='rename'){const result=preferences.renameComputer(value.peer,value.name);computerChanged();return result;}
+  if(operation==='pin'){const result=preferences.pinComputer(value.peer,value.pinned);computerChanged();return result;}
   throw new Error('Invalid computer card operation.');
 });
 ipcMain.on('desktop-viewing',(e,value)=>{state(e).outgoingDesktop=value===true;});

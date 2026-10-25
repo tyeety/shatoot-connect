@@ -17,6 +17,17 @@ test('combined computers deduplicate saved/recent destinations and sort every ro
   const savedAt=rows.find(r=>r.saved).at;p.connected({address:'192.168.1.10'});rows=p.computers();assert.equal(rows[0].saved,true);assert.ok(rows[0].at>=savedAt);
   p.save({address:'192.168.1.11',name:'Now saved'});assert.equal(p.computers().length,2);assert.ok(p.computers().every(r=>r.saved));
 });
+
+test('connection pins persist across save, identity resolution and new connections without losing names or credentials',()=>{
+  const {preferences:p,storage}=fixture(),first={address:'192.168.1.10'},second={address:'192.168.1.11'};
+  p.attempt({...first,password:'keep-password'});p.connected(first);p.connected(second);
+  p.pinComputer(first,true);assert.equal(p.computers()[0].address,first.address);assert.equal(p.computers()[0].pinned,true);
+  const id=p.save({...first,name:'My office'});p.connected(second);assert.equal(p.computers()[0].saved,true);assert.equal(p.computers()[0].displayName,'My office');assert.equal(p.recall(first),'keep-password');
+  const deviceId=crypto.randomUUID();p.rememberComputer({deviceId,name:'Published name'},{address:'192.168.1.10:8788'});
+  const reopened=new ClientPreferences(p);assert.equal(reopened.decorate({deviceId}).pinned,true);assert.equal(reopened.computers()[0].pinned,true);assert.equal(reopened.get(id).name,'My office');
+  reopened.pinComputer({deviceId},false);assert.equal(reopened.computers()[0].address,second.address);assert.equal(reopened.computers().find(r=>r.saved).pinned,false);assert.equal(Object.values(storage().computerCards).length,1);
+  assert.throws(()=>p.pinComputer(first,'yes'),/Invalid pin/);
+});
 test('a chosen computer nickname survives resaving credentials and keeps the shortcut identity',()=>{
   const{preferences}=fixture();const id=preferences.save({name:'دفتر مرکزی',address:'192.168.1.10',password:'secret'});preferences.markShortcut(id);const shortcut=preferences.shortcutName(id);
   preferences.save({address:'192.168.1.10',password:'new-secret'});assert.equal(preferences.get(id).name,'دفتر مرکزی');

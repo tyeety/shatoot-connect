@@ -39,7 +39,9 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"document.querySelector('#chat-text').focus();true");
   await click(`[data-conversation="${conversation}"] .chat-pin`);await until(()=>owner.chatStore.list().pins[conversation]);
   await until(()=>run(chat,"document.querySelector('.chat-pin[aria-pressed=true]')!==null"));
+  await pause(200);if(!await run(chat,"getComputedStyle(document.querySelector('.chat-pin[aria-pressed=true] .mi')).transform!=='none'"))throw Error('Pinned chat icon did not tilt');
   await click(`[data-conversation="${conversation}"] .chat-pin`);await until(()=>!owner.chatStore.list().pins[conversation]);
+  await pause(200);if(!await run(chat,"getComputedStyle(document.querySelector('.chat-pin .mi')).transform==='none'"))throw Error('Unpinned chat icon stayed tilted');
   viewer.show();viewer.focus();await until(()=>!chat.isFocused());
   await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Unread badge fixture').then(()=>true)`);await until(()=>run(chat,"!!document.querySelector('.chat-conversation .unread-badge')"));await until(()=>run(host,"!document.querySelector('#chat-total-unread').hidden"));
   chat.show();chat.focus();await run(chat,"document.querySelector('#chat-text').focus();true");await until(()=>!owner.chatStore.unread()[conversation]);await until(()=>run(host,"document.querySelector('#chat-total-unread').hidden"));

@@ -28,7 +28,12 @@ class ClientPreferences {
     const favorite=(this.read().favorites||[]).find(f=>{try{return f.name!==f.address&&keys.has(this.destination(f).key);}catch{return false;}});
     let preview='';try{if(card.preview&&card.previewKind==='wallpaper'){this.previewCache||=new Map();if(!this.previewCache.has(card.preview)){this.previewCache.set(card.preview,this.decrypt(card.preview));if(this.previewCache.size>200)this.previewCache.delete(this.previewCache.keys().next().value);}preview=this.previewCache.get(card.preview);}}catch{}
     const knownRoute=card.routes?.at(-1);
-    return {...value,deviceId:value.deviceId||card.deviceId,route:value.route||(knownRoute?{type:knownRoute.endpoint?'id':'lan',address:knownRoute.address,endpoint:knownRoute.endpoint}:null),displayName:card.alias||favorite?.name||card.name||value.name||value.address||'',avatar:card.avatar!==undefined?card.avatar:value.avatar||'',preview,previewAt:card.previewAt};
+    return {...value,pinned:card.pinned===true,deviceId:value.deviceId||card.deviceId,route:value.route||(knownRoute?{type:knownRoute.endpoint?'id':'lan',address:knownRoute.address,endpoint:knownRoute.endpoint}:null),displayName:card.alias||favorite?.name||card.name||value.name||value.address||'',avatar:card.avatar!==undefined?card.avatar:value.avatar||'',preview,previewAt:card.previewAt};
+  }
+  pinComputer(value,pinned) {
+    if(typeof pinned!=='boolean')throw new Error('Invalid pin setting.');
+    const previous=this.card(value);this.rememberComputer({...value,name:previous?.name||value.name,preview:undefined});const old=this.card(value);if(!old)throw new Error('Computer not found.');
+    const cards={...(this.read().computerCards||{})};cards[old._key]={...old,pinned};delete cards[old._key]._key;this.write({computerCards:cards});return this.decorate(value);
   }
   renameComputer(value,name) {
     if(typeof name!=='string'||name.trim().length>60)throw new Error('Enter a valid computer name.');
@@ -76,10 +81,10 @@ class ClientPreferences {
     const rows=[];
     for(const record of [...this.list().map(r=>({...r,saved:true,at:0})),...this.history().map(r=>({...r,saved:false}))]){
       const key=this.destination(record).key,existing=rows.find(r=>r.keys.has(key)||(record.deviceId&&r.deviceId===record.deviceId));
-      if(existing){existing.at=Math.max(existing.at||0,record.at||0);existing.keys.add(key);if(!existing.deviceId)existing.deviceId=record.deviceId;}
+      if(existing){existing.at=Math.max(existing.at||0,record.at||0);existing.pinned=existing.pinned||record.pinned;existing.keys.add(key);if(!existing.deviceId)existing.deviceId=record.deviceId;}
       else rows.push({...record,keys:new Set([key])});
     }
-    return rows.sort((a,b)=>(b.at||0)-(a.at||0)||Number(b.saved)-Number(a.saved)||a.name.localeCompare(b.name)).map(({keys,...record})=>record);
+    return rows.sort((a,b)=>Number(b.pinned)-Number(a.pinned)||(b.at||0)-(a.at||0)||Number(b.saved)-Number(a.saved)||a.name.localeCompare(b.name)).map(({keys,...record})=>record);
   }
   connected(value) {
     const target=this.destination(value), history=this.read().connectionHistory||[], previous=history.find(h=>h.key===target.key);

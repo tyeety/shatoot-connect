@@ -13,6 +13,16 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.4 — 2026-10-25
+
+### Added
+
+- The combined saved/recent connections list now has a translated Pin/Unpin action on every card. Pinned computers appear above unpinned computers; last-connection order is retained within each section. Pins persist locally across restarts, saving a recent computer and recognizing the same device through a known alternate address.
+
+### Changed
+
+- Active chat and connection pin icons tilt; unpinned icons remain upright. The change animates briefly and respects reduced-motion preferences.
+
 ## 0.20.3 — 2026-10-25
 
 ### Added
