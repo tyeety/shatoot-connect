@@ -192,7 +192,7 @@ function chatFilesReceived(s,record,files){
   if(reading)s.chatStore?.conversationState(record.conversation,{read:true});publishUnread(s);
   if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
 }
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, previewImage:file=>readProfilePhoto(file,true),catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
 ipcMain.handle('voice-recording',(event,enabled)=>{
   const s=state(event);if(s.owner||typeof enabled!=='boolean')throw new Error('Invalid microphone request.');
   s.voicePermissions||=new Map();if(enabled)s.voicePermissions.set(event.sender.id,Date.now()+15000);else s.voicePermissions.delete(event.sender.id);
@@ -646,7 +646,7 @@ ipcMain.handle('chat-clipboard',async(e,operation,token)=>{
   }
   if(operation==='read'){
     const data=await nativeClipboard(s,{op:'read'});if(data.files.length)return {files:true};
-    return {files:false,text:data.text||'',image:smoke?'':await require('./clipboard-image.cjs').clipboardImage(clipboard)};
+    return {files:false,text:data.text||'',image:smoke||data.text?'':await require('./clipboard-image.cjs').clipboardImage(clipboard).catch(()=> '')};
   }
   throw new Error('Invalid clipboard operation.');
 });

@@ -63,6 +63,10 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       if(row.deleted)item.classList.add('deleted');
       else {
         voice?.attachment(item,row);
+        if(row.kind==='file'&&row.attachment&&!/^Voice-[a-f0-9-]{36}\.webm$/i.test(row.text)){
+          const preview=document.createElement('div');preview.className='attachment-previews';item.append(preview);
+          api.collaboration('attachment-preview',{token:row.attachment}).then(files=>{if(!preview.isConnected)return;if(files.length)text.hidden=true;for(const file of files){const card=document.createElement('button');card.type='button';card.className='attachment-preview';card.title=tr(own?'Open sent files':'Open received files');card.onclick=run(()=>api.collaboration('open-attachment',{token:row.attachment,index:file.index}));if(file.image){const img=document.createElement('img');img.src=file.image;img.alt=file.name;img.loading='lazy';card.append(img);}else{const icon=document.createElement('span');icon.className='attachment-extension';icon.textContent=file.directory?tr('Folder'):file.extension||'FILE';card.append(icon);}const label=document.createElement('span');label.textContent=file.name;const size=document.createElement('small');size.dir='ltr';size.textContent=file.directory?tr('Folder'):file.size<1024?file.size+' B':file.size<1048576?Math.ceil(file.size/1024)+' KB':(file.size/1048576).toFixed(1)+' MB';card.append(label,size);preview.append(card);}}).catch(()=>{});
+        }
         const actions=document.createElement('div');actions.className='chat-message-actions';
         if(row.attachment)actions.append(button(own?'Open sent files':'Open received files',()=>api.collaboration('open-attachment',{token:row.attachment}),'folder'));
         const copy=button('Copy',()=>row.kind==='file'?api.chatClipboard('copy',row.attachment):api.copyText(row.text),'content_copy');copy.disabled=row.kind==='file'&&!row.attachment;actions.append(copy);
@@ -79,17 +83,21 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     const pending=connecting||(engine.connectAttempts?[...engine.connectAttempts].filter(a=>!a.background).length:engine.pendingConnections||0)>0;cancelConnect.hidden=!pending;$('chat-connect').disabled=pending;$('chat-address').disabled=pending;
     const total=Object.values(engine.catalog.unread||{}).reduce((a,b)=>a+b,0);$('chat-total-unread').textContent=total>99?'99+':String(total);$('chat-total-unread').hidden=!total;
     own.replaceChildren();const ownImage=document.createElement('img');ownImage.src=self.avatar||'assets/app-icon.png';ownImage.className='profile-avatar';ownImage.alt='';const ownName=document.createElement('span');ownName.textContent=self.name;own.append(ownImage,ownName);
-    const list = $('chat-conversations'); list.replaceChildren();
+    const list = $('chat-conversations');
     const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar:c.avatar,preview:c.preview,name:displayName(c),detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, avatar:g.avatar,name: g.name,detail:g.description, status: 'Group' }))];
     const last=new Map((engine.catalog.conversations||[]).map(c=>[c.id,c.last?.receivedAt||0]));
     items.sort((a,b)=>Number(!!engine.catalog.pins?.[b.id])-Number(!!engine.catalog.pins?.[a.id])||(last.get(b.id)||0)-(last.get(a.id)||0));
-    for (const item of items) {
-      const row=document.createElement('div');row.className='chat-contact-row';const b=document.createElement('button');b.className='chat-conversation';b.type='button';b.setAttribute('aria-pressed',String(item.id===selected));
-      const name=document.createElement('b');name.textContent=item.name;const count=engine.catalog.unread?.[item.id]||0;if(count){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=count>99?'99+':String(count);name.append(badge);}
-      const detail=document.createElement('small');detail.textContent=item.detail||'';const image=document.createElement('img');image.src=item.avatar||'assets/app-icon.png';image.className='profile-avatar';image.alt='';b.append(image,name,detail);
-      if(!item.id.startsWith('g:')){const dot=document.createElement('span');dot.className='presence-dot presence-'+(online(item.id.slice(2))?(contact(item.id.slice(2))?.status||'available'):discovery.peers.some(p=>p.deviceId===item.id.slice(2))?'available':'offline');b.append(dot);}
-      previewCard(b,item);b.onclick=run(()=>select(item.id));const pinned=!!engine.catalog.pins?.[item.id],pin=button(pinned?'Unpin chat':'Pin chat',async()=>{await api.collaboration('conversation-state',{conversation:item.id,pinned:!pinned});await engine.refresh();},'pin');pin.classList.add('chat-pin');pin.setAttribute('aria-pressed',String(pinned));row.append(b,pin);list.append(row);
+    const existing=new Map([...list.children].map(row=>[row.dataset.conversation,row]));
+    for (let index=0;index<items.length;index++) {
+      const item=items[index];let row=existing.get(item.id);existing.delete(item.id);
+      if(!row){row=document.createElement('div');row.className='chat-contact-row';row.dataset.conversation=item.id;const b=document.createElement('button');b.className='chat-conversation';b.type='button';const image=document.createElement('img');image.className='profile-avatar';image.alt='';b.append(image,document.createElement('b'),document.createElement('small'));b.onclick=run(()=>select(item.id));const pin=button('Pin chat',async()=>{await api.collaboration('conversation-state',{conversation:item.id,pinned:!engine.catalog.pins?.[item.id]});await engine.refresh();},'pin');pin.classList.add('chat-pin');row.append(b,pin);}
+      const b=row.querySelector('.chat-conversation'),name=b.querySelector('b'),detail=b.querySelector('small'),image=b.querySelector('.profile-avatar'),pin=row.querySelector('.chat-pin');
+      b.setAttribute('aria-pressed',String(item.id===selected));name.textContent=item.name;const count=engine.catalog.unread?.[item.id]||0;if(count){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=count>99?'99+':String(count);name.append(badge);}detail.textContent=item.detail||'';const src=item.avatar||'assets/app-icon.png';if(image.getAttribute('src')!==src)image.src=src;
+      if(!item.id.startsWith('g:')){let dot=b.querySelector('.presence-dot');if(!dot){dot=document.createElement('span');b.append(dot);}dot.className='presence-dot presence-'+(online(item.id.slice(2))?(contact(item.id.slice(2))?.status||'available'):discovery.peers.some(p=>p.deviceId===item.id.slice(2))?'available':'offline');}
+      let preview=b.querySelector('.desktop-preview');b.classList.add('computer-preview');if(item.preview){if(!preview){preview=document.createElement('img');preview.className='desktop-preview';preview.alt='';preview.draggable=false;b.prepend(preview);}if(preview.getAttribute('src')!==item.preview)preview.src=item.preview;}else preview?.remove();
+      const pinned=!!engine.catalog.pins?.[item.id];pin.title=tr(pinned?'Unpin chat':'Pin chat');pin.setAttribute('aria-label',pin.title);pin.setAttribute('aria-pressed',String(pinned));if(list.children[index]!==row)list.insertBefore(row,list.children[index]||null);
     }
+    for(const row of existing.values())row.remove();
     const group = selected.startsWith('g:') && engine.group(selected.slice(2)), peer = selected.startsWith('p:') && contact(selected.slice(2));
     if($('chat-rename')){$('chat-rename').hidden=!selected;$('chat-rename').title=tr(selected.startsWith('g:')?'Conversation settings':'Rename saved computer');}
     $('chat-edit-group').hidden=!group||group.owner!==self.deviceId;
@@ -131,18 +139,16 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('chat-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
   $('chat-older').onclick = run(() => load(true));
   $('chat-compose').onsubmit = run(async () => { const text = $('chat-text').value;if(voice?.active()||!text.trim()){voice?.activate();return;} await engine.send(selected, text); $('chat-text').value = '';voice?.sync(); await load(false); $('chat-messages').scrollTop = $('chat-messages').scrollHeight; });
-  async function pasteClipboard(event){const target=selected;if(!target)return;event?.preventDefault();try{
-    const data=await api.chatClipboard('read');if(target!==selected)return;
-    if(data.files){await files('clipboard-sources');return;}
-    const image=[...(event?.clipboardData?.items||[])].find(item=>item.kind==='file'&&item.type.startsWith('image/'));
-    if(!image){if(data.image){await files('clipboard-image',data.image);return;}const text=event?.clipboardData?.getData('text/plain')??data.text;if(text){$('chat-text').setRangeText(text,$('chat-text').selectionStart,$('chat-text').selectionEnd,'end');$('chat-text').dispatchEvent(new Event('input',{bubbles:true}));}return;}
-    const file=image.getAsFile();if(!file)return;
-    if(file.size>10*1024**2)throw new Error('Clipboard image is too large.');
-    const imageData=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Invalid clipboard image.'));reader.readAsDataURL(file);});
-    await files('clipboard-image',imageData);
+  function insertPaste(text){const field=$('chat-text');field.setRangeText(text,field.selectionStart,field.selectionEnd,'end');field.dispatchEvent(new Event('input',{bubbles:true}));}
+  async function pasteClipboard(event){const target=selected;if(!target)return;event.preventDefault();try{
+    const items=[...(event.clipboardData?.items||[])],image=items.find(item=>item.kind==='file'&&item.type.startsWith('image/')),text=event.clipboardData?.getData('text/plain')||'';
+    if(!image&&text){insertPaste(text);return;}
+    if(image){const file=image.getAsFile();if(!file)return;if(file.size>10*1024**2)throw new Error('Clipboard image is too large.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Invalid clipboard image.'));reader.readAsDataURL(file);});if(target===selected)await files('clipboard-image',data);return;}
+    const localFiles=[...(event.clipboardData?.files||[])];if(localFiles.length){await files('drop',localFiles);return;}
+    const data=await api.chatClipboard('read');if(target!==selected)return;if(data.files)await files('clipboard-sources');else if(data.text)insertPaste(data.text);else if(data.image)await files('clipboard-image',data.image);
   }catch(e){error(e);}}
   $('chat-text').addEventListener('paste',pasteClipboard);
-  $('chat-text').onkeydown = event => {if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='v'){event.preventDefault();pasteClipboard();return;} if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-compose').requestSubmit(); } };
+  $('chat-text').onkeydown = event => {if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-compose').requestSubmit(); } };
   async function files(operation = 'pick', value) { if (busy) throw new Error('A file transfer is already in progress.'); busy = true; render(); try { await engine.sendFiles(selected, operation, value); } finally { busy = false; render(); } }
   voice=window.installVoiceMessages({api,conversation:()=>selected,available:()=>!!selected&&!busy,send:(conversation,data)=>engine.sendFiles(conversation,'voice',data),error});
   $('chat-send-files').onclick = run(() => files());

@@ -13,6 +13,21 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.1 — 2026-10-25
+
+### Added
+
+- Inline previews for image attachments and file cards with names, types and sizes for sent/received files. Previews are decoded locally in a sandbox, cached with file modification checks, and open the matching attachment without exposing filesystem paths to the renderer.
+
+### Fixed
+
+- Chat selection and pin buttons retain their DOM identity during focus/unread/discovery updates, so a pointer-down is not lost before pointer-up. Pin actions read the current state instead of a stale render snapshot. UI tests exercise real Chromium pointer events with a delayed release.
+- Chat Paste handles browser text/image data directly and leaves Ctrl+V/Shift+Insert to the browser's paste event. Text paste no longer depends on the native file bridge or image clipboard API; Explorer files retain the native fallback. Clipboard image reads cannot prevent plain-text insertion.
+
+### Upgrade note
+
+- Version 0.19.3 and earlier can report Update installer could not start (0) before starting the downloaded installer. Their running legacy launcher cannot be repaired by the downloaded package. Run the latest Setup manually once over the existing installation, without uninstalling; settings/history remain. The replacement launcher introduced in 0.19.4 is covered by Windows updater and installer tests.
+
 ## 0.20.0 — 2026-10-25
 
 ### Added

@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const { ChatStore } = require('./chat-store.cjs');
 const { Transfers } = require('./transfers.cjs');
 const { UUID } = require('./discovery.cjs');
-function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, clipboardRead=async()=>({files:[]}), decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {}, messageReceived = () => {},catalogChanged=()=>{} }) {
+function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, clipboardRead=async()=>({files:[]}), decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {}, messageReceived = () => {},catalogChanged=()=>{},previewImage=async()=>'' }) {
+  let previewQueue=Promise.resolve();
   function store(s) {
     if (!s.identity) throw new Error('The device is not initialized.');
     return s.chatStore ||= new ChatStore({ file: path.join(app.getPath('userData'), `chat-${s.identity.deviceId}.dat`), self: s.identity.deviceId,
@@ -51,7 +52,14 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
       const bytes=await fs.promises.readFile(files[0]);if(bytes.length<4||bytes.length>10*1024**2||bytes.readUInt32BE(0)!==0x1a45dfa3)throw new Error('Invalid voice message.');
       return bytes.toString('base64');
     }
-    if (op === 'open-attachment') { const files = history.files(value.token); if (!fs.existsSync(files[0])) throw new Error('The file was moved or deleted.'); const error=await shell.openPath(files.length===1?files[0]:path.dirname(files[0]));if(error)throw new Error(error);return; }
+    if(op==='attachment-preview'){
+      const files=history.files(value.token),result=[];s.attachmentPreviews||=new Map();
+      for(let index=0;index<Math.min(8,files.length);index++){const file=files[index];let stat;try{stat=await fs.promises.lstat(file);}catch{continue;}if(stat.isSymbolicLink()||(!stat.isFile()&&!stat.isDirectory()))continue;const extension=path.extname(file).slice(1).toUpperCase();let image='';
+        if(stat.isFile()&&stat.size<=10*1024**2&&/^(PNG|JPG|JPEG|GIF|WEBP|AVIF)$/.test(extension)){const key=file+'|'+stat.size+'|'+stat.mtimeMs;let cached=s.attachmentPreviews.get(key);if(!cached){cached=previewQueue.then(()=>previewImage(file)).catch(()=> '');previewQueue=cached.then(()=>{});s.attachmentPreviews.set(key,cached);while(s.attachmentPreviews.size>80)s.attachmentPreviews.delete(s.attachmentPreviews.keys().next().value);}image=await cached;}
+        result.push({index,name:path.basename(file),extension,size:stat.size,directory:stat.isDirectory(),image});
+      }return result;
+    }
+    if (op === 'open-attachment') { const files = history.files(value.token); if(value.index!==undefined&&(!Number.isInteger(value.index)||value.index<0||value.index>=files.length))throw new Error('This attachment is unavailable.');if(!fs.existsSync(files[value.index??0]))throw new Error('The file was moved or deleted.');const error=await shell.openPath(value.index!==undefined?files[value.index]:files.length===1?files[0]:path.dirname(files[0]));if(error)throw new Error(error);return; }
     if (op === 'approve' || op === 'grant') {
       if (!UUID.test(value.session) || !UUID.test(value.peer?.deviceId) || typeof value.peer.name !== 'string' || value.peer.name.length > 60) throw new Error('Invalid chat request.');
       if (op === 'approve' && settings().requireChatApproval === true) {
