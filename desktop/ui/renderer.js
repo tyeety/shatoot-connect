@@ -647,6 +647,7 @@ function selectSettingsTab(name, focus = false) {
   }
 }
 document.querySelector('.settings-tabs').setAttribute('aria-orientation','vertical');
+document.querySelector('.settings-tabs').addEventListener('click',event=>{const tab=event.target.closest('[data-settings-tab]');if(tab)selectSettingsTab(tab.dataset.settingsTab);});
 document.querySelector('.settings-tabs').addEventListener('keydown',event=>{
   const button=event.target.closest('[data-settings-tab]');if(!button)return;
   const tabs=[...document.querySelectorAll('[data-settings-tab]')],index=tabs.indexOf(button);let next;

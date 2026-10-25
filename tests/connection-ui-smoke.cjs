@@ -4,6 +4,14 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
   const run=code=>host.webContents.executeJavaScript(code),pause=ms=>new Promise(r=>setTimeout(r,ms));
   const until=async fn=>{for(let i=0;i<400;i++){if(await fn())return;await pause(50)}throw Error('Connection UI timed out: '+fn.toString())};
   await until(()=>run('window.shatootconnectReady===true'));
+  await run("document.querySelector('#settings-dialog').showModal();window.tabSelects=[];window.originalSelectSettingsTab=selectSettingsTab;selectSettingsTab=(...args)=>{tabSelects.push(args[0]);return originalSelectSettingsTab(...args)};true");
+  for(const tab of ['host','lan','display','internet','general','profile','chat','updates']){
+    const point=await run(`(()=>{const r=document.querySelector('#tab-${tab}').getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
+    host.webContents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});host.webContents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});
+    await until(()=>run(`document.querySelector('#tab-${tab}').getAttribute('aria-selected')==='true'&&!document.querySelector('#settings-${tab}').hidden`));
+  }
+  if(!await run("tabSelects.length===8"))throw Error('A settings tab click was skipped or invoked twice');
+  await run("selectSettingsTab=originalSelectSettingsTab;document.querySelector('#settings-dialog').close();true");
   await run("document.querySelector('#settings-dialog').showModal();selectSettingsTab('display');document.querySelector('#appearance-theme').value='light';document.querySelector('#appearance-theme').dispatchEvent(new Event('change'));true");
   await until(()=>run("document.documentElement.dataset.theme==='light'&&config.theme==='light'"));
   if(!await run("(async()=>getComputedStyle(document.body).backgroundColor==='rgb(250, 246, 255)'&&getComputedStyle(document.querySelector('#remote-id')).color==='rgb(48, 32, 57)'&&(await api.config()).theme==='light'&&await api.appearance('invalid').then(()=>false,()=>true))()"))throw Error('Light palette, persistence or theme validation failed');

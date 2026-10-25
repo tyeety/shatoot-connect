@@ -76,3 +76,13 @@ test('manual pinned chat order survives reload, new messages and repinning; malf
   for(const order of [[first],[first,first],[first,'p:'+crypto.randomUUID()],null])assert.throws(()=>reopened.reorderPins(order),/Pinned list changed/);
   assert.deepEqual(reopened.list().pinOrder,[second,first]);reopened.conversationState(second,{pinned:false});reopened.conversationState(second,{pinned:true});assert.deepEqual(reopened.list().pinOrder,[first,second]);
 });
+
+test('mute persists independently per conversation without reading messages or changing file policy and pins',t=>{
+  const{store,options,self,peer,other}=fixture(t),conversation='p:'+peer;
+  store.contact({deviceId:other,name:'Other'},{type:'lan',address:'192.168.1.11:8788'});
+  store.conversationState(conversation,{pinned:true});store.filePolicy(conversation,'ask');
+  store.conversationState(conversation,{muted:true});store.append({id:crypto.randomUUID(),conversation,sender:peer,name:'Peer',kind:'text',text:'Still received'});
+  const reopened=new ChatStore(options);assert.equal(reopened.isMuted(conversation),true);assert.equal(reopened.isMuted('p:'+other),false);assert.equal(reopened.unread()[conversation],1);assert.equal(reopened.filePolicy(conversation),'ask');assert.equal(reopened.list().pins[conversation],true);assert.equal(reopened.list().muted[conversation],true);
+  assert.throws(()=>reopened.conversationState(conversation,{muted:'yes'}),/Invalid mute/);assert.equal(reopened.isMuted(conversation),true);
+  reopened.conversationState(conversation,{muted:false});assert.equal(new ChatStore(options).isMuted(conversation),false);assert.equal(reopened.unread()[conversation],1);assert.deepEqual(reopened.list().pinOrder,[conversation]);
+});

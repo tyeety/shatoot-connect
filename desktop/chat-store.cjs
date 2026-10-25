@@ -83,20 +83,22 @@ class ChatStore {
     return this.change(data => { const token = crypto.randomUUID(); data.attachments[token] = { conversation, message, files }; return token; });
   }
   list() {
-    const data = this.load(); return { filePolicies: {...data.filePolicies}, pins:{...data.pins},pinOrder:[...(data.pinOrder||[])],lastSelected:data.lastSelected||'', unread:this.unread(), contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => !m.deleted && m.conversation === id).at(-1) })) };
+    const data = this.load(); return { filePolicies: {...data.filePolicies}, muted:{...data.muted}, pins:{...data.pins},pinOrder:[...(data.pinOrder||[])],lastSelected:data.lastSelected||'', unread:this.unread(), contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => !m.deleted && m.conversation === id).at(-1) })) };
   }
   reorderPins(order) {
     const pins=Object.keys(this.load().pins||{});
     if(!Array.isArray(order)||order.length!==pins.length||new Set(order).size!==order.length||order.some(id=>!pins.includes(id)))throw new Error('Pinned list changed. Try again.');
     return this.change(next=>{next.pinOrder=[...order];});
   }
-  conversationState(conversation, {pinned,selected,read,readThrough}={}) {
+  conversationState(conversation, {pinned,muted,selected,read,readThrough}={}) {
     const data=this.load();
     if(typeof conversation!=='string'||!/^([pg]):[a-f0-9-]{36}$/i.test(conversation)||!(conversation.startsWith('p:')?data.contacts[conversation.slice(2)]:data.groups[conversation.slice(2)]))throw new Error('Unknown conversation.');
     if(pinned!==undefined&&typeof pinned!=='boolean')throw new Error('Invalid pin setting.');
-    const latest=Math.max(0,...data.messages.filter(m=>m.conversation===conversation).map(m=>m.receivedAt)),readAt=Number.isSafeInteger(readThrough)&&readThrough>=0?Math.min(latest,readThrough):latest;if(pinned===undefined&&(!selected||data.lastSelected===conversation)&&(!read||(data.readAt?.[conversation]||0)>=readAt))return;
-    return this.change(next=>{if(pinned!==undefined){next.pins||={};next.pinOrder||=Object.keys(next.pins);if(pinned){next.pins[conversation]=true;if(!next.pinOrder.includes(conversation))next.pinOrder.push(conversation);}else{delete next.pins[conversation];next.pinOrder=next.pinOrder.filter(id=>id!==conversation);}}if(selected)next.lastSelected=conversation;if(read){next.readAt||={};next.readAt[conversation]=Math.max(next.readAt[conversation]||0,readAt);}});
+    if(muted!==undefined&&typeof muted!=='boolean')throw new Error('Invalid mute setting.');
+    const latest=Math.max(0,...data.messages.filter(m=>m.conversation===conversation).map(m=>m.receivedAt)),readAt=Number.isSafeInteger(readThrough)&&readThrough>=0?Math.min(latest,readThrough):latest;if(pinned===undefined&&(muted===undefined||!!data.muted?.[conversation]===muted)&&(!selected||data.lastSelected===conversation)&&(!read||(data.readAt?.[conversation]||0)>=readAt))return;
+    return this.change(next=>{if(muted!==undefined){next.muted||={};if(muted)next.muted[conversation]=true;else delete next.muted[conversation];}if(pinned!==undefined){next.pins||={};next.pinOrder||=Object.keys(next.pins);if(pinned){next.pins[conversation]=true;if(!next.pinOrder.includes(conversation))next.pinOrder.push(conversation);}else{delete next.pins[conversation];next.pinOrder=next.pinOrder.filter(id=>id!==conversation);}}if(selected)next.lastSelected=conversation;if(read){next.readAt||={};next.readAt[conversation]=Math.max(next.readAt[conversation]||0,readAt);}});
   }
+  isMuted(conversation){return this.load().muted?.[conversation]===true;}
   unread(){const data=this.load(),counts={};for(const m of data.messages)if(m.sender!==this.self&&!m.deleted&&m.receivedAt>(data.readAt?.[m.conversation]||0))counts[m.conversation]=(counts[m.conversation]||0)+1;return counts;}
   filePolicy(conversation, mode) {
     const data=this.load();

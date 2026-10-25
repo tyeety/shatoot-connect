@@ -13,6 +13,18 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.7 — 2026-10-25
+
+### Added
+
+- Each private or group chat has a Mute/Unmute notifications bell in its header and a muted indicator in the contact list. The local preference persists in encrypted history. New text, voice and completed-file popups are suppressed while messages, transfers, unread badges, history and explicit approval policies keep working.
+- Chat message body text can be selected and copied as plain text, including partial selections. Other interface labels remain non-selectable and message text does not become draggable.
+
+### Fixed
+
+- All eight vertical Settings tabs share one delegated click handler. The first four static tabs work again; dynamic tabs no longer have a second independent click handler. Physical click regression checks verify one selection per tab.
+- Contact selection uses its selected background/border instead of stacking a mouse-down scale with a second click pulse. Clicking an already selected contact no longer resets its history or scroll position. Settings tabs also use their selected state instead of a scale pulse.
+
 ## 0.20.6 — 2026-10-25
 
 ### Fixed

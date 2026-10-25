@@ -34,8 +34,11 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,`messenger.select('${conversation}').then(()=>true)`);
   const click=async selector=>{chat.show();chat.focus();const point=await run(chat,`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);chat.webContents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});await pause(250);chat.webContents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});};
   const alternate=await run(chat,"collaboration.createGroup('Pointer switching fixture',[]).then(g=>g.id)");await until(()=>run(chat,`!!document.querySelector('[data-conversation="g:${alternate}"]')`));
+  const originalConversationState=owner.chatStore.conversationState,selectionCalls=[];owner.chatStore.conversationState=function(id,value){if(value?.selected)selectionCalls.push(id);return originalConversationState.call(this,id,value);};
   await click(`[data-conversation="g:${alternate}"] .chat-conversation`);await until(()=>run(chat,`window.chatSelected==='g:${alternate}'`));
   await click(`[data-conversation="${conversation}"] .chat-conversation`);await until(()=>run(chat,`window.chatSelected==='${conversation}'`));
+  await click(`[data-conversation="${conversation}"] .chat-conversation`);await pause(100);owner.chatStore.conversationState=originalConversationState;
+  if(selectionCalls.length!==2||!await run(chat,"!document.querySelector('.chat-conversation.action-feedback')&&getComputedStyle(document.querySelector('.chat-conversation[aria-pressed=true]')).transform==='none'"))throw Error('Contact selection repeated or showed a second press animation');
   await run(chat,"document.querySelector('#chat-text').focus();true");
   await click(`[data-conversation="${conversation}"] .chat-pin`);await until(()=>owner.chatStore.list().pins[conversation]);
   await until(()=>run(chat,"document.querySelector('.chat-pin[aria-pressed=true]')!==null"));
@@ -119,7 +122,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   const pastedImage=peer.chatStore.history({conversation:sentConversation}).filter(r=>r.text===image.text&&r.attachment).at(-1);
   if(!fs.readFileSync(peer.chatStore.files(pastedImage.attachment)[0]).equals(fs.readFileSync(owner.chatStore.files(image.attachment)[0])))throw Error('Copied file Paste changed file bytes');
   log('File Copy retained original source paths on the simulated clipboard; Paste resent the actual file over RTC with identical bytes');
-  if(!await run(chat,"(()=>{const item=document.querySelector('.chat-message p');return !item.dispatchEvent(new Event('selectstart',{bubbles:true,cancelable:true}))&&getComputedStyle(document.querySelector('#chat-text')).userSelect==='text'})()"))throw Error('App text selection or editable fields regressed');
+  if(!await run(chat,"(()=>{const item=[...document.querySelectorAll('.chat-message p')].find(p=>p.textContent==='Focused text message'),range=document.createRange(),selection=getSelection(),data=new DataTransfer();if(!item||!item.dispatchEvent(new Event('selectstart',{bubbles:true,cancelable:true}))||getComputedStyle(item).userSelect!=='text')return false;range.selectNodeContents(item);selection.removeAllRanges();selection.addRange(range);document.dispatchEvent(new ClipboardEvent('copy',{clipboardData:data,bubbles:true,cancelable:true}));selection.removeAllRanges();return data.getData('text/plain')==='Focused text message'&&!document.querySelector('#chat-title').dispatchEvent(new Event('selectstart',{bubbles:true,cancelable:true}))&&getComputedStyle(document.querySelector('#chat-text')).userSelect==='text'})()"))throw Error('Message selection/plain-text Copy or protected UI labels regressed');
   log('Background text notifies, focused text stays in chat, clipboard image round-trip and retained sender source passed');
   const changedId=await run(chat,`collaboration.send('${conversation}','Editable fixture').then(m=>m.id)`);
   await until(()=>peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId));
@@ -183,6 +186,12 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,`messenger.select('${conversation}').then(()=>true)`);
   clear();
   const send=async name=>{const file=path.join(artifacts,name);fs.writeFileSync(file,'Received content '+name);await run(viewer,`collaboration.sendFiles('p:${owner.identity.deviceId}','sources',${JSON.stringify([file])}).then(()=>true)`);await until(()=>owner.chatStore.history({conversation}).some(row=>row.text===name&&row.attachment));const row=owner.chatStore.history({conversation}).find(r=>r.text===name);const received=owner.chatStore.files(row.attachment)[0];if(fs.readFileSync(received,'utf8')!=='Received content '+name||path.dirname(path.dirname(received))!==app.getPath('downloads'))throw new Error('Received file integrity/Downloads destination failed');};
+  await run(chat,"document.querySelector('#chat-mute').click();true");await until(()=>owner.chatStore.isMuted(conversation));await until(()=>run(chat,"document.querySelector('#chat-mute').getAttribute('aria-pressed')==='true'&&!!document.querySelector('.conversation-muted')"));
+  clear();viewer.show();viewer.focus();await until(()=>!chat.isFocused());
+  await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Muted incoming text').then(()=>true)`);await send('muted-incoming-file.txt');await pause(300);
+  if([...notices.entries.values()].some(r=>r.owner===host)||!owner.chatStore.unread()[conversation])throw Error('Muted chat notified or lost its unread badge');
+  chat.show();chat.focus();await run(chat,"document.querySelector('#chat-mute').click();true");await until(()=>!owner.chatStore.isMuted(conversation));await until(()=>run(chat,"!document.querySelector('.conversation-muted')"));
+  log('Mute icon and preference suppress background text/file notifications while preserving received Downloads bytes, history and unread counts');
   clear();chat.show();chat.focus();await run(chat,"document.querySelector('#chat-search').value='non-matching search';document.querySelector('#chat-text').focus();true");await until(()=>chat.isFocused()&&owner.chatViews?.get(chat.webContents.id)?.active);
   await send('active-chat.txt');await until(()=>run(chat,"document.querySelector('#chat-messages').textContent.includes('active-chat.txt')"));
   if([...notices.entries.values()].some(r=>r.owner===host&&r.data.message.includes('Files received')))throw new Error('Focused selected chat received a redundant notification');
