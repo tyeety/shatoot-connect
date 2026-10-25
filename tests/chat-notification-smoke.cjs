@@ -176,7 +176,10 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
     await until(()=>thirdState.chatStore.list().groups.some(g=>g.id===groupId&&g.name==='Renamed group'&&g.description==='Updated details'));
     await run(host,`collaboration.createGroup('Renamed group',['${peer.identity.deviceId}','${thirdId}'],'${groupId}',{avatar:${JSON.stringify(avatar)},background:${JSON.stringify(avatar)},description:'Updated details'}).then(()=>true)`);
     await until(()=>peer.chatStore.list().groups.some(g=>g.id===groupId&&g.avatar===avatar&&g.background===avatar));
-    await until(()=>run(chat,"document.querySelector('#chat-messages').style.backgroundImage.includes('data:image/png')"));
+    await until(()=>run(chat,`document.querySelector('[data-conversation="g:${groupId}"] .chat-conversation .desktop-preview')?.getAttribute('src')===${JSON.stringify(avatar)}`));
+    if(!await run(chat,"!document.querySelector('#chat-messages').style.backgroundImage"))throw Error('Group card background leaked into the message timeline');
+    await run(viewer,`messenger.open();messenger.select('g:${groupId}').then(()=>true)`);
+    await until(()=>run(viewer,`document.querySelector('[data-conversation="g:${groupId}"] .desktop-preview')?.getAttribute('src')===${JSON.stringify(avatar)}`));
     const groupMessage=await run(viewer,`collaboration.send('g:${groupId}','Member original').then(m=>m.id)`);await until(()=>thirdState.chatStore.history({conversation:'g:'+groupId}).some(m=>m.id===groupMessage));
     await run(viewer,`collaboration.changeMessage('g:${groupId}','${groupMessage}','Member edited').then(()=>true)`);await until(()=>thirdState.chatStore.history({conversation:'g:'+groupId}).some(m=>m.id===groupMessage&&m.text==='Member edited'));
     await run(third,`collaboration.close(collaboration.peer('${owner.identity.deviceId}'));true`);await until(()=>run(host,`!collaboration.peer('${thirdId}')`));

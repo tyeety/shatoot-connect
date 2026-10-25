@@ -13,6 +13,13 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.9 — 2026-10-25
+
+### Fixed
+
+- A group's chosen background now appears on its contact card in the chat list, underneath the same dark purple readability overlay used for computer cards. It no longer changes the message timeline. Existing saved group backgrounds are reused automatically, including on other group members' clients.
+- Group background actions explicitly say card background in English and Persian. The chat UI regression check verifies the owner and member cards receive the image while the timeline remains unchanged.
+
 ## 0.20.8 — 2026-10-25
 
 ### Fixed
