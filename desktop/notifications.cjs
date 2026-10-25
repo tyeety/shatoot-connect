@@ -1,8 +1,8 @@
 'use strict';
 const path=require('node:path');
-function createNotifications({BrowserWindow,ipcMain,screen,language=()=> 'en',activity=()=>true,now=Date.now,timers=globalThis}){
+function createNotifications({BrowserWindow,ipcMain,screen,language=()=> 'en',activity=()=>true,now=Date.now,timers=globalThis,windowsChanged=()=>{}}){
   const entries=new Map(),waiting=[],tasks=new Set(),reserved=new Map();
-  const width=420,height=230,gap=12,margin=16;
+  const width=360,height=230,gap=12,margin=16;
   let closed=false,pumping=false,lastTick=now(),sequence=0,listening=false;
   const rank=task=>task.data.priority==='critical'?0:task.data.urgent?1:2;
   function entry(event){const record=entries.get(event.sender.id);if(!record)return null;if(event.senderFrame!==event.sender.mainFrame)throw new Error('Unauthorized notification.');return record;}
@@ -25,15 +25,15 @@ function createNotifications({BrowserWindow,ipcMain,screen,language=()=> 'en',ac
     bottom=Math.max(area.y+margin+90,bottom);
     return{x:area.x+area.width-Math.min(width,area.width-2*margin)-margin,bottom};
   }
-  function position(){const{x,bottom}=geometry();let offset=0;for(const task of entries.values()){const taskWidth=Math.min(task.width||width,screen.getPrimaryDisplay().workArea.width-2*margin);const bounds={x:screen.getPrimaryDisplay().workArea.x+screen.getPrimaryDisplay().workArea.width-margin-taskWidth,y:bottom-(task.height||height)-offset,width:taskWidth,height:task.height||height};if(task.win.setBounds)task.win.setBounds(bounds);else task.win.setPosition(bounds.x,bounds.y);offset+=(task.height||height)+gap;}}
-  function removeWindow(task){const win=task.win;task.win=null;task.visible=false;if(!win)return;entries.delete(win.webContents.id);if(!win.isDestroyed())win.destroy();}
-  function stopFade(task){if(!task.fading)return;timers.clearTimeout(task.fadeTimer);task.fading=false;task.remaining=Math.max(2000,task.remaining);task.win?.webContents.send('notice-fade',false);}
+  function position(){const{x,bottom}=geometry();let offset=0;for(const task of entries.values()){if(!task.win||task.win.isDestroyed())continue;const taskWidth=Math.min(task.width||width,screen.getPrimaryDisplay().workArea.width-2*margin);const bounds={x:screen.getPrimaryDisplay().workArea.x+screen.getPrimaryDisplay().workArea.width-margin-taskWidth,y:bottom-(task.height||height)-offset,width:taskWidth,height:task.height||height};if(task.win.setBounds)task.win.setBounds(bounds);else task.win.setPosition(bounds.x,bounds.y);offset+=(task.height||height)+gap;}}
+  function removeWindow(task){const win=task.win;task.win=null;task.visible=false;if(!win)return;entries.delete(task.contentsId);windowsChanged();if(!win.isDestroyed())win.destroy();}
+  function stopFade(task){if(!task.fading)return;timers.clearTimeout(task.fadeTimer);task.fading=false;task.remaining=Math.max(2000,task.remaining);if(task.win&&!task.win.isDestroyed())task.win.webContents.send('notice-fade',false);}
   function finish(task,response){if(task.done)return;task.done=true;tasks.delete(task);timers.clearTimeout(task.deadline);timers.clearTimeout(task.fadeTimer);const index=waiting.indexOf(task);if(index>=0)waiting.splice(index,1);task.owner?.removeListener('closed',task.ownerClosed);removeWindow(task);task.resolve({response});pump();}
   function suspend(task){stopFade(task);removeWindow(task);waiting.push(task);}
   function reveal(task){if(!task.ready||!task.measured||task.done||!task.win||task.visible)return;position();task.win.setAlwaysOnTop(true,'screen-saver');task.win.showInactive();task.visible=true;}
   function present(task){task.ready=false;task.measured=false;
     const win=new BrowserWindow({width:task.width||width,height:task.height||height,show:false,frame:false,resizable:false,skipTaskbar:true,alwaysOnTop:true,transparent:true,backgroundColor:'#00000000',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,backgroundThrottling:false}});
-    task.win=win;entries.set(win.webContents.id,task);win.on('closed',()=>{if(task.win===win)task.finish(task.cancel);});win.setContentProtection(true);win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',event=>event.preventDefault());
+    task.win=win;task.contentsId=win.webContents.id;entries.set(task.contentsId,task);windowsChanged();win.on('closed',()=>{if(task.win===win)task.finish(task.cancel);});win.setContentProtection(true);win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',event=>event.preventDefault());
     win.once('ready-to-show',()=>{if(task.win!==win||task.done)return;task.ready=true;reveal(task);});
     win.loadFile(path.join(__dirname,'ui/notification.html')).catch(()=>task.finish(task.cancel));
   }

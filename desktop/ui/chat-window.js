@@ -23,9 +23,8 @@
   window.CollaborationClient = ChatWindowClient;
   window.i18n.setLanguage(initial.language);
   const messenger = window.messenger = window.installMessenger({ api, self: initial.self, detached: true, remote: () => api.showMain() });
-  api.onChatSnapshot(snapshot => { changed?.(snapshot); messenger.renderDiscovery(snapshot.discovery); if (snapshot.selected && snapshot.selected !== initial.selected) { initial.selected = snapshot.selected; messenger.select(snapshot.selected); } });
+  api.onChatSnapshot(snapshot => { changed?.(snapshot); messenger.renderDiscovery(snapshot.discovery); });
   messenger.renderDiscovery(initial.discovery); messenger.open();
-  if (initial.selected) await messenger.select(initial.selected);
   document.getElementById('messenger-dialog').addEventListener('close', () => api.closeChat());
   const navigate=async()=>{const target=await api.pendingChatTarget();if(target)await messenger.navigate(target);};api.onChatTarget(()=>navigate().catch(error=>window.actionNotice(error.message)));await navigate();
   window.shatootconnectChatReady = true;

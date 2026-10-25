@@ -3,7 +3,9 @@ using System.Text.Json;
 
 // Narrow local stdin protocol. No shell execution or network listener.
 Native.SetProcessDpiAwarenessContext(new IntPtr(-4));
+if(args.Length==2&&args[0]=="--virtual-clipboard-self-test"){Environment.ExitCode=VirtualClipboard.SelfTest(args[1]);return;}
 if (args.Contains("--self-test")) { Environment.ExitCode = IndependentPointer.SelfTest(); return; }
+if(args.Contains("--menu-self-test")){Environment.ExitCode=IndependentPointer.MenuSelfTest();return;}
 if (args.Contains("--keyboard-monitor")) { KeyboardSync.Monitor(); return; }
 if (args.Contains("--clipboard")) { ClipboardBridge.Run(); return; }
 if (args.Contains("--wallpaper")) { Wallpaper.Write(); return; }
@@ -47,7 +49,7 @@ try {
                 sharedCursor = m.TryGetProperty("sharedCursor", out var shared) && shared.ValueKind == JsonValueKind.True;
             } else if (type == "release") Release();
             else if (type == "exclude-window") { var value = m.GetProperty("handle").GetString(); if (ulong.TryParse(value, System.Globalization.NumberStyles.HexNumber, null, out var handle)) independentPointer.ExcludedWindow = unchecked((IntPtr)(long)handle); }
-            else if (type == "exclude-windows") { independentPointer.ExcludedWindows.Clear(); foreach (var item in m.GetProperty("handles").EnumerateArray().Take(8)) if (ulong.TryParse(item.GetString(), System.Globalization.NumberStyles.HexNumber, null, out var handle)) independentPointer.ExcludedWindows.Add(unchecked((IntPtr)(long)handle)); }
+            else if (type == "exclude-windows") { independentPointer.ExcludedWindows.Clear(); foreach (var item in m.GetProperty("handles").EnumerateArray().Take(64)) if (ulong.TryParse(item.GetString(), System.Globalization.NumberStyles.HexNumber, null, out var handle)) independentPointer.ExcludedWindows.Add(unchecked((IntPtr)(long)handle)); }
             else if (type == "layout-stop") keyboardSync.Restore();
             else if (type == "layout") { var layout = m.GetProperty("layout").GetString() ?? ""; Console.WriteLine(JsonSerializer.Serialize(new { type = "layout-status", layout, ok = keyboardSync.Apply(layout) })); }
             else if (type == "move" || type == "button") {

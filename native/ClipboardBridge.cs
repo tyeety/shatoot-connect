@@ -27,18 +27,30 @@ static class ClipboardBridge {
         if (SetClipboardData(format, memory) == IntPtr.Zero) { GlobalFree(memory); throw new IOException("Clipboard write failed."); }
     }
     public static void Run() {
+        var thread=new Thread(RunSta);thread.SetApartmentState(ApartmentState.STA);thread.Start();thread.Join();
+    }
+    static void RunSta() {
+        VirtualClipboard.Initialize();
+        var commands=new System.Collections.Concurrent.ConcurrentQueue<string>();bool ended=false;
+        var reader=new Thread(()=>{string? line;while((line=Console.ReadLine())!=null){if(VirtualClipboard.Complete(line))continue;commands.Enqueue(line);}ended=true;VirtualClipboard.Cancel();});reader.IsBackground=true;reader.Start();
         var owner = CreateWindowEx(0, "STATIC", "Shatoot clipboard", 0, 0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
         try {
-            string? line;
-            while ((line = Console.ReadLine()) != null) {
+            while (!ended) {
+                VirtualClipboard.Pump();
+                if(!commands.TryDequeue(out var line)){Thread.Sleep(5);continue;}
                 if (line.Length > 2200000) continue;
                 string id = ""; bool opened = false;
                 try {
                     using var doc = JsonDocument.Parse(line); var m = doc.RootElement; id = m.GetProperty("id").GetString() ?? "";
+                    if(m.GetProperty("op").GetString()=="offer"){
+                        if(m.TryGetProperty("expectedSeq",out var offerSeq)&&offerSeq.ValueKind==JsonValueKind.Number&&offerSeq.GetUInt32()!=GetClipboardSequenceNumber()){Console.WriteLine(JsonSerializer.Serialize(new{id,seq=GetClipboardSequenceNumber(),skipped=true}));continue;}
+                        VirtualClipboard.Offer(m);Console.WriteLine(JsonSerializer.Serialize(new{id,seq=GetClipboardSequenceNumber()}));continue;
+                    }
                     for (int i = 0; i < 20 && !(opened = OpenClipboard(owner)); i++) Thread.Sleep(10);
                     if (!opened) throw new IOException("Clipboard is busy.");
                     string op = m.GetProperty("op").GetString() ?? "";
                     if (op == "write") {
+                        if(m.TryGetProperty("expectedSeq",out var expected)&&expected.ValueKind==JsonValueKind.Number&&expected.GetUInt32()!=GetClipboardSequenceNumber()){Console.WriteLine(JsonSerializer.Serialize(new{id,seq=GetClipboardSequenceNumber(),skipped=true}));continue;}
                         byte[] bytes; uint format;
                         if (m.TryGetProperty("files", out var paths)) {
                             var files = paths.EnumerateArray().Select(p => p.GetString() ?? "").ToArray();
@@ -57,11 +69,11 @@ static class ClipboardBridge {
                         }
                         string text = ""; var handle = GetClipboardData(13);
                         if (files.Count == 0 && handle != IntPtr.Zero && GlobalSize(handle).ToUInt64() <= 2000002) { var data = GlobalLock(handle); if (data != IntPtr.Zero) { try { text = Marshal.PtrToStringUni(data) ?? ""; } finally { GlobalUnlock(handle); } } }
-                        Console.WriteLine(JsonSerializer.Serialize(new { id, seq = GetClipboardSequenceNumber(), text, files, supported = files.Count > 0 || (handle != IntPtr.Zero && GlobalSize(handle).ToUInt64() <= 2000002) }));
+                        Console.WriteLine(JsonSerializer.Serialize(new { id, seq = GetClipboardSequenceNumber(), text, files, remote=VirtualClipboard.IsCurrent,supported = VirtualClipboard.IsCurrent || files.Count > 0 || (handle != IntPtr.Zero && GlobalSize(handle).ToUInt64() <= 2000002) }));
                     } else throw new IOException("Invalid clipboard operation.");
                 } catch (Exception e) { Console.WriteLine(JsonSerializer.Serialize(new { id, error = e.Message })); }
                 finally { if (opened) CloseClipboard(); }
             }
-        } finally { if (owner != IntPtr.Zero) DestroyWindow(owner); }
+        } finally { VirtualClipboard.Shutdown();if (owner != IntPtr.Zero) DestroyWindow(owner); }
     }
 }

@@ -43,6 +43,7 @@ sealed class IndependentPointer {
         int hit = 1;
         if (window == root && SendMessageTimeout(window, 0x84, IntPtr.Zero, Coordinates(px, py), 2, 20, out var result) != IntPtr.Zero) hit = result.ToInt32();
         var className = new StringBuilder(256); GetClassName(window, className, className.Capacity);
+        if(className.ToString()=="#32768")hit=1;
         bool nativeButton = className.ToString().Equals("Button", StringComparison.OrdinalIgnoreCase) || className.ToString().Contains(".BUTTON.", StringComparison.OrdinalIgnoreCase);
         return new Target(window, root, hit, bounds, px, py, nativeButton);
     }
@@ -67,9 +68,22 @@ sealed class IndependentPointer {
             if (pressed.ContainsKey(button)) return;
             target = At(x, y); if (target is null) return;
             pressed[button] = target;
-            SetForegroundWindow(target.Root);
+            var targetClass=new StringBuilder(256);GetClassName(target.Root,targetClass,targetClass.Capacity);
+            // Popup menus belong to the existing foreground owner. Activating
+            // the popup itself dismisses Windows' menu loop before the click.
+            if(targetClass.ToString()!="#32768")SetForegroundWindow(target.Root);
         } else {
             if (!pressed.Remove(button, out target)) return;
+        }
+        var menuClass=new StringBuilder(256);GetClassName(target.Root,menuClass,menuClass.Capacity);
+        if(button==0&&menuClass.ToString()=="#32768"){
+            if(!down)try{
+                // System menu loops consult the physical cursor, so posted
+                // clicks cannot reliably invoke their items. MSAA invokes the
+                // item at the remote point without moving that cursor.
+                if(AccessibleObjectFromPoint(new POINT{X=x,Y=y},out var accessible,out var child)==0){try{((dynamic)accessible).accDoDefaultAction(child);return;}finally{if(Marshal.IsComObject(accessible))Marshal.ReleaseComObject(accessible);}}
+            }catch(COMException){}catch(Microsoft.CSharp.RuntimeBinder.RuntimeBinderException){}
+            return;
         }
         if (target.Hit != 1) {
             if (!down && button == 0) {
@@ -124,6 +138,17 @@ sealed class IndependentPointer {
             Console.WriteLine(JsonSerializer.Serialize(new { ok = english && persian && back && restored, english, persian, restored }));
             return english && persian && back && restored ? 0 : 1;
         } finally { sync.Restore(); DestroyWindow(window); UnregisterClass(name, wc.Instance); GC.KeepAlive(procedure); }
+    }
+
+    public static int MenuSelfTest(){
+        WindowProc procedure=(w,m,wp,lp)=>DefWindowProc(w,m,wp,lp);
+        string name="ShatootMenuTest"+Environment.ProcessId;var wc=new WNDCLASS{ClassName=name,Procedure=procedure,Instance=GetModuleHandle(null)};RegisterClass(ref wc);
+        var host=CreateWindowEx(0,name,"Shatoot menu check",0x80C80000,80,80,400,250,IntPtr.Zero,IntPtr.Zero,wc.Instance,IntPtr.Zero);var menu=CreatePopupMenu();AppendMenu(menu,0,(UIntPtr)101,"First");AppendMenu(menu,0,(UIntPtr)102,"Second");
+        ShowWindow(host,5);SetForegroundWindow(host);GetCursorPos(out var before);int originalMoves=Native.CursorMoveCount;
+        using var timer=new Timer(_=>{var popup=FindWindow("#32768",null);if(popup==IntPtr.Zero)return;if(GetMenuItemRect(host,menu,1,out var rect)){var p=new IndependentPointer();p.Button(0,true,(rect.Left+rect.Right)/2,(rect.Top+rect.Bottom)/2);p.Button(0,false,(rect.Left+rect.Right)/2,(rect.Top+rect.Bottom)/2);}},null,300,Timeout.Infinite);
+        using var cancel=new Timer(_=>PostMessage(host,0x1f,IntPtr.Zero,IntPtr.Zero),null,3000,Timeout.Infinite);
+        try{uint command=TrackPopupMenuEx(menu,0x100,150,150,host,IntPtr.Zero);bool ok=command==102&&Native.CursorMoveCount==originalMoves;Console.WriteLine(JsonSerializer.Serialize(new{ok,command,cursorMovedByHelper=Native.CursorMoveCount!=originalMoves}));return ok?0:1;}
+        finally{DestroyMenu(menu);DestroyWindow(host);UnregisterClass(name,wc.Instance);GC.KeepAlive(procedure);}
     }
 
     // A real Win32 button proves message delivery and checks that moving/clicking,
@@ -201,4 +226,11 @@ sealed class IndependentPointer {
     [DllImport("user32.dll")] static extern bool TranslateMessage(ref MSG msg);
     [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref MSG msg);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string? name);
+    [DllImport("user32.dll")]static extern IntPtr CreatePopupMenu();
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern bool AppendMenu(IntPtr menu,uint flags,UIntPtr id,string text);
+    [DllImport("user32.dll")]static extern uint TrackPopupMenuEx(IntPtr menu,uint flags,int x,int y,IntPtr owner,IntPtr parameters);
+    [DllImport("user32.dll")]static extern bool DestroyMenu(IntPtr menu);
+    [DllImport("user32.dll")]static extern bool GetMenuItemRect(IntPtr window,IntPtr menu,uint index,out RECT rect);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern IntPtr FindWindow(string name,string? title);
+    [DllImport("oleacc.dll")]static extern int AccessibleObjectFromPoint(POINT point,[MarshalAs(UnmanagedType.Interface)]out object accessible,[MarshalAs(UnmanagedType.Struct)]out object child);
 }

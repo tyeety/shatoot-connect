@@ -51,3 +51,10 @@ test('group owner keeps an offline relay queue and corrupt history is retained i
   const damaged = Buffer.from('corrupt encrypted history'); fs.writeFileSync(options.file, damaged);
   assert.throws(() => new ChatStore(options).list(), /has been kept/); assert.deepEqual(fs.readFileSync(options.file), damaged);
 });
+
+test('pins, last selection and unread watermarks persist independently of remote metadata',t=>{
+  const {store,options,self,peer}=fixture(t),conversation=`p:${peer}`,incoming=()=>({id:crypto.randomUUID(),conversation,sender:peer,name:'Peer',kind:'text',text:'Hi'});
+  const first=store.append(incoming()).message;store.append(first);assert.equal(store.unread()[conversation],1);store.append({...incoming(),sender:self},true);assert.equal(store.unread()[conversation],1);
+  store.conversationState(conversation,{pinned:true,selected:true,read:true});let reopened=new ChatStore(options);assert.equal(reopened.list().pins[conversation],true);assert.equal(reopened.list().lastSelected,conversation);assert.equal(reopened.unread()[conversation],undefined);
+  const second=store.append(incoming()).message;assert.equal(store.unread()[conversation],1);store.mutate({id:crypto.randomUUID(),message:second.id,conversation,sender:peer,removed:true,revision:1});assert.equal(store.unread()[conversation],undefined);store.conversationState(conversation,{pinned:false});assert.equal(store.list().pins[conversation],undefined);assert.throws(()=>store.conversationState('p:'+crypto.randomUUID(),{read:true}),/Unknown/);
+});

@@ -571,7 +571,7 @@ async function renderComputers(){
     const marker=document.createElement('span');marker.className='computer-kind mi '+(record.saved?'star_outline':'schedule');marker.title=tr(record.saved?'Saved computer':'Recent connection');marker.setAttribute('role','img');marker.setAttribute('aria-label',marker.title);
     const connectButton=document.createElement('button');connectButton.className=record.saved?'favorite-connect':'history-connect';connectButton.disabled=role!=='idle';
     const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/app-icon.png';avatar.alt='';
-    const name=document.createElement('b');name.textContent=record.displayName||record.name;const address=document.createElement('small');address.textContent=record.address;address.dir='ltr';connectButton.append(avatar,name,address);
+    const name=document.createElement('b');name.textContent=record.displayName||record.name;const dot=document.createElement('span');const live=window.collaboration?.peer(record.deviceId)||window.collaboration?.nearby?.find(p=>p.deviceId===record.deviceId);dot.className='presence-dot presence-'+(live?record.status||'available':'offline');name.append(dot);const address=document.createElement('small');address.textContent=record.address;address.dir='ltr';connectButton.append(avatar,name,address);
     const resolve=()=>record.saved?api.favoriteGet(record.id):api.connections('get',record.id);
     connectButton.onclick=guarded(async()=>connectRecord(await resolve()));
     const actions=document.createElement('div');actions.className='favorite-actions';

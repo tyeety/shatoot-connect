@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { ChatStore } = require('./chat-store.cjs');
 const { Transfers } = require('./transfers.cjs');
 const { UUID } = require('./discovery.cjs');
-function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, clipboardRead=async()=>({files:[]}), decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {}, messageReceived = () => {} }) {
+function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, clipboardRead=async()=>({files:[]}), decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {}, messageReceived = () => {},catalogChanged=()=>{} }) {
   function store(s) {
     if (!s.identity) throw new Error('The device is not initialized.');
     return s.chatStore ||= new ChatStore({ file: path.join(app.getPath('userData'), `chat-${s.identity.deviceId}.dat`), self: s.identity.deviceId,
@@ -14,9 +14,10 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
   function grant(s, id) { const value = s.chatGrants?.get(id); if (!value) throw new Error('Chat permission is required.'); return value; }
   ipcMain.handle('collaboration', async (event, op, value = {}) => {
     const s = state(event), history = store(s);
-    if(op==='list'){const list=history.list();return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
+    if(op==='list'){const list=history.list();catalogChanged(s);return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
     if(op==='message')return history.history({conversation:value.conversation,limit:100}).find(m=>m.id===value.id)||history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation);
     if(op==='history')return history.history(value).map(m=>({...m,displayName:decorateComputer({deviceId:m.sender,name:m.name}).displayName||m.name}));
+    if(op==='conversation-state')return history.conversationState(value.conversation,value);
     if (op === 'file-policy') return history.filePolicy(value.conversation,value.mode);
     if (op === 'pending') return history.pending(value.peer);
     if(op==='peer-preview'){const g=grant(s,value.session);if(value.previewKind!=='wallpaper')return false;if(typeof value.preview!=='string'||value.preview.length>90000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.preview))throw new Error('Invalid desktop preview.');rememberComputer({deviceId:g.peer.deviceId,preview:value.preview,previewKind:'wallpaper'},undefined,true);return true;}

@@ -51,3 +51,7 @@ test('clicking a passive notice activates its destination once; Hide and critica
  const hidden=f.api.toast(f.owner,'Hidden',{onActivate:()=>opened++});await f.ready();f.hide([...f.api.entries.values()][0]);await hidden;assert.equal(opened,1);
  const question=f.api.showMessageBox(f.owner,{type:'question',buttons:['Allow','Reject'],cancelId:1});await f.ready();const critical=[...f.api.entries.values()][0];f.listeners.get('notice-open')(f.event(critical));assert.equal(critical.done,undefined);f.answer(critical,1);assert.equal((await question).response,1);
 });
+
+test('an OS-destroyed notice is removed without touching destroyed webContents',async t=>{
+ const f=fixture(t),done=f.api.toast(f.owner,'Closing');await f.ready();const task=[...f.api.entries.values()][0],win=task.win;win.destroyed=true;Object.defineProperty(win,'webContents',{get(){throw Error('Object has been destroyed');}});win.emit('closed');await done;assert.equal(f.api.entries.size,0);f.screen.emit('display-metrics-changed');
+});

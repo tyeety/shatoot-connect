@@ -13,3 +13,8 @@ test('saved ID cards obtain metadata over background chat without a prior chat; 
  f.engine.connect=async route=>{attempts.push(route);};await f.engine.reconnectKnown();assert.equal(attempts.length,1);assert.equal(attempts[0].address,'123456789');assert.equal(attempts[0].type,'id');assert.equal(attempts[0].background,true);
  await f.engine.reconnectKnown();assert.equal(attempts.length,1,'Retry throttle prevents repeated invitations');
 });
+
+test('known ID addresses reuse an incoming or pending chat instead of a duplicate invitation',async()=>{
+ const f=client();await f.engine.ready;const peer=crypto.randomUUID(),active={id:'incoming',peer:{deviceId:peer,id:'123456789'},route:{type:'id',endpoint:'wss://example.test'},channel:{readyState:'open'}};active.promise=Promise.resolve(active);f.engine.sessions.set(active.id,active);assert.equal(await f.engine.connect({type:'id',address:'123 456 789'}),active);assert.equal(f.sent.length,0);
+ f.engine.sessions.clear();f.engine.catalog.contacts=[{deviceId:peer,name:'Peer',route:{type:'id',address:'123456789',endpoint:'wss://example.test'}}];const pending={...active,id:'pending',peer:{deviceId:peer},route:{type:'incoming-lan'},channel:{readyState:'connecting'}};pending.promise=Promise.resolve(pending);f.engine.sessions.set(pending.id,pending);assert.equal(await f.engine.connect({type:'id',address:'123456789'}),pending);assert.equal(f.sent.length,0);
+});

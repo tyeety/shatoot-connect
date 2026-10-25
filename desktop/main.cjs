@@ -108,7 +108,7 @@ function release(s) {
 }
 function syncCursorExclusions(s) {
   if (!s.helper?.stdin.writable) return;
-  const handles = [s.overlay,s.guestCursor].filter(win=>win && !win.isDestroyed()).map(win=>{const h=win.getNativeWindowHandle();return (h.length===8?h.readBigUInt64LE():BigInt(h.readUInt32LE())).toString(16);});
+  const handles = [s.overlay,s.guestCursor,...[...states.values()].map(other=>other.chatWindow),...[...notices.entries.values()].map(record=>record.win)].filter(win=>win && !win.isDestroyed()).map(win=>{const h=win.getNativeWindowHandle();return (h.length===8?h.readBigUInt64LE():BigInt(h.readUInt32LE())).toString(16);});
   s.helper.stdin.write(JSON.stringify({type:'exclude-windows',handles})+'\n');
 }
 function hideGuestCursor(s) {
@@ -181,7 +181,7 @@ function state(event) {
   if (!s || event.senderFrame !== event.sender.mainFrame) throw new Error('Unauthorized IPC');
   return s;
 }
-const notices=require('./notifications.cjs').createNotifications({BrowserWindow,ipcMain,screen,language:()=>settings().language==='fa'?'fa':'en',activity:()=>!app.isReady()||smoke||powerMonitor.getSystemIdleTime()<30});
+const notices=require('./notifications.cjs').createNotifications({BrowserWindow,ipcMain,screen,language:()=>settings().language==='fa'?'fa':'en',windowsChanged:()=>{for(const s of states.values())syncCursorExclusions(s);},activity:()=>!app.isReady()||smoke||powerMonitor.getSystemIdleTime()<30});
 function chatFilesReceived(s,record,files){
   let reading=false;
   for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed()){
@@ -189,14 +189,22 @@ function chatFilesReceived(s,record,files){
     if(win.isVisible()&&!win.isMinimized()&&win.isFocused()&&view?.active&&view.conversation===record.conversation)reading=true;
     win.webContents.send('chat-files-received',{conversation:record.conversation,id:record.id});
   }
+  if(reading)s.chatStore?.conversationState(record.conversation,{read:true});publishUnread(s);
   if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
 }
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
 ipcMain.handle('voice-recording',(event,enabled)=>{
   const s=state(event);if(s.owner||typeof enabled!=='boolean')throw new Error('Invalid microphone request.');
   s.voicePermissions||=new Map();if(enabled)s.voicePermissions.set(event.sender.id,Date.now()+15000);else s.voicePermissions.delete(event.sender.id);
 });
-ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active});});
+function unreadIcon(total){
+  const pixels=Buffer.alloc(32*32*4),digits=['111101101101111','010110010010111','111001111100111','111001111001111','101101111001001','111100111001111','111100111101111','111001001001001','111101111101111','111101111001111'],label=String(Math.min(99,total));
+  for(let y=0;y<32;y++)for(let x=0;x<32;x++)if((x-15.5)**2+(y-15.5)**2<=250){const i=(y*32+x)*4;pixels[i]=209;pixels[i+1]=62;pixels[i+2]=142;pixels[i+3]=255;}
+  const scale=3,left=Math.floor((32-(label.length*4-1)*scale)/2);for(let n=0;n<label.length;n++)for(let y=0;y<5;y++)for(let x=0;x<3;x++)if(digits[Number(label[n])][y*3+x]==='1')for(let dy=0;dy<scale;dy++)for(let dx=0;dx<scale;dx++){const i=((8+y*scale+dy)*32+left+(n*4+x)*scale+dx)*4;pixels.fill(255,i,i+4);}
+  return require('electron').nativeImage.createFromBitmap(pixels,{width:32,height:32});
+}
+function publishUnread(s){const unread=s.chatStore?.unread()||{},total=Object.values(unread).reduce((a,b)=>a+b,0);for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed()){win.webContents.send('chat-unread',{unread,total});if(process.platform==='win32')win.setOverlayIcon(total?unreadIcon(total):null,total?`${total} unread messages`:'');}}
+ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active});if(value.active&&s.chatStore)s.chatStore.conversationState(value.conversation,{read:true});publishUnread(s);});
 ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message,{onActivate:()=>showMain(s)});});
 function configureStartup(enabled){
   if(!smoke && app.isPackaged)app.setLoginItemSettings({name:'Shatoot Connect',openAtLogin:enabled,path:process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),args:['--start-in-tray']});
@@ -261,8 +269,9 @@ function openChat(s,target) {
   if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show();if(s.chatWindow.isMinimized())s.chatWindow.restore();s.chatWindow.focus();if(target)s.chatWindow.webContents.send('chat-target',target);return; }
   const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor: '#0a0e17', title:chatWindowTitle(s), icon:path.join(__dirname,'ui/assets/chat-icon.png'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   win.on('page-title-updated',event=>event.preventDefault());
-  s.chatWindow = win; win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
-  const chatContentsId=win.webContents.id;win.on('closed', () => { s.chatViews?.delete(chatContentsId);s.voicePermissions?.delete(chatContentsId);s.chatWindow = null; });
+  s.chatWindow = win; win.setContentProtection(true); win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
+  for(const host of states.values())syncCursorExclusions(host);
+  const chatContentsId=win.webContents.id;win.on('closed', () => { s.chatViews?.delete(chatContentsId);s.voicePermissions?.delete(chatContentsId);s.chatWindow = null;for(const host of states.values())syncCursorExclusions(host); });
   win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
 }
 ipcMain.handle('chat-target',e=>{const s=state(e);if(s.chatWindow?.webContents!==e.sender)throw new Error('Invalid chat target request.');const target=s.chatTarget;s.chatTarget=null;return target;});
@@ -278,7 +287,7 @@ ipcMain.handle('chat-call', (e, operation, args = []) => {
   return new Promise((resolve,reject) => { const timer = setTimeout(() => { chatPending.delete(id); reject(new Error('Chat operation timed out.')); }, operation === 'sendFiles' ? 1800000 : 75000); chatPending.set(id, { s, resolve, reject, timer }); s.win.webContents.send('chat-command', { id, operation, args }); });
 });
 ipcMain.on('chat-result', (e, data) => { const pending = chatPending.get(data?.id); if (!pending || pending.s.win.webContents !== e.sender || e.senderFrame !== e.sender.mainFrame) return; clearTimeout(pending.timer); chatPending.delete(data.id); data.error ? pending.reject(new Error(data.error)) : pending.resolve(data.value); });
-ipcMain.on('chat-publish', (e, value) => { const s = state(e); if (s.win.webContents !== e.sender) return; if (s.chatWindow && !s.chatWindow.isDestroyed()) s.chatWindow.webContents.send('chat-snapshot', value); });
+ipcMain.on('chat-publish', (e, value) => { const s = state(e); if (s.win.webContents !== e.sender) return; if(s.chatStore)value={...value,catalog:{...value.catalog,unread:s.chatStore.unread(),pins:{...s.chatStore.load().pins},lastSelected:s.chatStore.load().lastSelected||''}};if (s.chatWindow && !s.chatWindow.isDestroyed()) s.chatWindow.webContents.send('chat-snapshot', value); });
 let installingUpdate=false;
 ipcMain.handle('update', async (e, operation) => {
   state(e);
@@ -302,7 +311,7 @@ ipcMain.handle('firewall-status',async(e,force=false)=>{const s=state(e);if(smok
 ipcMain.handle('firewall-repair',async e=>{const s=state(e);if(smoke){s.firewallStatus={needsRepair:false};return true;}try{return await require('./firewall.cjs').repairFirewall(app.getPath('exe'));}finally{firewallCheck=null;}});
 ipcMain.handle('chat-preferences', (e, value) => { state(e); if (!value || typeof value.autoAcceptFiles !== 'boolean' || typeof value.requireChatApproval !== 'boolean') throw new Error('Invalid chat settings.'); saveSettings({ autoAcceptFiles: value.autoAcceptFiles, requireChatApproval: value.requireChatApproval }); return value; });
 ipcMain.handle('profile-save', (e, value) => { const s = state(e); if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !require('../shared/profile.cjs').STATUSES.includes(value.status)) throw new Error('Enter a profile name and status.'); const next = { ...profile(), name: value.name.trim(), status: value.status }; saveSettings({ profile: next }); if (s.discovery) { s.discovery.name = next.name; s.discovery.status = next.status; s.discovery.refresh(); } if(s.directSocket?.readyState===1)s.directSocket.send(JSON.stringify({type:'profile',...next})); return next; });
-async function readProfilePhoto(file) {
+async function readProfilePhoto(file,background=false) {
   const mime={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'}[path.extname(file).toLowerCase()];
   if(!mime)throw new Error('This photo could not be opened.');
   if((await fs.promises.stat(file)).size>10*1024**2)throw new Error('Choose a profile photo smaller than 10 MB.');
@@ -320,7 +329,8 @@ async function readProfilePhoto(file) {
         const bytes=Uint8Array.from(atob(${JSON.stringify(bytes.toString('base64'))}),c=>c.charCodeAt(0));
         const image=await createImageBitmap(new Blob([bytes],{type:${JSON.stringify(mime)}}));
         try{
-          const side=Math.min(image.width,image.height),canvas=document.createElement('canvas');
+          const background=${JSON.stringify(background)},side=Math.min(image.width,image.height),canvas=document.createElement('canvas');
+          if(background){canvas.width=960;canvas.height=Math.max(1,Math.round(image.height*960/image.width));if(canvas.height>540){canvas.width=Math.max(1,Math.round(image.width*540/image.height));canvas.height=540;}canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);const data=canvas.toDataURL('image/jpeg',.8);if(data.length>300000)throw new Error('Choose a smaller background.');return data;}
           for(const size of [64,48]){
             canvas.width=canvas.height=size;const context=canvas.getContext('2d');context.imageSmoothingQuality='high';
             context.drawImage(image,(image.width-side)/2,(image.height-side)/2,side,side,0,0,size,size);
@@ -333,7 +343,7 @@ async function readProfilePhoto(file) {
   }catch{throw new Error('This photo could not be opened.');}
   finally{clearTimeout(timer);if(!decoder.isDestroyed())decoder.destroy();}
 }
-ipcMain.handle('group-photo',async(e,id)=>{const s=state(e);if(id&&s.chatStore?.load().groups[id]?.owner!==s.identity.deviceId)throw new Error('Only the group owner can edit the group.');const chosen=await dialog.showOpenDialog(s.chatWindow||s.win,{properties:['openFile'],filters:[{name:'Images',extensions:['png','jpg','jpeg','webp','gif','avif']}]});return chosen.canceled?undefined:readProfilePhoto(chosen.filePaths[0]);});
+ipcMain.handle('group-photo',async(e,id,background=false)=>{const s=state(e);if(id&&s.chatStore?.load().groups[id]?.owner!==s.identity.deviceId)throw new Error('Only the group owner can edit the group.');const chosen=await dialog.showOpenDialog(s.chatWindow||s.win,{properties:['openFile'],filters:[{name:'Images',extensions:['png','jpg','jpeg','webp','gif','avif']}]});return chosen.canceled?undefined:readProfilePhoto(chosen.filePaths[0],background===true);});
 ipcMain.handle('profile-photo', async (e, remove) => {
   const s=state(e);let avatar='';
   if(!remove){
@@ -374,7 +384,7 @@ function createWindow() {
   }
   states.set(win.webContents.id, s);
   win.on('blur', () => { s.grab?.stdin.end(); s.grab = null; });
-  win.on('will-resize',(event,bounds,details)=>{if(!s.videoSizing||s.win.isMaximized()||s.win.isFullScreen())return;const {ratio,extraWidth,extraHeight}=s.videoSizing,outer=s.win.getBounds(),content=s.win.getContentBounds(),horizontal=outer.width-content.width+extraWidth,vertical=outer.height-content.height+extraHeight;if(['top','bottom'].includes(details?.edge))bounds.width=Math.round((bounds.height-vertical)*ratio+horizontal);else bounds.height=Math.round((bounds.width-horizontal)/ratio+vertical);event.preventDefault();s.win.setBounds(bounds);});
+  win.on('will-resize',(event,bounds,details)=>{if(!s.videoSizing||s.win.isMaximized()||s.win.isFullScreen())return;const {ratio,extraWidth,extraHeight}=s.videoSizing,outer=s.win.getBounds(),content=s.win.getContentBounds(),horizontal=outer.width-content.width+extraWidth,vertical=outer.height-content.height+extraHeight;const [minWidth,minHeight]=s.win.getMinimumSize();if(['top','bottom'].includes(details?.edge)){bounds.height=Math.max(minHeight,bounds.height);bounds.width=Math.round((bounds.height-vertical)*ratio+horizontal);if(bounds.width<minWidth){bounds.width=minWidth;bounds.height=Math.round((minWidth-horizontal)/ratio+vertical);}}else{bounds.width=Math.max(minWidth,bounds.width);bounds.height=Math.round((bounds.width-horizontal)/ratio+vertical);if(bounds.height<minHeight){bounds.height=minHeight;bounds.width=Math.round((minHeight-vertical)*ratio+horizontal);}}event.preventDefault();s.win.setBounds(bounds);});
   win.removeMenu();
   win.webContents.setWebRTCIPHandlingPolicy('default');
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -617,13 +627,13 @@ ipcMain.handle('keyboard-grab', (e, enabled) => {
 function nativeClipboard(s, value) {
   // Smoke peers have independent simulated clipboards; tests must not overwrite
   // the interactive user's clipboard. The production bridge is a native pipe.
-  if (smoke) { s.testClipboard ||= { seq: 1, text: '', files: [], supported: true }; if (value.op === 'write') s.testClipboard = { seq: s.testClipboard.seq + 1, text: value.text || '', files: value.files || [], supported: true }; return Promise.resolve({ ...s.testClipboard }); }
+  if (smoke) { s.testClipboard ||= { seq: 1, text: '', files: [], supported: true };if(value.op==='offer'&&value.expectedSeq!=null&&value.expectedSeq!==s.testClipboard.seq)return Promise.resolve({seq:s.testClipboard.seq,skipped:true});if(value.op==='offer')s.testClipboard={seq:s.testClipboard.seq+1,text:'',files:[],remote:true,supported:true};if(value.op==='write'&&value.expectedSeq!=null&&value.expectedSeq!==s.testClipboard.seq)return Promise.resolve({seq:s.testClipboard.seq,skipped:true}); if (value.op === 'write') s.testClipboard = { seq: s.testClipboard.seq + 1, text: value.text || '', files: value.files || [], supported: true }; return Promise.resolve({ ...s.testClipboard }); }
   if (!s.clipboardProc) {
     const proc = spawn(nativeExecutable(), ['--clipboard'], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] }); s.clipboardProc = proc; s.clipboardRequests = new Map(); let buffer = '';
     const fail = () => { if (s.clipboardProc === proc) s.clipboardProc = null; for (const pending of requests.values()) { clearTimeout(pending.timer); pending.reject(new Error('Clipboard helper stopped.')); } requests.clear(); };
     const requests = s.clipboardRequests;
     proc.on('error', fail); proc.on('exit', fail); proc.stdin.on('error', fail);
-    proc.stdout.on('data', chunk => { buffer += chunk; if (buffer.length > 13000000) { proc.kill(); return; } let end; while ((end = buffer.indexOf('\n')) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); try { const data = JSON.parse(line), pending = requests.get(data.id); if (pending) { requests.delete(data.id); clearTimeout(pending.timer); data.error ? pending.reject(new Error(data.error)) : pending.resolve(data); } } catch {} } });
+    proc.stdout.on('data', chunk => { buffer += chunk; if (buffer.length > 13000000) { proc.kill(); return; } let end; while ((end = buffer.indexOf('\n')) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); try { const data = JSON.parse(line);if(data.type==='clipboard-fetch'){s.win.webContents.send('exchange-paste',{token:data.token});continue;}const pending = requests.get(data.id); if (pending) { requests.delete(data.id); clearTimeout(pending.timer); data.error ? pending.reject(new Error(data.error)) : pending.resolve(data); } } catch {} } });
   }
   return new Promise((resolve, reject) => { const id = crypto.randomUUID(), requests = s.clipboardRequests; const timer = setTimeout(() => { requests.delete(id); reject(new Error('Clipboard timed out.')); }, 5000); requests.set(id, { resolve, reject, timer }); s.clipboardProc.stdin.write(JSON.stringify({ ...value, id }) + '\n'); });
 }
@@ -643,13 +653,16 @@ ipcMain.handle('chat-clipboard',async(e,operation,token)=>{
 ipcMain.handle('exchange', async (e, operation, value) => {
   const s = state(e);
   if (operation === 'viewer-start') { s.exchangeAllowed = true; return; }
-  if (operation === 'stop') { s.exchangeAllowed = false; await s.transfers?.reset(); s.clipboardProc?.stdin.end(); s.clipboardProc = null; return; }
+  if (operation === 'stop') { s.exchangeAllowed = false;await s.clipboardTransfers?.reset();s.clipboardReceiving=false;s.virtualOffer=null; await s.transfers?.reset(); s.clipboardProc?.stdin.end(); s.clipboardProc = null; return; }
   if (!s.control && !s.exchangeAllowed) throw new Error('Clipboard and files require an active control session.');
   s.transfers ||= new (require('./transfers.cjs').Transfers)(app.getPath('downloads'));
   const transfers = s.transfers;
   switch (operation) {
-    case 'clipboard-read': { const data = await nativeClipboard(s, { op: 'read' }); return { seq: data.seq, text: data.text, files: !!data.files.length, supported: data.supported }; }
-    case 'clipboard-write': if (typeof value !== 'string' || value.length > 1000000) throw new Error('Invalid clipboard text.'); return nativeClipboard(s, { op: 'write', text: value });
+    case 'clipboard-read': { const data = await nativeClipboard(s, { op: 'read' }); return { seq: data.seq, text: data.text, files: !!data.files.length, remote:data.remote, supported: data.supported }; }
+    case 'clipboard-write': {const text=typeof value==='string'?value:value?.text;if(typeof text!=='string'||text.length>1000000)throw new Error('Invalid clipboard text.');return nativeClipboard(s,{op:'write',text,expectedSeq:value?.expectedSeq});}
+    case 'clipboard-offer': {const {safeRelative}=require('./transfers.cjs');if(!value||!require('./discovery.cjs').UUID.test(value.token)||!Array.isArray(value.entries)||value.entries.length<1||value.entries.length>1000)throw new Error('Invalid clipboard offer.');let total=0;for(const entry of value.entries){safeRelative(entry.name);if(entry.name.length>259||!Number.isSafeInteger(entry.size)||entry.size<0)throw new Error('Invalid clipboard entry.');total+=entry.size;}if(total>10*1024**3)throw new Error('Clipboard files are too large.');const result=await nativeClipboard(s,{op:'offer',...value});if(!result.skipped)s.virtualOffer=value;return result;}
+    case 'clipboard-materialized': {if(!s.virtualOffer||value?.token!==s.virtualOffer.token)throw new Error('Clipboard offer expired.');const files=s.clipboardTransfers?.completedEntries||[];s.clipboardProc?.stdin.write(JSON.stringify({op:'materialized',token:value.token,...(value.error?{error:String(value.error).slice(0,200)}:{files})})+'\n');return;}
+
     case 'clipboard-sources': { const data = await nativeClipboard(s, { op: 'read' }); return transfers.offer(data.files); }
     case 'pick': { const result = await dialog.showOpenDialog(s.win, { properties: ['openFile', 'multiSelections'] }); return result.canceled ? [] : transfers.offer(result.filePaths); }
     case 'sources': return transfers.offer(value);
@@ -660,13 +673,14 @@ ipcMain.handle('exchange', async (e, operation, value) => {
         try{const fa=s.language==='fa',answer=await notices.showMessageBox(s.win,{type:'question',message:fa?'دریافت فایل‌های این اتصال؟':'Receive files from this connection?',detail:'Downloads',buttons:fa?['رد','دریافت فایل‌ها']:['Decline','Receive files'],cancelId:0});if(answer.response!==1)throw new Error('File offer declined.');}finally{s.filePrompt=false;}
       }
       if(!s.control&&!s.exchangeAllowed)throw new Error('Clipboard and files require an active control session.');
-      return transfers.begin(value);
+      if(value?.clipboard){if(!s.virtualOffer||value.clipboard!==s.virtualOffer.token||JSON.stringify(value.entries)!==JSON.stringify(s.virtualOffer.entries))throw new Error('Clipboard offer expired.');s.clipboardTransfers||=new (require('./transfers.cjs').Transfers)(path.join(app.getPath('temp'),'ShatootConnect-Clipboard',String(process.pid)));s.clipboardReceiving=true;return s.clipboardTransfers.begin(value.entries);}
+      s.clipboardReceiving=false;return transfers.begin(value);
     }
-    case 'write': return transfers.write(value);
-    case 'end-file': return transfers.endFile(value);
-    case 'finish': { const files = await transfers.finish(); try { const result = await nativeClipboard(s, { op: 'write', files }); return { seq: result.seq, count: files.length, clipboardReady:true }; } catch { return { count:files.length, clipboardReady:false }; } }
+    case 'write': return (s.clipboardReceiving?s.clipboardTransfers:transfers).write(value);
+    case 'end-file': return (s.clipboardReceiving?s.clipboardTransfers:transfers).endFile(value);
+    case 'finish': { if(s.clipboardReceiving){const receiver=s.clipboardTransfers;receiver.completedEntries=receiver.incoming.entries.map(entry=>path.join(receiver.incoming.folder,...entry.name.split('/')));await receiver.finish();s.clipboardReceiving=false;return {clipboardVirtual:true,count:receiver.completedEntries.length};}const files = await transfers.finish(); try { const result = await nativeClipboard(s, { op: 'write', files }); return { seq: result.seq, count: files.length, clipboardReady:true }; } catch { return { count:files.length, clipboardReady:false }; } }
     case 'open-received': { const file=transfers.completed[0]; if(!file || !fs.existsSync(file)) throw new Error('No received files in this session.'); shell.showItemInFolder(file); return; }
-    case 'cancel': await transfers.abort(); return;
+    case 'cancel': await transfers.abort();await s.clipboardTransfers?.abort();s.clipboardReceiving=false;return;
     default: throw new Error('Invalid exchange operation.');
   }
 });
@@ -714,6 +728,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   for (const s of states.values()) { release(s); s.helper?.stdin.end(); }
   localServer?.close();
+  const clipboardCache=path.join(app.getPath('temp'),'ShatootConnect-Clipboard',String(process.pid));try{fs.rmSync(clipboardCache,{recursive:true,force:true});}catch{}
 });
 app.on('second-instance', (_event,args)=>{
   if(args.includes('--quit-if-background')){if(!BrowserWindow.getAllWindows().some(win=>win.isVisible())){quitting=true;app.quit();}return;}
@@ -802,7 +817,7 @@ async function runSmoke(host) {
   await viewer.webContents.executeJavaScript("document.querySelector('.favorite-connect').click(); true", true);
   await wait(viewer, "document.querySelector('#remote-video').videoWidth > 0", 45000);
   await wait(viewer,"(()=>{const stage=document.querySelector('#video-stage'),video=document.querySelector('#remote-video');return Math.abs(stage.clientWidth/stage.clientHeight-video.videoWidth/video.videoHeight)<0.04})()");
-  {const bounds=viewer.getBounds();viewer.emit('will-resize',{preventDefault(){}},{...bounds,width:bounds.width-80},{edge:'right'});await delay(100);await wait(viewer,"(()=>{const s=document.querySelector('#video-stage'),v=document.querySelector('#remote-video');return Math.abs(s.clientWidth/s.clientHeight-v.videoWidth/v.videoHeight)<0.04})()");}
+  {smokeLog('Before manual resize '+JSON.stringify({bounds:viewer.getBounds(),sizing:states.get(viewer.webContents.id).videoSizing,ui:await viewer.webContents.executeJavaScript("({width:innerWidth,height:innerHeight,stage:[document.querySelector('#video-stage').clientWidth,document.querySelector('#video-stage').clientHeight]})")}));const bounds=viewer.getBounds();viewer.emit('will-resize',{preventDefault(){}},{...bounds,width:bounds.width-80},{edge:'right'});await delay(100);smokeLog('After manual resize '+JSON.stringify({bounds:viewer.getBounds(),sizing:states.get(viewer.webContents.id).videoSizing,ui:await viewer.webContents.executeJavaScript("({width:innerWidth,height:innerHeight,stage:[document.querySelector('#video-stage').clientWidth,document.querySelector('#video-stage').clientHeight]})")}));await wait(viewer,"(()=>{const s=document.querySelector('#video-stage'),v=document.querySelector('#remote-video');return Math.abs(s.clientWidth/s.clientHeight-v.videoWidth/v.videoHeight)<0.04})()");}
   const historyEntries=await viewer.webContents.executeJavaScript("api.connections('history')");if(!historyEntries.some(h=>h.address===credentials.id.replace(/\s/g,'')))throw new Error('Accepted connection was not added to history');
   await viewer.webContents.executeJavaScript(`api.connections('save',${JSON.stringify(historyEntries[0].id)}).then(renderFavorites)`);
   const hostState = states.get(host.webContents.id);
@@ -876,6 +891,14 @@ async function runSmoke(host) {
   await host.webContents.executeJavaScript("api.exchange('clipboard-write','متن فارسی — WebRTC').then(()=>exchange.flushClipboard())");
   if (await viewer.webContents.executeJavaScript("api.exchange('clipboard-read').then(c=>c.text)") !== 'متن فارسی — WebRTC') throw new Error('RTC text clipboard did not arrive');
   const transferFixture = path.join(__dirname, '../artifacts/clipboard-فایل.bin'), transferBytes = crypto.randomBytes(250123); fs.writeFileSync(transferFixture, transferBytes);
+  await nativeClipboard(hostState,{op:'write',files:[transferFixture]});
+  await host.webContents.executeJavaScript('exchange.flushClipboard()');
+  const virtualReceiver=states.get(viewer.webContents.id);
+  if(!virtualReceiver.virtualOffer||virtualReceiver.clipboardTransfers?.completedEntries?.length)throw new Error('Copy eagerly downloaded files instead of advertising a virtual clipboard.');
+  viewer.webContents.send('exchange-paste',{token:virtualReceiver.virtualOffer.token});
+  for(let n=0;n<200&&!virtualReceiver.clipboardTransfers?.completedEntries?.length;n++)await delay(50);
+  const pasted=virtualReceiver.clipboardTransfers?.completedEntries?.[0];if(!pasted||!fs.readFileSync(pasted).equals(transferBytes)||pasted.startsWith(app.getPath('downloads')+path.sep))throw new Error('Deferred RTC paste did not materialize intact bytes outside Downloads.');
+  smokeLog('Copy advertised metadata only; native Paste event pulled exact RTC bytes into the private temporary cache.');
   await host.webContents.executeJavaScript(`exchange.sendFiles('sources', [${JSON.stringify(transferFixture)}])`);
   const receivedByViewer = states.get(viewer.webContents.id).testClipboard.files[0];
   if (!fs.readFileSync(receivedByViewer).equals(transferBytes)) throw new Error('RTC file contents did not match');

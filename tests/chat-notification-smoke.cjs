@@ -18,6 +18,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   if(owner.captureAllowed||peer.captureAllowed)throw Error('Chat thumbnail acquired remote screen/control permission');
   await run(host,'api.openChat()');await until(()=>owner.chatWindow);const chat=owner.chatWindow;
   await until(()=>run(chat,'window.shatootconnectChatReady===true'));
+  if(!chat.isContentProtected())throw Error('Chat is not excluded from remote screen capture');
   if(chat.getTitle()!=='Chats · Shatoot Connect'||chat.getTitle()===host.getTitle())throw Error('Native chat/main window titles are not distinct');
   if(!await run(chat,"document.title==='Chats · Shatoot Connect' && document.querySelector('link[rel=icon]')?.href.endsWith('/chat-icon.png')"))throw Error('Chat document title/favicon is not distinct');
   const nativeImage=require('electron').nativeImage,chatIcon=nativeImage.createFromPath(path.join(__dirname,'../desktop/ui/assets/chat-icon.png')),appIcon=nativeImage.createFromPath(path.join(__dirname,'../desktop/ui/assets/app-icon.png'));
@@ -25,6 +26,14 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"document.title='Shatoot Connect';true");await pause(50);if(chat.getTitle()!=='Chats · Shatoot Connect')throw Error('HTML replaced the native chat title');
   await run(chat,"document.title='Chats · Shatoot Connect';true");
   await run(chat,`messenger.select('${conversation}').then(()=>true)`);
+  await run(chat,"document.querySelector('.chat-pin').click();true");await until(()=>owner.chatStore.list().pins[conversation]);
+  await until(()=>run(chat,"document.querySelector('.chat-pin').getAttribute('aria-pressed')==='true'"));
+  await run(chat,"document.querySelector('.chat-pin').click();true");await until(()=>!owner.chatStore.list().pins[conversation]);
+  viewer.show();viewer.focus();await until(()=>!chat.isFocused());
+  await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Unread badge fixture').then(()=>true)`);await until(()=>run(chat,"!!document.querySelector('.chat-conversation .unread-badge')"));await until(()=>run(host,"!document.querySelector('#chat-total-unread').hidden"));
+  chat.show();chat.focus();await run(chat,"document.querySelector('#chat-text').focus();true");await until(()=>!owner.chatStore.unread()[conversation]);await until(()=>run(host,"document.querySelector('#chat-total-unread').hidden"));
+  log('Pin/unpin persists; unread badges increment in the background and clear when read; chat capture protection is enabled');
+
   for(const language of ['en','fa']){await run(chat,`window.i18n.setLanguage('${language}');document.querySelector('#action-snackbar .snackbar-confirm')?.click();document.querySelector('.chat-conversation').click();true`);await pause(500);if(!await run(chat,"!document.querySelector('#action-snackbar')||document.querySelector('#action-snackbar').hidden"))throw Error('Selecting a contact showed a redundant snackbar');}
   await run(chat,"window.i18n.setLanguage('en');true");host.close();chat.show();chat.focus();
   await run(chat,"document.querySelector('#chat-rename').click();true");await until(()=>run(chat,"document.querySelector('#chat-name-dialog')?.open"));
@@ -115,8 +124,9 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
     const avatar=await run(chat,"(()=>{const c=document.createElement('canvas');c.width=c.height=16;c.getContext('2d').fillRect(0,0,16,16);return c.toDataURL()})()");
     await run(chat,"document.querySelector('#chat-group-name').value='Renamed group';document.querySelector('#chat-group-description').value='Updated details';document.querySelector('#chat-group-form').requestSubmit();true");
     await until(()=>thirdState.chatStore.list().groups.some(g=>g.id===groupId&&g.name==='Renamed group'&&g.description==='Updated details'));
-    await run(host,`collaboration.createGroup('Renamed group',['${peer.identity.deviceId}','${thirdId}'],'${groupId}',{avatar:${JSON.stringify(avatar)},description:'Updated details'}).then(()=>true)`);
-    await until(()=>peer.chatStore.list().groups.some(g=>g.id===groupId&&g.avatar===avatar));
+    await run(host,`collaboration.createGroup('Renamed group',['${peer.identity.deviceId}','${thirdId}'],'${groupId}',{avatar:${JSON.stringify(avatar)},background:${JSON.stringify(avatar)},description:'Updated details'}).then(()=>true)`);
+    await until(()=>peer.chatStore.list().groups.some(g=>g.id===groupId&&g.avatar===avatar&&g.background===avatar));
+    await until(()=>run(chat,"document.querySelector('#chat-messages').style.backgroundImage.includes('data:image/png')"));
     const groupMessage=await run(viewer,`collaboration.send('g:${groupId}','Member original').then(m=>m.id)`);await until(()=>thirdState.chatStore.history({conversation:'g:'+groupId}).some(m=>m.id===groupMessage));
     await run(viewer,`collaboration.changeMessage('g:${groupId}','${groupMessage}','Member edited').then(()=>true)`);await until(()=>thirdState.chatStore.history({conversation:'g:'+groupId}).some(m=>m.id===groupMessage&&m.text==='Member edited'));
     await run(third,`collaboration.close(collaboration.peer('${owner.identity.deviceId}'));true`);await until(()=>run(host,`!collaboration.peer('${thirdId}')`));
@@ -159,7 +169,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await until(()=>run(host,"!!document.querySelector('.favorite-row .desktop-preview')"));
   await run(host,`(async()=>{await api.connections('connected',{address:'127.0.0.1:${peer.directInfo.port}',name:'Published Amir',peer:{deviceId:'${peer.identity.deviceId}',name:'Published Amir'}});renderHistory(await api.connections('history'));return true})()`);
   if(!await run(host,"!!document.querySelector('.favorite-connect .profile-avatar')&&document.querySelectorAll('#favorites-list>div').length===1"))throw Error('Saved/recent cards lack profile avatars');
-  await run(host,`collaboration.close(collaboration.peer('${peer.identity.deviceId}'));true`);await until(()=>run(chat,"document.querySelector('#chat-peer-status').textContent===window.i18n.translate('Offline')"));
+  await run(host,`collaboration.close(collaboration.peer('${peer.identity.deviceId}'));true`);await until(()=>run(chat,"document.querySelector('#chat-peer-status').classList.contains('presence-offline')"));
   if(!await run(chat,"!!document.querySelector('.chat-conversation .desktop-preview') && !!document.querySelector('.chat-conversation .profile-avatar')"))throw Error('Offline preview/avatar disappeared');
   await run(viewer,'collaboration.nearby=[];collaboration.retries?.clear();collaboration.reconnectKnown().then(()=>true)');
   await until(()=>run(host,`!!collaboration.peer('${peer.identity.deviceId}')`));

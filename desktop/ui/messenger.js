@@ -2,8 +2,8 @@
 window.installMessenger = ({ api, self, internet, ensureInternet, remote, detached = false }) => {
   const $ = id => document.getElementById(id), tr = text => window.i18n.translate(text);
   let engine, targetMessage='',selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
-  let voice;
-  let editingGroup,groupAvatar='',connecting=false,connectSequence=0;
+  let voice,autoSelecting=false;
+  let editingGroup,groupAvatar='',groupBackground='',connecting=false,connectSequence=0;
   const progress = new Map();
   const displayName=peer=>peer?.displayName||peer?.name||'';
   const previewCard=(element,peer)=>{element.classList.add('computer-preview');if(peer.preview){const image=document.createElement('img');image.className='desktop-preview';image.alt='';image.src=peer.preview;image.draggable=false;element.prepend(image);}};
@@ -38,7 +38,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     catch(error){if(sequence===connectSequence)throw error;}
     finally{if(sequence===connectSequence){connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;}}
   }
-  async function select(id) { if(id!==selected)voice?.reset();if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await reportView(); await load(false); publish(); }
+  async function select(id) { if(id!==selected)voice?.reset();if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await api.collaboration('conversation-state',{conversation:id,selected:true});engine.catalog.lastSelected=id;await reportView(); await load(false); publish(); }
   async function navigate(target){await select(target.conversation);targetMessage=target.message||'';if(target.message){if(!rows.some(m=>m.id===target.message)){const message=await api.collaboration('message',{conversation:target.conversation,id:target.message});if(message&&!message.deleted){rows=await api.collaboration('history',{conversation:target.conversation,before:message.receivedAt+1});renderMessages(false);}}const item=[...$('chat-messages').children].find(e=>e.dataset.messageId===target.message);item?.scrollIntoView({block:'center'});item?.classList.add('message-target');setTimeout(()=>{if(targetMessage!==target.message)return;targetMessage='';for(const row of document.querySelectorAll('.message-target'))row.classList.remove('message-target');},3000);}$('chat-text').focus();}
   async function load(older = false) {
     if (!selected) return;
@@ -77,19 +77,30 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   function render(refreshHistory = false) {
     if (!engine) return;
     const pending=connecting||(engine.connectAttempts?[...engine.connectAttempts].filter(a=>!a.background).length:engine.pendingConnections||0)>0;cancelConnect.hidden=!pending;$('chat-connect').disabled=pending;$('chat-address').disabled=pending;
+    const total=Object.values(engine.catalog.unread||{}).reduce((a,b)=>a+b,0);$('chat-total-unread').textContent=total>99?'99+':String(total);$('chat-total-unread').hidden=!total;
     own.replaceChildren();const ownImage=document.createElement('img');ownImage.src=self.avatar||'assets/app-icon.png';ownImage.className='profile-avatar';ownImage.alt='';const ownName=document.createElement('span');ownName.textContent=self.name;own.append(ownImage,ownName);
     const list = $('chat-conversations'); list.replaceChildren();
     const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar:c.avatar,preview:c.preview,name:displayName(c),detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, avatar:g.avatar,name: g.name,detail:g.description, status: 'Group' }))];
-    for (const item of items) { const b = document.createElement('button'); b.className = 'chat-conversation'; b.type = 'button'; b.setAttribute('aria-pressed', String(item.id === selected)); const name = document.createElement('b'), status = document.createElement('small'); name.textContent = item.name; status.textContent = tr(item.status) + (item.detail ? ' · ' + item.detail : ''); { const image = document.createElement('img'); image.src=item.avatar||'assets/app-icon.png'; image.className = 'profile-avatar'; image.alt = ''; b.append(image); } b.append(name,status);previewCard(b,item); b.onclick = run(() => select(item.id)); list.append(b); }
+    const last=new Map((engine.catalog.conversations||[]).map(c=>[c.id,c.last?.receivedAt||0]));
+    items.sort((a,b)=>Number(!!engine.catalog.pins?.[b.id])-Number(!!engine.catalog.pins?.[a.id])||(last.get(b.id)||0)-(last.get(a.id)||0));
+    for (const item of items) {
+      const row=document.createElement('div');row.className='chat-contact-row';const b=document.createElement('button');b.className='chat-conversation';b.type='button';b.setAttribute('aria-pressed',String(item.id===selected));
+      const name=document.createElement('b');name.textContent=item.name;const count=engine.catalog.unread?.[item.id]||0;if(count){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=count>99?'99+':String(count);name.append(badge);}
+      const detail=document.createElement('small');detail.textContent=item.detail||'';const image=document.createElement('img');image.src=item.avatar||'assets/app-icon.png';image.className='profile-avatar';image.alt='';b.append(image,name,detail);
+      if(!item.id.startsWith('g:')){const dot=document.createElement('span');dot.className='presence-dot presence-'+(online(item.id.slice(2))?(contact(item.id.slice(2))?.status||'available'):discovery.peers.some(p=>p.deviceId===item.id.slice(2))?'available':'offline');b.append(dot);}
+      previewCard(b,item);b.onclick=run(()=>select(item.id));const pinned=!!engine.catalog.pins?.[item.id],pin=button(pinned?'Unpin chat':'Pin chat',async()=>{await api.collaboration('conversation-state',{conversation:item.id,pinned:!pinned});await engine.refresh();},'pin');pin.classList.add('chat-pin');pin.setAttribute('aria-pressed',String(pinned));row.append(b,pin);list.append(row);
+    }
     const group = selected.startsWith('g:') && engine.group(selected.slice(2)), peer = selected.startsWith('p:') && contact(selected.slice(2));
     if($('chat-rename')){$('chat-rename').hidden=!selected;$('chat-rename').title=tr(selected.startsWith('g:')?'Conversation settings':'Rename saved computer');}
     $('chat-edit-group').hidden=!group||group.owner!==self.deviceId;
     $('chat-title').textContent = group?.name || displayName(peer) || tr('Select a conversation');
-    $('chat-peer-status').textContent = group ? `${tr(group.owner === self.deviceId || online(group.owner) ? 'Group owner online' : 'Group owner offline')} · ${group.members.map(m => displayName(contact(m.deviceId))||displayName(m)).join(', ')}` : peer ? tr(online(peer.deviceId) ? 'Connected' : 'Offline') : '';
+    const peerStatus=$('chat-peer-status');peerStatus.textContent=group?group.members.map(m=>displayName(contact(m.deviceId))||displayName(m)).join(', '):'';peerStatus.className=peer?'presence-dot presence-'+(online(peer.deviceId)?peer.status||'available':'offline'):'';
+    const log=$('chat-messages');log.style.backgroundImage=group?.background?`linear-gradient(#180e27bb,#180e27bb),url("${group.background}")`:'';
     $('chat-text').disabled = !selected; $('chat-send').disabled = !selected || busy; $('chat-send-files').disabled = !selected || busy;
     voice?.sync();
     $('chat-progress').textContent = selected && progress.get(selected) || '';
     filePolicy.value=engine.catalog.filePolicies?.[selected]||'inherit';
+    if(detached&&!selected&&items.length&&!autoSelecting){autoSelecting=true;queueMicrotask(()=>select(engine.catalog.lastSelected||items[0].id).catch(error).finally(()=>autoSelecting=false));}
     if (refreshHistory && $('messenger-dialog').open && selected && rows.length <= 100) { clearTimeout(historyTimer); historyTimer = setTimeout(() => load(false).catch(error), 80); }
   }
   function renderDiscovery(value) {
@@ -100,13 +111,15 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     for (const peer of value.peers) {
       const card = document.createElement('div'); card.className = 'network-peer';
       if (peer.avatar) { const avatar = document.createElement('img'); avatar.className = 'profile-avatar'; avatar.src = peer.avatar; avatar.alt = ''; card.append(avatar); }
-      const info = document.createElement('div'); info.className = 'network-peer-info'; const name = document.createElement('b'), address = document.createElement('small'); name.textContent=displayName(peer); address.textContent = tr(peer.status || 'available') + ' · ' + peer.endpoints.join(' / '); info.append(name, address);
+      const info = document.createElement('div'); info.className = 'network-peer-info'; const name = document.createElement('b'), address = document.createElement('small'); name.textContent=displayName(peer); address.textContent = peer.endpoints.join(' / ');const dot=document.createElement('span');dot.className='presence-dot presence-'+(peer.status||'available');name.append(dot); info.append(name, address);
       previewCard(card,peer);card.append(info, button('Start chat', () => start({ type: 'lan', address: peer.endpoints[0], deviceId: peer.deviceId, name: peer.name }), 'chat'), button('Connect to a computer', () => remote(peer.endpoints[0]), 'desktop_windows')); list.append(card);
     }
     render();publish();
   }
   function publish() { if (!detached && engine) api.chatPublish(snapshot()); }
   function snapshot() { return { self, pendingConnections:engine.connectAttempts?[...engine.connectAttempts].filter(a=>!a.background).length:0,catalog: engine.catalog, connected: engine.connected(), language: window.i18n.language, discovery, selected, progress: [...progress] }; }
+  api.onChatUnread?.(value=>{if(engine){engine.catalog.unread=value.unread;const badge=$('chat-total-unread');badge.textContent=value.total>99?'99+':String(value.total);badge.hidden=!value.total;render();}});
+  const totalBadge=document.createElement('span');totalBadge.id='chat-total-unread';totalBadge.className='unread-badge';totalBadge.hidden=true;$('open-messenger').append(totalBadge);
   engine = new window.CollaborationClient({ api, self, internet, ensureInternet, changed: () => { render(true); publish(); }, error, progress: value => { const text = tr(value.text) + (Number.isInteger(value.percent) ? ` ${value.percent}%` : ''); progress.set(value.conversation, text); if (selected === value.conversation) $('chat-progress').textContent = text; publish(); } });
   if(!detached)api.onChatTarget(target=>navigate(target).catch(error));
   if (!detached) api.onChatCommand(async (operation, args) => { if (operation === 'snapshot') return snapshot(); if (operation === 'close') { engine.close(engine.peer(args[0])); return; } const result = await engine[operation](...args); return operation === 'connect' ? { peer: result.peer } : result; });
@@ -145,7 +158,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   },'edit');rename.id='chat-rename';document.querySelector('.chat-thread-heading').append(rename);
   const groupEditor=async existing=>{
     editingGroup=existing;const list = $('chat-group-members'); list.replaceChildren(); $('chat-group-error').textContent = ''; $('chat-group-name').value = existing?.name||'';
-    groupAvatar=existing?.avatar||'';$('chat-group-avatar').src=groupAvatar||'assets/app-icon.png';$('chat-group-description').value=existing?.description||'';
+    groupBackground=existing?.background||'';groupAvatar=existing?.avatar||'';$('chat-group-avatar').src=groupAvatar||'assets/app-icon.png';$('chat-group-description').value=existing?.description||'';
     document.querySelector('#chat-group-dialog h2').textContent=tr(existing?'Edit group':'New group');$('chat-create-group').textContent=tr(existing?'Save changes':'Create group');
     for(const peer of discovery.peers)if(!engine.catalog.contacts.some(c=>c.deviceId===peer.deviceId))await api.collaboration('contact',{peer:{deviceId:peer.deviceId,name:peer.name},route:{type:'lan',address:peer.endpoints[0]}});
     await engine.refresh();
@@ -153,17 +166,17 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     for (const peer of candidates.values()) { const label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span'); input.type = 'checkbox'; input.value = peer.deviceId;input.checked=!!existing?.members.some(m=>m.deviceId===peer.deviceId);text.textContent=displayName(peer); label.append(input, text); list.append(label); }
     $('chat-group-dialog').showModal();
   };
-  const photo=document.createElement('div');photo.className='chat-group-photo';photo.innerHTML='<img id="chat-group-avatar" class="profile-avatar" alt="">';photo.append(button('Choose photo',async()=>{const avatar=await api.groupPhoto(editingGroup?.id);if(avatar!==undefined){groupAvatar=avatar;$('chat-group-avatar').src=avatar||'assets/app-icon.png';}},'person'),button('Remove photo',()=>{groupAvatar='';$('chat-group-avatar').src='assets/app-icon.png';},'delete'));$('chat-group-form').prepend(photo);
+  const photo=document.createElement('div');photo.className='chat-group-photo';photo.innerHTML='<img id="chat-group-avatar" class="profile-avatar" alt="">';photo.append(button('Choose photo',async()=>{const avatar=await api.groupPhoto(editingGroup?.id);if(avatar!==undefined){groupAvatar=avatar;$('chat-group-avatar').src=avatar||'assets/app-icon.png';}},'person'),button('Remove photo',()=>{groupAvatar='';$('chat-group-avatar').src='assets/app-icon.png';},'delete'));photo.append(button('Choose background',async()=>{const image=await api.groupPhoto(editingGroup?.id,true);if(image!==undefined){groupBackground=image;window.actionNotice(tr('Background selected'));}},'wallpaper'),button('Remove background',()=>{groupBackground='';window.actionNotice(tr('Background removed'));},'delete'));$('chat-group-form').prepend(photo);
   const description=document.createElement('label');description.textContent=tr('Group description');const descriptionInput=document.createElement('textarea');descriptionInput.id='chat-group-description';descriptionInput.maxLength=500;description.append(descriptionInput);$('chat-group-name').after(description);
   $('chat-new-group').onclick=run(()=>groupEditor());$('chat-edit-group').onclick=run(()=>groupEditor(engine.group(selected.slice(2))));
-  $('chat-group-form').onsubmit = async event => { event.preventDefault(); $('chat-create-group').disabled = true; try { const group = await engine.createGroup($('chat-group-name').value.trim(), [...document.querySelectorAll('#chat-group-members input:checked')].map(i => i.value),editingGroup?.id,{avatar:groupAvatar,description:$('chat-group-description').value.trim()}); $('chat-group-dialog').close(); await select(`g:${group.id}`); } catch (e) { $('chat-group-error').textContent = tr(e.message); } finally { $('chat-create-group').disabled = false; } };
+  $('chat-group-form').onsubmit = async event => { event.preventDefault(); $('chat-create-group').disabled = true; try { const group = await engine.createGroup($('chat-group-name').value.trim(), [...document.querySelectorAll('#chat-group-members input:checked')].map(i => i.value),editingGroup?.id,{avatar:groupAvatar,background:groupBackground,description:$('chat-group-description').value.trim()}); $('chat-group-dialog').close(); await select(`g:${group.id}`); } catch (e) { $('chat-group-error').textContent = tr(e.message); } finally { $('chat-create-group').disabled = false; } };
   function editMessage(row){
     let dialog=$('message-edit-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='message-edit-dialog';dialog.innerHTML='<form id="message-edit-form"><h2></h2><textarea id="message-edit-text" maxlength="8000" required></textarea><div class="inline-setting"><button type="submit" class="small-button"></button><button type="button" class="small-button"></button></div><p class="error" role="alert"></p></form>';document.body.append(dialog);}
     dialog.querySelector('h2').textContent=tr('Edit message');dialog.querySelector('[type=submit]').textContent=tr('Save changes');const cancel=dialog.querySelector('[type=button]');cancel.textContent=tr('Cancel');cancel.onclick=()=>dialog.close();dialog.querySelector('.error').textContent='';$('message-edit-text').value=row.text;
     $('message-edit-form').onsubmit=async event=>{event.preventDefault();const save=dialog.querySelector('[type=submit]');save.disabled=true;try{await engine.changeMessage(row.conversation,row.id,$('message-edit-text').value);dialog.close();await load(false);}catch(e){dialog.querySelector('.error').textContent=tr(e.message);}finally{save.disabled=false;}};dialog.showModal();$('message-edit-text').focus();
   }
   if(!detached)setInterval(()=>engine.reconnectKnown().catch(()=>{}),5000);
-  engine.ready.then(()=>{render();if(!detached)engine.reconnectKnown().catch(()=>{});}).catch(error); api.discovery().then(renderDiscovery).catch(error);
+  engine.ready.then(async()=>{render();await reportView();if(!detached)engine.reconnectKnown().catch(()=>{});}).catch(error); api.discovery().then(renderDiscovery).catch(error);
   window.addEventListener('shatoot-language-change', () => { renderDiscovery(discovery); renderMessages(false);publish(); });
   return { engine, open, select, navigate, start, renderDiscovery, snapshot };
 };

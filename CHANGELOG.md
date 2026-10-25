@@ -13,6 +13,28 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.0 — 2026-10-25
+
+### Added
+
+- Pin/unpin private and group chats. Pins, the last selected conversation and local unread watermarks survive restarts in encrypted history. A new chat window restores the selection, or selects the first available conversation.
+- Group owners can choose/remove a shared chat background independently of the group photo. Updated members receive the background immediately or after reconnecting.
+- Unread counts beside contact names, a total on Chats and files, and Windows taskbar overlay badges. Reading a focused conversation clears its count; deleted messages no longer contribute.
+- Native Windows virtual-file clipboard: copying files advertises names/sizes without downloading. Pasting requests contents over the existing encrypted remote channel; Explorer writes streams into the chosen destination. A private temporary cache supports rendering and is removed on normal application exit. Both peers need this version for deferred file clipboard.
+
+### Changed
+
+- Contact presence uses color indicators instead of textual online/offline labels. Notifications use smaller typography, spacing, borders and width while keeping their shared bottom-right queue and Hide/approval controls.
+- The separate chat window is excluded from remote screen capture and remote pointer hit testing, like protected host controls and notification windows. Host users retain normal access to these windows.
+
+### Fixed
+
+- Incoming clipboard text/files respect a newer local clipboard change instead of overwriting it between polls. Local copies remain available for local Paste.
+- Notification shutdown no longer reads a destroyed window webContents or leaves a stale queue entry that can crash the application.
+- Starting a chat by a known address reuses its pending/connected session, avoiding a duplicate invitation being declined during automatic reconnect.
+- Resizing a remote window below its minimum size clamps dimensions before computing the image aspect ratio, avoiding a distorted viewport.
+- Native Windows context-menu items use their accessibility action, without moving the host pointer or activating/dismissing the popup window. Isolated native menu and OLE stream tests cover both paths.
+
 ## 0.19.4 — 2026-10-25
 
 ### Fixed

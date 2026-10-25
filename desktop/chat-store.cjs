@@ -14,12 +14,13 @@ class ChatStore {
       if (error.code !== 'ENOENT') throw error;
       // An interrupted first save can leave a complete encrypted temporary file.
       try { bytes = fs.readFileSync(this.file + '.tmp'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-      if (!bytes) return this.data = { version: 1, contacts: {}, groups: {}, messages: [], attachments: {} };
+      if (!bytes) return this.data = { version: 1, contacts: {}, groups: {}, messages: [], attachments: {},readAt:{},pins:{} };
     }
     try {
       if (bytes.length > LIMIT + 65536) throw new Error();
       const data = JSON.parse(this.decrypt(bytes));
       if (data.version !== 1 || !data.contacts || !data.groups || !data.attachments || !Array.isArray(data.messages)) throw new Error();
+      if(!data.readAt){data.readAt={};for(const message of data.messages)data.readAt[message.conversation]=Math.max(data.readAt[message.conversation]||0,message.receivedAt||0);}
       for(const message of [...data.messages])if(message.deleted)this.eraseMessage(data,message.conversation,message.id);
       return this.data = data;
     } catch { throw new Error('Chat history cannot be read. The existing history file has been kept.'); }
@@ -45,7 +46,7 @@ class ChatStore {
     const members = value.members.map(m => { if (!UUID.test(m.deviceId) || typeof m.name !== 'string' || m.name.length > 60) throw new Error('Invalid group member.'); return { deviceId: m.deviceId, name: m.name }; });
     if (new Set(members.map(m => m.deviceId)).size !== members.length || !members.some(m => m.deviceId === this.self) || !members.some(m => m.deviceId === value.owner)) throw new Error('Invalid group membership.');
     if(value.description!==undefined&&(typeof value.description!=='string'||value.description.length>500))throw new Error('Group description is too long.');
-    return this.change(data => { const old=data.groups[value.id];if(old&&old.owner!==value.owner)throw new Error('The group owner cannot change.');if(old&&(old.revision||0)>(value.revision||0))return old;return data.groups[value.id] = { id: value.id, name: value.name.trim(), owner: value.owner, members,description:value.description||'',avatar:require('../shared/profile.cjs').profile(value).avatar,revision:Number.isSafeInteger(value.revision)&&value.revision>=0?value.revision:0 }; });
+    return this.change(data => { const old=data.groups[value.id];if(old&&old.owner!==value.owner)throw new Error('The group owner cannot change.');if(old&&(old.revision||0)>(value.revision||0))return old;return data.groups[value.id] = { id: value.id, name: value.name.trim(), owner: value.owner, members,description:value.description||'',avatar:require('../shared/profile.cjs').profile(value).avatar,background:typeof value.background==='string'&&value.background.length<=300000&&/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/]+=*$/.test(value.background)?value.background:'',revision:Number.isSafeInteger(value.revision)&&value.revision>=0?value.revision:0 }; });
   }
   append(value, outgoing = false) {
     const data = this.load();
@@ -82,8 +83,16 @@ class ChatStore {
     return this.change(data => { const token = crypto.randomUUID(); data.attachments[token] = { conversation, message, files }; return token; });
   }
   list() {
-    const data = this.load(); return { filePolicies: {...data.filePolicies}, contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => !m.deleted && m.conversation === id).at(-1) })) };
+    const data = this.load(); return { filePolicies: {...data.filePolicies}, pins:{...data.pins},lastSelected:data.lastSelected||'', unread:this.unread(), contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => !m.deleted && m.conversation === id).at(-1) })) };
   }
+  conversationState(conversation, {pinned,selected,read}={}) {
+    const data=this.load();
+    if(typeof conversation!=='string'||!/^([pg]):[a-f0-9-]{36}$/i.test(conversation)||!(conversation.startsWith('p:')?data.contacts[conversation.slice(2)]:data.groups[conversation.slice(2)]))throw new Error('Unknown conversation.');
+    if(pinned!==undefined&&typeof pinned!=='boolean')throw new Error('Invalid pin setting.');
+    const readAt=Math.max(0,...data.messages.filter(m=>m.conversation===conversation).map(m=>m.receivedAt));if(pinned===undefined&&(!selected||data.lastSelected===conversation)&&(!read||(data.readAt?.[conversation]||0)>=readAt))return;
+    return this.change(next=>{if(pinned!==undefined){next.pins||={};if(pinned)next.pins[conversation]=true;else delete next.pins[conversation];}if(selected)next.lastSelected=conversation;if(read){next.readAt||={};next.readAt[conversation]=Math.max(next.readAt[conversation]||0,...next.messages.filter(m=>m.conversation===conversation).map(m=>m.receivedAt));}});
+  }
+  unread(){const data=this.load(),counts={};for(const m of data.messages)if(m.sender!==this.self&&!m.deleted&&m.receivedAt>(data.readAt?.[m.conversation]||0))counts[m.conversation]=(counts[m.conversation]||0)+1;return counts;}
   filePolicy(conversation, mode) {
     const data=this.load();
     if(typeof conversation!=='string'||!/^([pg]):[a-f0-9-]{36}$/i.test(conversation)||!(conversation.startsWith('p:')?data.contacts[conversation.slice(2)]:data.groups[conversation.slice(2)]))throw new Error('Unknown conversation.');

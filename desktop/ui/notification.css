@@ -6,3 +6,7 @@ body{height:auto}.notice{height:auto;max-height:calc(100vh - 2px);overflow:auto;
 .notice{width:max-content;min-width:min(280px,calc(100vw - 2px));max-width:calc(100vw - 2px)}
 
 .notice{cursor:pointer}.notice:focus-visible{outline:2px solid #c28afa;outline-offset:-3px}
+
+body{border-color:#76518b99;border-radius:9px;background:#24192ef5}.notice{padding:10px 12px;gap:5px;min-width:min(240px,calc(100vw - 2px))}.notice header{gap:7px}.notice header img{width:19px;height:19px}.notice header b{font-size:11px;color:#cbb9d5}.notice h2{font-size:13px;font-weight:600;line-height:1.5}.notice p{font-size:12px;line-height:1.45}#notice-actions{gap:5px}.notice button{font-size:11px;padding:3px 8px;min-height:25px}
+
+.notice h2{font-size:13px!important}.notice button{font-size:11px!important}.notice header b{font-weight:500}

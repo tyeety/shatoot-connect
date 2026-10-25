@@ -44,6 +44,10 @@
     cancelPending(){for(const attempt of this.connectAttempts)attempt.cancel();for(const s of [...this.sessions.values()])if(s.outgoingAttempt&&s.channel?.readyState!=='open')this.close(s,'Connection cancelled.');}
     async connectDestination(destination,attempt) {
       await attempt.wait(this.ready);
+      const addressKey=String(destination.address||'').replace(/\s/g,'').toLowerCase(),endpoint=destination.endpoint||this.internet().endpoint;
+      if(!destination.deviceId){const known=this.catalog.contacts.find(c=>c.route?.type===destination.type&&String(c.route.address||'').replace(/\s/g,'').toLowerCase()===addressKey&&(destination.type!=='id'||c.route.endpoint===endpoint));if(known)destination={...destination,deviceId:known.deviceId,name:known.name};}
+      const sameRoute=[...this.sessions.values()].find(s=>!s.closed&&(!destination.deviceId||s.peer?.deviceId===destination.deviceId)&&s.route.type===destination.type&&(destination.type!=='id'||s.route.endpoint===endpoint)&&(String(s.route.address||s.peer?.id||'').replace(/\s/g,'').toLowerCase()===addressKey));
+      if(sameRoute)return attempt.wait(sameRoute.promise);
       if (destination.deviceId && this.peer(destination.deviceId)) return this.peer(destination.deviceId);
       const pending = [...this.sessions.values()].find(s => !s.closed && destination.deviceId && s.peer?.deviceId === destination.deviceId); if (pending) return attempt.wait(pending.promise);
       const id = crypto.randomUUID(); let route;
@@ -251,7 +255,7 @@
       const previous=existingId&&this.group(existingId);if(existingId&&(!previous||previous.owner!==this.self.deviceId))throw new Error('Only the group owner can change members.');
       const candidates=new Map([...this.catalog.contacts,...this.connected(),...(previous?.members||[])].map(p=>[p.deviceId,p]));
       const peers=[...new Set(members)].filter(id=>id!==this.self.deviceId).map(id=>candidates.get(id));if(peers.some(p=>!p))throw new Error('Unknown group contact.');
-      const group = { id: existingId||crypto.randomUUID(), name,description:details.description??previous?.description??'',avatar:details.avatar??previous?.avatar??'',revision:(previous?.revision||0)+1, owner: this.self.deviceId, members: [this.self, ...peers].map(p => ({ deviceId: p.deviceId, name: p.name })) };
+      const group = { id: existingId||crypto.randomUUID(), name,description:details.description??previous?.description??'',avatar:details.avatar??previous?.avatar??'',background:details.background??previous?.background??'',revision:(previous?.revision||0)+1, owner: this.self.deviceId, members: [this.self, ...peers].map(p => ({ deviceId: p.deviceId, name: p.name })) };
       await this.api.collaboration('group', group);
       await this.refresh();
       for(const peer of peers){const s=this.peer(peer.deviceId);if(s){s.groups.delete(group.id);s.declined.delete(group.id);this.announceGroup(s,group).catch(error=>this.error(error.message));}else{const contact=this.catalog.contacts.find(c=>c.deviceId===peer.deviceId);if(contact?.route)this.connect({...contact.route,deviceId:peer.deviceId,name:peer.name}).catch(()=>{});}}
