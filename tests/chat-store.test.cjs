@@ -19,9 +19,9 @@ test('sender edits/deletes persist, queue offline, reject forged authors and pre
   const edit={id:crypto.randomUUID(),message:id,conversation,sender:self,removed:false,text:'updated',revision:1,pending:[peer]};store.mutate(edit,true);
   assert.equal(new ChatStore(options).history({conversation})[0].text,'updated');assert.equal(store.pendingChanges(peer).length,1);
   assert.throws(()=>store.mutate({...edit,sender:other,revision:2},true),/Invalid/);
-  const deleted={...edit,id:crypto.randomUUID(),revision:2,removed:true};store.mutate(deleted,true);assert.equal(store.history({conversation})[0].deleted,true);assert.equal(store.history({conversation})[0].text,'');
+  const deleted={...edit,id:crypto.randomUUID(),revision:2,removed:true};store.mutate(deleted,true);assert.equal(store.history({conversation}).length,0);assert.equal(store.load().messages.length,0);assert.equal(store.list().conversations.length,0);
   assert.throws(()=>store.mutate({...edit,revision:3},true),/cannot be changed/);store.deliveredChange(deleted.id,peer);assert.equal(store.pendingChanges(peer).length,0);
-  const late=crypto.randomUUID();store.mutate({...deleted,id:crypto.randomUUID(),message:late,sender:peer,revision:1});store.append({id:late,conversation,sender:peer,name:'Peer',kind:'text',text:'late original'});assert.equal(store.history({conversation}).find(m=>m.id===late).deleted,true);
+  const late=crypto.randomUUID();store.mutate({...deleted,id:crypto.randomUUID(),message:late,sender:peer,revision:1});store.append({id:late,conversation,sender:peer,name:'Peer',kind:'text',text:'late original'});assert.equal(store.history({conversation}).find(m=>m.id===late),undefined);assert.equal(new ChatStore(options).history({conversation}).length,0);
 });
 test('encrypted history survives restart, deduplicates delivery, paginates without timestamp gaps and persists the outbox', t => {
   const { store, options, self, peer } = fixture(t);
@@ -32,6 +32,15 @@ test('encrypted history survives restart, deduplicates delivery, paginates witho
   store.delivered(message.id, peer); assert.equal(store.pending(peer).length, 124);
   assert.equal(fs.readFileSync(options.file).includes(Buffer.from('پیام')), false);
   const reopened = new ChatStore(options); assert.equal(reopened.pending(peer).length, 124); assert.equal(reopened.history({ conversation: `p:${peer}`, search: '124' })[0].status, 'delivered');
+});
+
+test('deletion erases file-message references without deleting the file and hides legacy deletion placeholders',t=>{
+ const{store,options,self,peer}=fixture(t),conversation=`p:${peer}`,id=crypto.randomUUID(),file=path.join(path.dirname(options.file),'received.txt');fs.writeFileSync(file,'retain download');
+ store.append({id,conversation,sender:self,name:'Me',kind:'file',text:'received.txt'},true);const attachment=store.attachment(conversation,id,[file]);
+ store.mutate({id:crypto.randomUUID(),message:id,conversation,sender:self,removed:true,revision:1,pending:[peer]},true);
+ assert.equal(store.load().messages.length,0);assert.equal(Object.keys(store.load().attachments).length,0);assert.throws(()=>store.files(attachment),/unavailable/);assert.equal(fs.readFileSync(file,'utf8'),'retain download');
+ store.change(data=>data.messages.push({id:crypto.randomUUID(),conversation,sender:peer,name:'Peer',kind:'text',text:'',deleted:true,receivedAt:Date.now(),pending:[]}));
+ const reopened=new ChatStore(options);assert.equal(reopened.history({conversation}).length,0);assert.equal(reopened.load().messages.length,0);
 });
 test('group owner keeps an offline relay queue and corrupt history is retained instead of overwritten', t => {
   const { store, options, self, peer, other } = fixture(t);

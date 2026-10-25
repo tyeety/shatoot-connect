@@ -52,3 +52,5 @@ main>#session-status:empty{display:none}main>#session-status{flex-shrink:0;margi
 @media(max-height:650px){.connection-grid{margin-top:8px}.card{padding:10px 12px}.card-top{margin-bottom:8px}#network-panel{margin-top:8px;padding:10px}.network-list{margin-top:8px}main>footer{padding:7px 0}}
 
 #action-snackbar .snackbar-message{min-width:0;overflow-wrap:anywhere}#action-snackbar .snackbar-confirm{pointer-events:auto;flex:0 0 auto;margin-inline-start:8px;border:0;border-radius:4px;background:transparent;color:#d6a4ff;padding:4px 8px;min-height:28px;font-weight:600}#action-snackbar .snackbar-confirm:hover{background:#ffffff12}
+
+.chat-message.message-target{outline:2px solid #c28afa;outline-offset:2px}

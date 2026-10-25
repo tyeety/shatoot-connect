@@ -189,7 +189,7 @@ function chatFilesReceived(s,record,files){
     if(win.isVisible()&&!win.isMinimized()&&win.isFocused()&&view?.active&&view.conversation===record.conversation)reading=true;
     win.webContents.send('chat-files-received',{conversation:record.conversation,id:record.id});
   }
-  if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500)});}
+  if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
 }
 const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
 ipcMain.handle('voice-recording',(event,enabled)=>{
@@ -197,7 +197,7 @@ ipcMain.handle('voice-recording',(event,enabled)=>{
   s.voicePermissions||=new Map();if(enabled)s.voicePermissions.set(event.sender.id,Date.now()+15000);else s.voicePermissions.delete(event.sender.id);
 });
 ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active});});
-ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message);});
+ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message,{onActivate:()=>showMain(s)});});
 function configureStartup(enabled){
   if(!smoke && app.isPackaged)app.setLoginItemSettings({name:'Shatoot Connect',openAtLogin:enabled,path:process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),args:['--start-in-tray']});
   saveSettings({startupEnabled:enabled});return enabled;
@@ -248,22 +248,25 @@ const chatPending = new Map();
 ipcMain.handle('app-ready',e=>{
   const s=state(e);if(smoke||!app.isPackaged||s.owner||s.readyAnnounced)return;s.readyAnnounced=true;
   const launcher=getLauncher();launcher.repair(app.getPath('desktop'),shell);
-  try{const resultFile=path.join(update.directory,'last-update.json'),result=JSON.parse(fs.readFileSync(resultFile,'utf8'));if(result.state==='error'&&!result.reported){update.emit({state:'error',version:result.version,error:result.error});notices.toast(s.win,result.error);fs.writeFileSync(resultFile,JSON.stringify({...result,reported:true}));}}catch{}
+  try{const resultFile=path.join(update.directory,'last-update.json'),result=JSON.parse(fs.readFileSync(resultFile,'utf8'));if(result.state==='error'&&!result.reported){update.emit({state:'error',version:result.version,error:result.error});notices.toast(s.win,result.error,{onActivate:()=>openUpdateSettings(s)});fs.writeFileSync(resultFile,JSON.stringify({...result,reported:true}));}}catch{}
   for(const record of preferences.list())if(record.shortcut&&fs.existsSync(path.join(app.getPath('desktop'),preferences.shortcutName(record.id))))createFavoriteShortcut(record.id);
   const token=process.argv.find(arg=>/^--update-token=[a-f0-9-]{36}$/.test(arg))?.split('=')[1];
   if(token){fs.mkdirSync(update.directory,{recursive:true});const file=path.join(update.directory,token+'.ready.json');fs.writeFileSync(file+'.tmp',JSON.stringify({token,version:app.getVersion(),executable:process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),pid:process.pid}));fs.renameSync(file+'.tmp',file);}
-  else{fs.mkdirSync(update.directory,{recursive:true});const worker=path.join(update.directory,'update-worker.ps1');fs.copyFileSync(path.join(__dirname,'update-worker.ps1'),worker);const child=spawn(launcher.powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',worker,'-CleanupOnly','-Target',process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),'-Version',app.getVersion(),'-CacheDirectory',update.directory],{windowsHide:true,detached:true,stdio:'ignore'});child.on('error',()=>{});child.unref();}
+  else{fs.mkdirSync(update.directory,{recursive:true});const worker=path.join(update.directory,'update-worker.ps1');fs.copyFileSync(path.join(__dirname,'update-worker.ps1'),worker);const child=spawn(launcher.powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',worker,'-CleanupOnly','-Target',process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),'-Version',app.getVersion(),'-CacheDirectory',update.directory],{windowsHide:true,detached:false,stdio:'ignore'});child.on('error',()=>{});child.unref();}
 });
 function showMain(s) { if (s.win.isDestroyed()) return; s.win.show(); if (s.win.isMinimized()) s.win.restore(); s.win.focus(); }
 function chatWindowTitle(s){return s.language==='fa'?'گفتگوها · Shatoot Connect':'Chats · Shatoot Connect';}
-function openChat(s) {
-  if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show(); s.chatWindow.focus(); return; }
+function openChat(s,target) {
+  if(target){s.chatTarget=target;s.win.webContents.send('chat-target',target);}
+  if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show();if(s.chatWindow.isMinimized())s.chatWindow.restore();s.chatWindow.focus();if(target)s.chatWindow.webContents.send('chat-target',target);return; }
   const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor: '#0a0e17', title:chatWindowTitle(s), icon:path.join(__dirname,'ui/assets/chat-icon.png'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   win.on('page-title-updated',event=>event.preventDefault());
   s.chatWindow = win; win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
   const chatContentsId=win.webContents.id;win.on('closed', () => { s.chatViews?.delete(chatContentsId);s.voicePermissions?.delete(chatContentsId);s.chatWindow = null; });
   win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
 }
+ipcMain.handle('chat-target',e=>{const s=state(e);if(s.chatWindow?.webContents!==e.sender)throw new Error('Invalid chat target request.');const target=s.chatTarget;s.chatTarget=null;return target;});
+function openUpdateSettings(s){showMain(s);s.win.webContents.send('settings-open','updates');}
 ipcMain.handle('chat-open', e => openChat(state(e)));
 ipcMain.handle('profile-edit',e=>{const s=state(e);showMain(s);s.win.webContents.send('profile-edit');});
 ipcMain.handle('show-main', e => showMain(state(e)));
@@ -285,20 +288,12 @@ ipcMain.handle('update', async (e, operation) => {
   if(installingUpdate)throw new Error('An update is already in progress.');installingUpdate=true;
   try{
   await update.prepare();
-  const worker = path.join(update.directory, 'update-worker.ps1');
+  const token=crypto.randomUUID(),worker=path.join(update.directory,token+'.worker.ps1');
   fs.writeFileSync(worker, fs.readFileSync(path.join(__dirname, 'update-worker.ps1')));
   const executable = process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe');
   if (process.env.PORTABLE_EXECUTABLE_FILE) fs.accessSync(path.dirname(executable), fs.constants.W_OK);
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const token=crypto.randomUUID(),handshake=path.join(update.directory,token+'.worker.json');
-  const proc = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', worker, '-ParentId', String(process.pid), '-Package', update.file, '-Target', executable, '-Digest', update.asset.digest, '-Version',update.asset.version,'-ReadyToken',token,'-CacheDirectory',update.directory, ...(process.env.PORTABLE_EXECUTABLE_FILE ? ['-Portable'] : [])], { detached: true, windowsHide: true, stdio: 'ignore' });
-  await new Promise((resolve,reject)=>{
-    const finish=error=>{clearInterval(poll);clearTimeout(timeout);proc.removeListener('error',failed);proc.removeListener('exit',exited);error?reject(error):resolve();};
-    const failed=error=>finish(error),exited=code=>finish(new Error(`Update installer could not start (${code}). The application remains open.`));
-    const poll=setInterval(()=>{try{const ack=JSON.parse(fs.readFileSync(handshake,'utf8'));if(ack.token===token&&ack.version===update.asset.version)finish();}catch{}},100);
-    const timeout=setTimeout(()=>{proc.kill();finish(new Error('Update installer did not become ready. The application remains open.'));},30000);
-    proc.once('error',failed);proc.once('exit',exited);
-  });proc.unref();
+  await require('./update-launch.cjs').startUpdateWorker({powershell,worker,directory:update.directory,parameters:{ParentId:process.pid,Package:update.file,Target:executable,Digest:update.asset.digest,Version:update.asset.version,ReadyToken:token,CacheDirectory:update.directory,Portable:!!process.env.PORTABLE_EXECUTABLE_FILE}});
   update.emit({state:'installing'});quitting = true; setTimeout(() => app.quit(), 300); return { state: 'installing' };
   }catch(error){update.emit({state:'error',error:error.message});throw error;}finally{installingUpdate=false;}
 });
@@ -702,12 +697,12 @@ app.whenReady().then(async () => {
   if (!smoke) {
     tray = new Tray(path.join(__dirname, 'ui/assets/app-icon.png')); tray.setToolTip('Shatoot Connect');
     refreshTray(states.get(win.webContents.id));tray.on('double-click', () => showMain(states.get(win.webContents.id)));
-    if(app.isPackaged)try{configureStartup(settings().startupEnabled!==false);}catch(error){notices.toast(win,error.message);}
+    if(app.isPackaged)try{configureStartup(settings().startupEnabled!==false);}catch(error){notices.toast(win,error.message,{onActivate:()=>showMain(states.get(win.webContents.id))});}
     setTimeout(() => update.check(), 10000).unref(); setInterval(() => update.check(), 6 * 3600000).unref();
   }
   if (!smoke) for (const record of preferences.list()) if (record.shortcut && fs.existsSync(path.join(app.getPath('desktop'), preferences.shortcutName(record.id)))) { try { createFavoriteShortcut(record.id); } catch {} }
   if (smoke) {
-    setTimeout(() => { smokeLog('Watchdog timeout'); app.exit(1); }, 240000).unref();
+    setTimeout(() => { smokeLog('Watchdog timeout');try{console.error(fs.readFileSync(path.join(__dirname,'../artifacts/smoke.log'),'utf8').split('\n').slice(-25).join('\n'));}catch{}app.exit(1); }, 240000).unref();
     const run=process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,dialog,update,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
     run(win).catch(error => { smokeLog(error.stack); console.error(error); app.exit(1); });
   }

@@ -4,3 +4,5 @@ html{background:transparent}body{opacity:1;transition:opacity .6s ease}body.fadi
 body{height:auto}.notice{height:auto;max-height:calc(100vh - 2px);overflow:auto;box-sizing:border-box}.notice p{flex:none;overflow:visible}.notice p:empty{display:none}#notice-actions{flex-wrap:wrap;flex-shrink:0}.notice header b{overflow-wrap:anywhere;min-width:0}
 
 .notice{width:max-content;min-width:min(280px,calc(100vw - 2px));max-width:calc(100vw - 2px)}
+
+.notice{cursor:pointer}.notice:focus-visible{outline:2px solid #c28afa;outline-offset:-3px}

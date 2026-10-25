@@ -27,5 +27,6 @@
   messenger.renderDiscovery(initial.discovery); messenger.open();
   if (initial.selected) await messenger.select(initial.selected);
   document.getElementById('messenger-dialog').addEventListener('close', () => api.closeChat());
+  const navigate=async()=>{const target=await api.pendingChatTarget();if(target)await messenger.navigate(target);};api.onChatTarget(()=>navigate().catch(error=>window.actionNotice(error.message)));await navigate();
   window.shatootconnectChatReady = true;
 })().catch(error => { document.body.textContent = error.message; });

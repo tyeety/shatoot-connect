@@ -45,3 +45,9 @@ test('measured notification heights compact the stack and a tall critical reques
   const critical=f.api.showMessageBox(f.owner,{type:'question',priority:'critical',buttons:['Reject','Allow']});await f.ready();const record=[...f.api.entries.values()].find(r=>r.data.urgent);assert.ok(record);f.listeners.get('notice-size')(f.event(record),450);f.disjoint();assert.ok(f.api.entries.size<=2);f.answer(record,0);await critical;
   while(f.api.entries.size){for(const r of [...f.api.entries.values()])f.hide(r);await f.ready()}await Promise.all([a,b,c]);
 });
+
+test('clicking a passive notice activates its destination once; Hide and critical body clicks never approve',async t=>{
+ const f=fixture(t);let opened=0;const done=f.api.toast(f.owner,'Message',{onActivate:()=>opened++});await f.ready();const record=[...f.api.entries.values()][0],event=f.event(record);f.listeners.get('notice-open')(event);await done;await Promise.resolve();assert.equal(opened,1);f.listeners.get('notice-open')(event);assert.equal(opened,1);
+ const hidden=f.api.toast(f.owner,'Hidden',{onActivate:()=>opened++});await f.ready();f.hide([...f.api.entries.values()][0]);await hidden;assert.equal(opened,1);
+ const question=f.api.showMessageBox(f.owner,{type:'question',buttons:['Allow','Reject'],cancelId:1});await f.ready();const critical=[...f.api.entries.values()][0];f.listeners.get('notice-open')(f.event(critical));assert.equal(critical.done,undefined);f.answer(critical,1);assert.equal((await question).response,1);
+});

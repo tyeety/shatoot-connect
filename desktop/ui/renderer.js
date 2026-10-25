@@ -736,3 +736,5 @@ $('language').onchange = guarded(async () => { window.i18n.setLanguage(await api
     await connectFavorite(config.pendingFavorite);
   } else if (config.internetEnabled !== false) connect().catch(e => { if (!window.shatootconnectDirect && role === 'idle') status(e.message, true); scheduleReconnect(); });
 })().catch(e => status(e.message, true));
+
+api.onSettingsOpen(tab=>{if(!$('settings-dialog').open)$('settings-dialog').showModal();selectSettingsTab(tab);});

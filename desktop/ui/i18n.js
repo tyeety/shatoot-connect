@@ -2,6 +2,7 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['باز کردن مقصد اعلان انجام نشد.','Could not open the notification destination.'],
     ['تأیید','OK'],
     ['اجازهٔ دسترسی فایروال','Allow firewall access'],
 ['پروفایل ذخیره شد.','Profile saved.'],

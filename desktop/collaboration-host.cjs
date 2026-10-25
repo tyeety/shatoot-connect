@@ -41,7 +41,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
         message: fa ? `پیوستن به گروه ${group.name}؟` : `Join ${group.name}?`, detail: `${decorateComputer(g.peer).displayName||g.peer.name}\n${group.members.slice(0,10).map(m => m.name).join(', ')}` }); return result.response === 1; }
       finally { s.chatPrompt = false; }
     }
-    if (op === 'append') { const result=history.append(value.message,value.outgoing===true);if(!value.outgoing&&!result.duplicate&&result.message.kind==='text')messageReceived(s,result.message);return result; }
+    if (op === 'append') { const result=history.append(value.message,value.outgoing===true);if(!value.outgoing&&!result.duplicate&&!result.message.deleted&&result.message.kind==='text')messageReceived(s,result.message);return result; }
     if (op === 'delivered') { if (!UUID.test(value.id) || !UUID.test(value.peer)) throw new Error('Invalid receipt.'); return history.delivered(value.id, value.peer); }
     if(op==='voice-data') {
       const files=history.files(value.token);

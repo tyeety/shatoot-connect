@@ -13,6 +13,14 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.19.4 — 2026-10-25
+
+### Fixed
+
+- Update helper startup no longer launches Windows PowerShell with Node's detached flag, which can exit successfully without executing its command. A hidden Windows Start-Process handoff keeps the worker independent after the app exits. Each update uses its own worker script, readiness token and bounded retained diagnostic files. Readiness and early-exit errors are checked before the app closes. The same detached-launch issue no longer prevents startup cache cleanup. Older affected clients need one manual installer upgrade to obtain this fix.
+- Deleting an own message removes it from both peers' visible history and conversation preview, without a Message deleted bubble or empty row. Internal deletion records still prevent delayed/offline replay from restoring it; received files remain in their filesystem locations.
+- Clicking a message, voice or file notification opens the correct chat and highlights the related message, restoring a minimized chat or creating it if closed. Update failure notices open Updates. Other passive notices restore their owner; clicking an approval notice never approves it. Hide continues to dismiss without navigating.
+
 ## 0.19.3 — 2026-10-25
 
 ### Fixed

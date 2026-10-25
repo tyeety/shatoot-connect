@@ -104,7 +104,8 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC').querySelector('.content_copy').parentElement.click();true");
   await until(()=>owner.copiedText==='Edited across RTC');
   await run(chat,"[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC').querySelector('.delete').parentElement.click();true");
-  await until(()=>peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId&&m.deleted));
+  await until(()=>peer.chatStore.load().mutations.some(m=>m.message===changedId&&m.removed)&&!peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId));
+  await until(()=>run(chat,`!document.querySelector('[data-message-id="${changedId}"]')&&!document.querySelector('.chat-message.deleted')`));
   const third=createWindow();await ready(third);const thirdState=states.get(third.webContents.id),thirdId=thirdState.identity.deviceId;
   try{
     await run(host,`collaboration.connect({type:'lan',address:'127.0.0.1:${thirdState.directInfo.port}'}).then(()=>true)`);
@@ -124,7 +125,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
     owner.chatStore=null;
     await run(host,`collaboration.connect({type:'lan',address:'127.0.0.1:${thirdState.directInfo.port}',deviceId:'${thirdId}'}).then(()=>true)`);
     await until(()=>thirdState.chatStore.history({conversation:'g:'+groupId}).some(m=>m.id===groupMessage&&m.text==='Edited while recipient offline'));
-    await run(viewer,`collaboration.changeMessage('g:${groupId}','${groupMessage}','',true).then(()=>true)`);await until(()=>thirdState.chatStore.history({conversation:'g:'+groupId}).some(m=>m.id===groupMessage&&m.deleted));
+    await run(viewer,`collaboration.changeMessage('g:${groupId}','${groupMessage}','',true).then(()=>true)`);await until(()=>thirdState.chatStore.load().mutations.some(m=>m.message===groupMessage&&m.removed)&&!thirdState.chatStore.history({conversation:'g:'+groupId}).some(m=>m.id===groupMessage));
     log('Actual message Copy/Edit/Delete buttons, private RTC changes, owner group metadata/photo and three-peer member edit/delete relay passed');
   }finally{if(!third.isDestroyed())third.destroy();}
   await run(chat,`messenger.select('${conversation}').then(()=>true)`);
@@ -140,8 +141,8 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await until(()=>run(notice.win,"!!document.querySelector('#notice-hide')"));
   const area=screen.getPrimaryDisplay().workArea,b=notice.win.getBounds();if(b.x+b.width!==area.x+area.width-16)throw new Error('Notification is not bottom-right');
   fs.writeFileSync(path.join(artifacts,'file-received-notice.png'),(await notice.win.webContents.capturePage()).toPNG());
-  await run(notice.win,"document.querySelector('#notice-hide').click();true");await until(()=>notice.done);
-  log('Background chat completion showed a themed bottom-right notification with a working Hide button');
+  await run(notice.win,"document.querySelector('#notice-message').click();true");await until(()=>notice.done);await until(()=>chat.isFocused());await until(()=>run(chat,`window.chatSelected==='${conversation}'&&!!document.querySelector('.chat-message.message-target')`));
+  log('Clicking the background file notification focused its exact chat and highlighted the received message');
   const group=await run(chat,"collaboration.createGroup('Different chat',[]).then(g=>g.id)");await run(chat,`messenger.select('g:${group}').then(()=>true)`);chat.show();chat.focus();await run(chat,"document.querySelector('#chat-text').focus();true");await until(()=>chat.isFocused());await send('other-chat.txt');
   await until(()=>[...notices.entries.values()].some(r=>r.owner===host&&r.data.message.includes('Files received')));clear();
   await run(chat,`messenger.select('${conversation}').then(()=>{window.i18n.setLanguage('fa');return true})`);await pause(100);fs.writeFileSync(path.join(artifacts,'chat-file-settings-fa.png'),(await chat.webContents.capturePage()).toPNG());
@@ -172,6 +173,11 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   }
   clear();const short=notices.toast(host,'Saved');await until(()=>notices.entries.size>0);const shortNotice=[...notices.entries.values()][0];await until(()=>run(shortNotice.win,"!!document.querySelector('#notice-hide')"));await until(()=>shortNotice.win.getBounds().height<230);const shortHeight=shortNotice.win.getBounds().height;if(shortNotice.win.getBounds().width>=420)throw Error('Short notification did not compact its width');fs.writeFileSync(path.join(artifacts,'notice-compact.png'),(await shortNotice.win.webContents.capturePage()).toPNG());shortNotice.finish(0);await short;
   const long=notices.toast(host,'A longer notification',{detail:'One\nTwo\nThree\nFour\nFive\nSix'});await until(()=>notices.entries.size>0);const longNotice=[...notices.entries.values()][0];await until(()=>run(longNotice.win,"!!document.querySelector('#notice-hide')"));await until(()=>longNotice.win.getBounds().height>shortHeight);fs.writeFileSync(path.join(artifacts,'notice-content.png'),(await longNotice.win.webContents.capturePage()).toPNG());longNotice.finish(0);await long;
+  chat.close();await until(()=>!owner.chatWindow);clear();
+  await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Reopen chat from notification').then(()=>true)`);await until(()=>[...notices.entries.values()].some(r=>r.owner===host&&r.data.detail==='Reopen chat from notification'));
+  const reopenNotice=[...notices.entries.values()].find(r=>r.owner===host&&r.data.detail==='Reopen chat from notification');await until(()=>run(reopenNotice.win,"!!document.querySelector('#notice-message')"));await run(reopenNotice.win,"document.querySelector('#notice-message').click();true");await until(()=>owner.chatWindow);
+  await until(()=>run(owner.chatWindow,`window.shatootconnectChatReady===true&&window.chatSelected==='${conversation}'&&[...document.querySelectorAll('.message-target p')].some(e=>e.textContent==='Reopen chat from notification')`));
+  log('A message notification recreated the closed chat window and navigated to the exact conversation/message');
   log('Private nicknames preserve the remote published name; cached desktop preview/avatar remain offline; narrow English/Persian chat layout and content-sized notices passed');
   if(owner.captureAllowed||owner.control)throw new Error('Chat file handling granted desktop control');
   log('Different selected chat still notifies; passive notice fades; per-chat settings work in the separate English/Persian chat window');

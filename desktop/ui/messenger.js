@@ -1,7 +1,7 @@
 'use strict';
 window.installMessenger = ({ api, self, internet, ensureInternet, remote, detached = false }) => {
   const $ = id => document.getElementById(id), tr = text => window.i18n.translate(text);
-  let engine, selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
+  let engine, targetMessage='',selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
   let voice;
   let editingGroup,groupAvatar='',connecting=false,connectSequence=0;
   const progress = new Map();
@@ -39,6 +39,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     finally{if(sequence===connectSequence){connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;}}
   }
   async function select(id) { if(id!==selected)voice?.reset();if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = []; selectionVersion++; $('chat-search').value = ''; render(); await reportView(); await load(false); publish(); }
+  async function navigate(target){await select(target.conversation);targetMessage=target.message||'';if(target.message){if(!rows.some(m=>m.id===target.message)){const message=await api.collaboration('message',{conversation:target.conversation,id:target.message});if(message&&!message.deleted){rows=await api.collaboration('history',{conversation:target.conversation,before:message.receivedAt+1});renderMessages(false);}}const item=[...$('chat-messages').children].find(e=>e.dataset.messageId===target.message);item?.scrollIntoView({block:'center'});item?.classList.add('message-target');setTimeout(()=>{if(targetMessage!==target.message)return;targetMessage='';for(const row of document.querySelectorAll('.message-target'))row.classList.remove('message-target');},3000);}$('chat-text').focus();}
   async function load(older = false) {
     if (!selected) return;
     const version = selectionVersion, id = selected, search = $('chat-search').value.trim();
@@ -49,8 +50,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   function renderMessages(scroll) {
     const log = $('chat-messages'), nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
     log.replaceChildren();
-    for (const row of rows) {
-      const item = document.createElement('article'); item.className = 'chat-message'; const own = row.sender === self.deviceId;
+    for (const row of rows.filter(row=>!row.deleted)) {
+      const item = document.createElement('article'); item.className = 'chat-message';item.dataset.messageId=row.id;if(row.id===targetMessage)item.classList.add('message-target'); const own = row.sender === self.deviceId;
       if (own) item.classList.add('own'); if (own && row.pending.length) item.classList.add('pending');
       const name = document.createElement('header'); name.textContent=row.sender===self.deviceId?self.name:row.displayName||displayName(contact(row.sender))||row.name;
       const text = document.createElement('p'); text.dir = 'auto'; text.textContent = row.deleted?tr('Message deleted'):row.text;
@@ -107,6 +108,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   function publish() { if (!detached && engine) api.chatPublish(snapshot()); }
   function snapshot() { return { self, pendingConnections:engine.connectAttempts?[...engine.connectAttempts].filter(a=>!a.background).length:0,catalog: engine.catalog, connected: engine.connected(), language: window.i18n.language, discovery, selected, progress: [...progress] }; }
   engine = new window.CollaborationClient({ api, self, internet, ensureInternet, changed: () => { render(true); publish(); }, error, progress: value => { const text = tr(value.text) + (Number.isInteger(value.percent) ? ` ${value.percent}%` : ''); progress.set(value.conversation, text); if (selected === value.conversation) $('chat-progress').textContent = text; publish(); } });
+  if(!detached)api.onChatTarget(target=>navigate(target).catch(error));
   if (!detached) api.onChatCommand(async (operation, args) => { if (operation === 'snapshot') return snapshot(); if (operation === 'close') { engine.close(engine.peer(args[0])); return; } const result = await engine[operation](...args); return operation === 'connect' ? { peer: result.peer } : result; });
   window.collaboration = engine;
   $('open-messenger').onclick = open;
@@ -163,5 +165,5 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   if(!detached)setInterval(()=>engine.reconnectKnown().catch(()=>{}),5000);
   engine.ready.then(()=>{render();if(!detached)engine.reconnectKnown().catch(()=>{});}).catch(error); api.discovery().then(renderDiscovery).catch(error);
   window.addEventListener('shatoot-language-change', () => { renderDiscovery(discovery); renderMessages(false);publish(); });
-  return { engine, open, select, start, renderDiscovery, snapshot };
+  return { engine, open, select, navigate, start, renderDiscovery, snapshot };
 };

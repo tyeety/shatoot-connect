@@ -34,6 +34,11 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
   }
   await run("document.querySelector('#settings-dialog').close();true");
   log('Actual Electron async clipboard API decoded PNG without readImage; Save Profile explicitly confirms changed and unchanged profiles');
+  const worker=path.join(artifacts,'update-launch.ps1'),token=require('node:crypto').randomUUID();
+  fs.writeFileSync(worker,"param($Version,$ReadyToken,$CacheDirectory)\n[IO.File]::WriteAllText((Join-Path $CacheDirectory ($ReadyToken+'.worker.json')),(@{token=$ReadyToken;version=$Version}|ConvertTo-Json -Compress));Start-Sleep -Milliseconds 200");
+  const launch=await require('../desktop/update-launch.cjs').startUpdateWorker({powershell:path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),worker,directory:artifacts,parameters:{Version:'0.19.4',ReadyToken:token,CacheDirectory:artifacts}});
+  await new Promise(resolve=>launch.exitCode!==null?resolve():launch.once('exit',resolve));if(launch.exitCode!==0)throw Error('Electron update-worker launch failed');
+  log('PowerShell worker started and confirmed readiness from the actual Electron main process');
   const server=new WebSocketServer({host:'127.0.0.1',port:0}),clients=new Set();
   let greet=false,joined=false;await new Promise(r=>server.once('listening',r));server.on('connection',ws=>{clients.add(ws);ws.once('close',()=>clients.delete(ws));ws.on('message',data=>{if(JSON.parse(data).type==='join')joined=true});if(greet)ws.send(JSON.stringify({type:'ready',direct:true,service:'ShatootConnect',protocol:2}))});
   const address='127.0.0.1:'+server.address().port;

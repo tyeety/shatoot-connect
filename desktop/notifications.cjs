@@ -9,6 +9,7 @@ function createNotifications({BrowserWindow,ipcMain,screen,language=()=> 'en',ac
   ipcMain.handle('notice-info',event=>entry(event)?.data);
   ipcMain.on('notice-answer',(event,index)=>{const record=entry(event);if(!record)return;if(Number.isInteger(index)&&index>=0&&index<record.data.buttons.length)record.finish(index);});
   ipcMain.on('notice-hide',event=>{const record=entry(event);if(!record)return;if(!record.data.urgent)record.finish(record.cancel);});
+  ipcMain.on('notice-open',event=>{const record=entry(event);if(!record||record.done)return;if(record.data.urgent){record.win.show?.();record.win.focus?.();return;}const activate=record.activate;record.finish(record.cancel);Promise.resolve().then(activate).catch(()=>{showMessageBox(record.owner,{message:'Could not open the notification destination.'});});});
   ipcMain.on('notice-size',(event,value)=>{
     const record=entry(event);if(!record)return;const requested=typeof value==='number'?{height:value}:value;
     if(!Number.isFinite(requested?.height))return;
@@ -47,6 +48,7 @@ function createNotifications({BrowserWindow,ipcMain,screen,language=()=> 'en',ac
     if(closed||owner?.isDestroyed())return Promise.resolve({response:options.cancelId||0});
     if(waiting.length>=64){const oldest=waiting.find(task=>!task.data.urgent);if(oldest)oldest.finish(oldest.cancel);else return Promise.resolve({response:options.cancelId||0});}
     return new Promise(resolve=>{const urgent=options.type==='question';const task={owner,resolve,cancel:options.cancelId||0,sequence:sequence++,remaining:options.timeout||6500,data:{title:String(options.title||'Shatoot Connect').slice(0,100),message:String(options.message||'').slice(0,300),detail:String(options.detail||'').slice(0,1600),buttons:(options.buttons||(urgent?['Close']:[])).slice(0,4),language:options.language||language(),urgent,priority:options.priority}};
+      task.data.activatable=true;task.activate=typeof options.onActivate==='function'?options.onActivate:()=>{if(owner&&!owner.isDestroyed()){owner.show?.();if(owner.isMinimized?.())owner.restore?.();owner.focus?.();}};
       task.finish=response=>finish(task,response);task.ownerClosed=()=>task.finish(task.cancel);tasks.add(task);waiting.push(task);owner?.once('closed',task.ownerClosed);if(urgent)task.deadline=timers.setTimeout(task.ownerClosed,options.timeout||60000);pump();});
   }
   const ticker=timers.setInterval(()=>{const at=now(),elapsed=Math.max(0,Math.min(1000,at-lastTick));lastTick=at;const active=activity();for(const task of entries.values())if(!task.data.urgent&&task.visible){if(!active||task.hovered){stopFade(task);continue;}if(task.fading)continue;task.remaining-=elapsed;if(task.remaining<=0){task.fading=true;task.win.webContents.send('notice-fade',true);task.fadeTimer=timers.setTimeout(()=>task.finish(task.cancel),600);}}},200);ticker.unref?.();
