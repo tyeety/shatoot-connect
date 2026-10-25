@@ -13,6 +13,22 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.6 — 2026-10-25
+
+### Fixed
+
+- Independent-pointer menu clicks now recognize Windows UI Automation menu items, including modern popup providers, without foregrounding/dismissing the popup or moving the host cursor. Invoke/ExpandCollapse patterns handle actions and submenus; checked MSAA menu-item actions remain a fallback for classic menus. Unsupported underlying controls are not accidentally invoked when a menu disappears. Install this fix on the host computer as well as the viewer; older hosts keep their older input helper.
+- Remote-video window minimum/content dimensions are rounded to positive integers before calling native window APIs.
+
+### Added
+
+- Local-only Electron crash minidumps under the existing profile's `crashes` directory, with uploads disabled. Bounded `logs/process.log` diagnostics now record startup, normal exit, renderer/GPU exits, viewer frame dimensions and window hiding/close requests without participant names or message/clipboard contents. Minidumps are process-memory diagnostic files and remain local.
+- A development-only isolated crash-recorder smoke test intentionally crashes a blank fixture renderer and verifies a real local dump and exit record with uploads disabled; both Windows CI workflows run it. The native popup-menu test now requires a successful UI Automation action with zero physical cursor moves. `test:smoke -- --quality-smoke` exercises VP9-quality remote viewing alongside the existing H.264 LAN path.
+
+### Investigation
+
+- A reported viewer exit when the first remote image appeared could not be reproduced locally: H.264 and VP9 connections decoded frames and continued through the full RTC/input/clipboard tests. No matching pre-existing application crash log or dump was available. This release does not claim that specific crash's cause is confirmed; the new recorder preserves evidence if it recurs.
+
 ## 0.20.5 — 2026-10-25
 
 ### Added

@@ -17,12 +17,8 @@ if (smoke) {
   process.on('uncaughtException', error => { smokeLog(`uncaught: ${error.stack}`); app.exit(1); });
   process.on('unhandledRejection', error => { smokeLog(`unhandled: ${error?.stack || error}`); app.exit(1); });
 }
-if(!smoke){
-  const diagnostic=require('./diagnostics.cjs').diagnosticLog(path.join(app.getPath('userData'),'logs'),app.getVersion());
-  process.on('uncaughtExceptionMonitor',(error,origin)=>diagnostic('uncaught-exception',{name:error?.name,code:error?.code,stack:error?.stack,origin}));
-  app.on('render-process-gone',(_event,_contents,details)=>diagnostic('renderer-exit',details));
-  app.on('child-process-gone',(_event,details)=>diagnostic('child-process-exit',details));
-}
+const crashProbe=smoke&&process.argv.includes('--crash-recorder-smoke');
+const diagnostic=smoke&&!crashProbe?()=>{}:require('./diagnostics.cjs').installProcessDiagnostics({app,process,crashReporter:require('electron').crashReporter});
 const states = new Map();
 let localServer, tray, quitting = false;
 let settingsCache;
@@ -219,13 +215,14 @@ ipcMain.handle('fit-video',(e,size)=>{
   const s=state(e);if(s.owner)return;
   if(!size){if(s.videoSizing&&!s.win.isMaximized()&&!s.win.isFullScreen())saveSettings({remoteWindowSize:{width:s.win.getContentBounds().width,height:s.win.getContentBounds().height}});s.videoSizing=null;s.win.setAspectRatio(0);if(s.normalBounds){s.win.setMinimumSize(Math.min(1000,s.normalBounds.width),Math.min(720,s.normalBounds.height));s.win.setBounds(s.normalBounds);s.normalBounds=null;if(s.normalMaximized)s.win.maximize();s.normalMaximized=false;}return;}
   if(!Number.isFinite(size.width)||!Number.isFinite(size.height)||size.width<1||size.height<1||size.width>32768||size.height>32768)return;
+  if(s.videoSizing?.sourceWidth!==size.width||s.videoSizing?.sourceHeight!==size.height)diagnostic('viewer-video',{width:size.width,height:size.height});
   const work=screen.getDisplayMatching(s.win.getBounds()).workArea,ratio=size.width/size.height;
   if(!s.normalBounds){s.normalMaximized=s.win.isMaximized();s.normalBounds=s.win.getNormalBounds();if(s.normalMaximized)s.win.unmaximize();}
   const frameHeight=s.win.getBounds().height-s.win.getContentBounds().height,frameWidth=s.win.getBounds().width-s.win.getContentBounds().width;
   const extraHeight=Number.isFinite(size.extraHeight)?Math.max(0,Math.min(250,size.extraHeight)):82,extraWidth=Number.isFinite(size.extraWidth)?Math.max(0,Math.min(80,size.extraWidth)):16;
   const previous=settings().remoteWindowSize;let width=Math.min(size.width+extraWidth,previous?.width||Infinity,work.width-frameWidth-24),height=Math.round((width-extraWidth)/ratio+extraHeight);
   const maxHeight=Math.min(work.height-frameHeight-24,previous?.height||Infinity,size.height+extraHeight);if(height>maxHeight){height=maxHeight;width=Math.round((height-extraHeight)*ratio+extraWidth);}
-  s.videoSizing={ratio,extraHeight,extraWidth};s.win.setMinimumSize(Math.min(640,width),Math.min(360,height));if(!s.win.isFullScreen()&&!s.win.isMaximized()){s.win.setContentSize(Math.round(width),Math.round(height));const bounds=s.win.getBounds();s.win.setPosition(Math.round(Math.max(work.x+12,Math.min(bounds.x,work.x+work.width-bounds.width-12))),Math.round(Math.max(work.y+12,Math.min(bounds.y,work.y+work.height-bounds.height-12))));}
+  s.videoSizing={ratio,extraHeight,extraWidth,sourceWidth:size.width,sourceHeight:size.height};s.win.setMinimumSize(Math.max(1,Math.round(Math.min(640,width))),Math.max(1,Math.round(Math.min(360,height))));if(!s.win.isFullScreen()&&!s.win.isMaximized()){s.win.setContentSize(Math.max(1,Math.round(width)),Math.max(1,Math.round(height)));const bounds=s.win.getBounds();s.win.setPosition(Math.round(Math.max(work.x+12,Math.min(bounds.x,work.x+work.width-bounds.width-12))),Math.round(Math.max(work.y+12,Math.min(bounds.y,work.y+work.height-bounds.height-12))));}
 });
 function hostReply(s, message) {
   if (!s.owner || s.owner.win.isDestroyed()) return;
@@ -391,7 +388,9 @@ function createWindow() {
   win.webContents.setWebRTCIPHandlingPolicy('default');
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
-  win.on('close', event => { if (!quitting) { event.preventDefault(); if(s.outgoingDesktop){win.webContents.send('remote-window-close');return;} win.hide(); } });
+  win.on('close', event => { diagnostic('window-close-request',{type:s.outgoingDesktop?'viewer':'main'});if (!quitting) { event.preventDefault(); if(s.outgoingDesktop){win.webContents.send('remote-window-close');return;} win.hide(); } });
+  win.on('hide',()=>diagnostic('window-hidden',{type:s.outgoingDesktop?'viewer':'main'}));
+  win.on('unresponsive',()=>diagnostic('window-unresponsive',{type:s.outgoingDesktop?'viewer':'main'}));
   win.on('closed', () => { for (const child of states.values()) if (child.owner === s) closeExtraHost(child); s.chatWindow?.destroy(); collaborationHost.close(s); s.discovery?.close(); for (const ws of s.lanSockets?.values() || []) ws.terminate(); hideHostOverlay(s); release(s); s.keyboardMonitor?.stdin.end(); s.helper?.stdin.end(); s.directSocket?.close(); s.directService?.close(); states.delete(contentsId); });
   win.loadFile(path.join(__dirname, 'ui/index.html'));
   return win;
@@ -697,6 +696,7 @@ ipcMain.handle('exchange', async (e, operation, value) => {
 
 app.whenReady().then(async () => {
   smokeLog('app ready');
+  if(crashProbe){await require('../tests/crash-recorder-smoke.cjs')({app,BrowserWindow,crashReporter:require('electron').crashReporter});return;}
   if (smoke) saveSettings({ theme:'dark',favorites: [], connectionHistory:[], connectionPasswords:{},computerCards:{}, rememberPasswords:true, fixedPassword: null, language: 'en' });
   if(smoke&&(process.argv.includes('--chat-notification-smoke')||process.argv.includes('--connection-ui-smoke')))saveSettings({internetEnabled:false,autoAcceptFiles:true});
   nativeTheme.themeSource=settings().theme==='light'?'light':'dark';
@@ -817,6 +817,7 @@ async function runSmoke(host) {
   const viewer = createWindow();
   await wait(viewer, '!!window.shatootconnectReady');
   smokeLog('viewer ready');
+  if(process.argv.includes('--quality-smoke'))for(const win of [host,viewer])await win.webContents.executeJavaScript("document.querySelector('#quality').value='quality';document.querySelector('#quality').dispatchEvent(new Event('change'));true");
   await viewer.webContents.executeJavaScript(`document.querySelector('#server-url').value=${JSON.stringify(credentials.endpoint)};document.querySelector('#remote-id').value=${JSON.stringify(credentials.id)};document.querySelector('#remote-password').value=${JSON.stringify(credentials.password)};document.querySelector('#quick-save').click(); true`, true);
   await wait(viewer, "!!document.querySelector('#save-computer-form')");
   await viewer.webContents.executeJavaScript("document.querySelector('#save-computer-form').requestSubmit();true");

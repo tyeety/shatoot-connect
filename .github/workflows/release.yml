@@ -41,6 +41,7 @@ jobs:
       - run: ./native/publish/ShatootConnect.Input.exe --menu-self-test
       - run: npm run test:connection-ui
       - run: npm run test:chat-ui
+      - run: npm run test:crash-recorder
       - run: npm run test:packaged -- --ui
       - run: npm run test:installer
       - run: npm run dist:server

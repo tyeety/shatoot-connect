@@ -12,9 +12,9 @@ sealed class IndependentPointer {
     public bool IsExcludedAt(int px, int py) => Excluded(GetAncestor(WindowFromPoint(new POINT { X = px, Y = py }), 2));
     readonly Dictionary<int, Target> pressed = new();
     int x, y, lastX, lastY, lastButton = -1;
-    long lastDown;
+    long lastDown,lastMenuHover;
     IntPtr lastWindow;
-    record Target(IntPtr Window, IntPtr Root, int Hit, RECT Bounds, int StartX, int StartY, bool NativeButton);
+    record Target(IntPtr Window, IntPtr Root, int Hit, RECT Bounds, int StartX, int StartY, bool NativeButton,bool Menu=false);
     static IntPtr Coordinates(int x, int y) => (IntPtr)((y & 0xffff) << 16 | (x & 0xffff));
     uint State() => (uint)((pressed.ContainsKey(0) ? 1 : 0) | (pressed.ContainsKey(2) ? 2 : 0) | (pressed.ContainsKey(1) ? 16 : 0) | (GetAsyncKeyState(0x10) < 0 ? 4 : 0) | (GetAsyncKeyState(0x11) < 0 ? 8 : 0));
     Target? At(int px, int py) {
@@ -58,7 +58,11 @@ sealed class IndependentPointer {
         if (target is null) return;
         if (pressed.ContainsKey(0) && target.Hit == 2) {
             SetWindowPos(target.Root, IntPtr.Zero, target.Bounds.Left + x - target.StartX, target.Bounds.Top + y - target.StartY, 0, 0, 0x0015);
-        } else if (target.Hit == 1) Post(target, 0x200, State());
+        } else if (target.Hit == 1) {
+            Post(target, 0x200, State());
+            var cls=new StringBuilder(256);GetClassName(target.Root,cls,cls.Capacity);
+            if(Environment.TickCount64-lastMenuHover>100&&(cls.ToString()=="#32768"||cls.ToString().Contains("Popup",StringComparison.OrdinalIgnoreCase))){lastMenuHover=Environment.TickCount64;MenuAutomation.At(x,y,expandOnly:true);}
+        }
     }
     public void Button(int button, bool down, int px, int py) {
         if (button is not (0 or 1 or 2)) return;
@@ -67,21 +71,22 @@ sealed class IndependentPointer {
         if (down) {
             if (pressed.ContainsKey(button)) return;
             target = At(x, y); if (target is null) return;
-            pressed[button] = target;
             var targetClass=new StringBuilder(256);GetClassName(target.Root,targetClass,targetClass.Capacity);
+            if(button==0)target=target with{Menu=targetClass.ToString()=="#32768"||MenuAutomation.At(x,y)};
+            pressed[button] = target;
             // Popup menus belong to the existing foreground owner. Activating
             // the popup itself dismisses Windows' menu loop before the click.
-            if(targetClass.ToString()!="#32768")SetForegroundWindow(target.Root);
+            if(!target.Menu&&targetClass.ToString()!="#32768")SetForegroundWindow(target.Root);
         } else {
             if (!pressed.Remove(button, out target)) return;
         }
-        var menuClass=new StringBuilder(256);GetClassName(target.Root,menuClass,menuClass.Capacity);
-        if(button==0&&menuClass.ToString()=="#32768"){
+        if(button==0&&target.Menu){
             if(!down)try{
+                if(MenuAutomation.At(x,y,invoke:true))return;
                 // System menu loops consult the physical cursor, so posted
                 // clicks cannot reliably invoke their items. MSAA invokes the
                 // item at the remote point without moving that cursor.
-                if(AccessibleObjectFromPoint(new POINT{X=x,Y=y},out var accessible,out var child)==0){try{((dynamic)accessible).accDoDefaultAction(child);return;}finally{if(Marshal.IsComObject(accessible))Marshal.ReleaseComObject(accessible);}}
+                if(AccessibleObjectFromPoint(new POINT{X=x,Y=y},out var accessible,out var child)==0){try{if(Convert.ToInt32(((dynamic)accessible).get_accRole(child))==12){((dynamic)accessible).accDoDefaultAction(child);return;}}finally{if(Marshal.IsComObject(accessible))Marshal.ReleaseComObject(accessible);}}
             }catch(COMException){}catch(Microsoft.CSharp.RuntimeBinder.RuntimeBinderException){}
             return;
         }
@@ -147,7 +152,7 @@ sealed class IndependentPointer {
         ShowWindow(host,5);SetForegroundWindow(host);GetCursorPos(out var before);int originalMoves=Native.CursorMoveCount;
         using var timer=new Timer(_=>{var popup=FindWindow("#32768",null);if(popup==IntPtr.Zero)return;if(GetMenuItemRect(host,menu,1,out var rect)){var p=new IndependentPointer();p.Button(0,true,(rect.Left+rect.Right)/2,(rect.Top+rect.Bottom)/2);p.Button(0,false,(rect.Left+rect.Right)/2,(rect.Top+rect.Bottom)/2);}},null,300,Timeout.Infinite);
         using var cancel=new Timer(_=>PostMessage(host,0x1f,IntPtr.Zero,IntPtr.Zero),null,3000,Timeout.Infinite);
-        try{uint command=TrackPopupMenuEx(menu,0x100,150,150,host,IntPtr.Zero);bool ok=command==102&&Native.CursorMoveCount==originalMoves;Console.WriteLine(JsonSerializer.Serialize(new{ok,command,cursorMovedByHelper=Native.CursorMoveCount!=originalMoves}));return ok?0:1;}
+        try{uint command=TrackPopupMenuEx(menu,0x100,150,150,host,IntPtr.Zero);bool ok=command==102&&Native.CursorMoveCount==originalMoves&&MenuAutomation.Actions>0;Console.WriteLine(JsonSerializer.Serialize(new{ok,command,automationActions=MenuAutomation.Actions,cursorMovedByHelper=Native.CursorMoveCount!=originalMoves}));return ok?0:1;}
         finally{DestroyMenu(menu);DestroyWindow(host);UnregisterClass(name,wc.Instance);GC.KeepAlive(procedure);}
     }
 
