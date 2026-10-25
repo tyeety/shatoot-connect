@@ -35,7 +35,7 @@ static class ClipboardBridge {
         var reader=new Thread(()=>{string? line;while((line=Console.ReadLine())!=null){if(VirtualClipboard.Complete(line))continue;commands.Enqueue(line);}ended=true;VirtualClipboard.Cancel();});reader.IsBackground=true;reader.Start();
         var owner = CreateWindowEx(0, "STATIC", "Shatoot clipboard", 0, 0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
         try {
-            while (!ended) {
+            while (!ended || !commands.IsEmpty) {
                 VirtualClipboard.Pump();
                 if(!commands.TryDequeue(out var line)){Thread.Sleep(5);continue;}
                 if (line.Length > 2200000) continue;
@@ -59,6 +59,7 @@ static class ClipboardBridge {
                             bytes = new byte[20 + names.Length]; BitConverter.GetBytes(20).CopyTo(bytes, 0); BitConverter.GetBytes(1).CopyTo(bytes, 16); names.CopyTo(bytes, 20); format = 15;
                         } else { var text = m.GetProperty("text").GetString() ?? ""; if (text.Length > 1000000) throw new IOException("Clipboard text is too large."); bytes = Encoding.Unicode.GetBytes(text + '\0'); format = 13; }
                         if (!EmptyClipboard()) throw new IOException("Clipboard clear failed."); Put(format, bytes);
+                        if(format==15)Put(RegisterClipboardFormat("Preferred DropEffect"),BitConverter.GetBytes(1));
                         CloseClipboard(); opened = false;
                         Console.WriteLine(JsonSerializer.Serialize(new { id, seq = GetClipboardSequenceNumber() }));
                     } else if (op == "read") {
@@ -76,4 +77,5 @@ static class ClipboardBridge {
             }
         } finally { VirtualClipboard.Shutdown();if (owner != IntPtr.Zero) DestroyWindow(owner); }
     }
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern uint RegisterClipboardFormat(string format);
 }

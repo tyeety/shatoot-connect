@@ -13,6 +13,20 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.3 — 2026-10-25
+
+### Added
+
+- Chat attachments have separate Open and Open containing folder actions. The folder action selects the original sent file or downloaded received file in Windows Explorer.
+- Chat history groups messages by local calendar day, with small centered sticky dates in English/Persian and time-only message footers. A displaced sticky date fades after scrolling stops and reappears on the next scroll.
+- A floating history button returns to the latest messages or jumps to the first new unread message, with a count of incoming messages received while reading older history.
+
+### Fixed
+
+- Message rows retain their DOM identity across refreshes, preserving voice playback, pointer clicks and reading position. Loading older history and late attachment previews retain the visible message anchor; background refreshes no longer cancel smooth scrolling.
+- Chat file Copy now adds the native Windows preferred Copy drop effect and verifies that the original attachment paths reached the clipboard. Message actions keep their visual feedback without redundant Done snackbars.
+- Focused chats scrolled into older history retain new-message unread counts until those messages are viewed or the user returns to the bottom. Existing settings, saved computers, downloaded files and encrypted history remain in place.
+
 ## 0.20.2 — 2026-10-25
 
 ### Added

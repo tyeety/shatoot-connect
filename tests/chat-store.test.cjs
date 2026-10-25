@@ -58,3 +58,11 @@ test('pins, last selection and unread watermarks persist independently of remote
   store.conversationState(conversation,{pinned:true,selected:true,read:true});let reopened=new ChatStore(options);assert.equal(reopened.list().pins[conversation],true);assert.equal(reopened.list().lastSelected,conversation);assert.equal(reopened.unread()[conversation],undefined);
   const second=store.append(incoming()).message;assert.equal(store.unread()[conversation],1);store.mutate({id:crypto.randomUUID(),message:second.id,conversation,sender:peer,removed:true,revision:1});assert.equal(store.unread()[conversation],undefined);store.conversationState(conversation,{pinned:false});assert.equal(store.list().pins[conversation],undefined);assert.throws(()=>store.conversationState('p:'+crypto.randomUUID(),{read:true}),/Unknown/);
 });
+
+test('partial read watermark marks only seen arrivals and cannot move backwards or beyond history',t=>{
+  const {store,peer}=fixture(t),conversation=`p:${peer}`,messages=[];
+  for(let i=0;i<3;i++)messages.push(store.append({id:crypto.randomUUID(),conversation,sender:peer,name:'Peer',kind:'text',text:'Unread '+i}).message);
+  store.conversationState(conversation,{read:true,readThrough:messages[0].receivedAt});assert.equal(store.unread()[conversation],2);
+  store.conversationState(conversation,{read:true,readThrough:0});assert.equal(store.unread()[conversation],2);
+  store.conversationState(conversation,{read:true,readThrough:Number.MAX_SAFE_INTEGER});assert.equal(store.unread()[conversation],undefined);assert.equal(store.load().readAt[conversation],messages[2].receivedAt);
+});

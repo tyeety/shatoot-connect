@@ -85,12 +85,12 @@ class ChatStore {
   list() {
     const data = this.load(); return { filePolicies: {...data.filePolicies}, pins:{...data.pins},lastSelected:data.lastSelected||'', unread:this.unread(), contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => !m.deleted && m.conversation === id).at(-1) })) };
   }
-  conversationState(conversation, {pinned,selected,read}={}) {
+  conversationState(conversation, {pinned,selected,read,readThrough}={}) {
     const data=this.load();
     if(typeof conversation!=='string'||!/^([pg]):[a-f0-9-]{36}$/i.test(conversation)||!(conversation.startsWith('p:')?data.contacts[conversation.slice(2)]:data.groups[conversation.slice(2)]))throw new Error('Unknown conversation.');
     if(pinned!==undefined&&typeof pinned!=='boolean')throw new Error('Invalid pin setting.');
-    const readAt=Math.max(0,...data.messages.filter(m=>m.conversation===conversation).map(m=>m.receivedAt));if(pinned===undefined&&(!selected||data.lastSelected===conversation)&&(!read||(data.readAt?.[conversation]||0)>=readAt))return;
-    return this.change(next=>{if(pinned!==undefined){next.pins||={};if(pinned)next.pins[conversation]=true;else delete next.pins[conversation];}if(selected)next.lastSelected=conversation;if(read){next.readAt||={};next.readAt[conversation]=Math.max(next.readAt[conversation]||0,...next.messages.filter(m=>m.conversation===conversation).map(m=>m.receivedAt));}});
+    const latest=Math.max(0,...data.messages.filter(m=>m.conversation===conversation).map(m=>m.receivedAt)),readAt=Number.isSafeInteger(readThrough)&&readThrough>=0?Math.min(latest,readThrough):latest;if(pinned===undefined&&(!selected||data.lastSelected===conversation)&&(!read||(data.readAt?.[conversation]||0)>=readAt))return;
+    return this.change(next=>{if(pinned!==undefined){next.pins||={};if(pinned)next.pins[conversation]=true;else delete next.pins[conversation];}if(selected)next.lastSelected=conversation;if(read){next.readAt||={};next.readAt[conversation]=Math.max(next.readAt[conversation]||0,readAt);}});
   }
   unread(){const data=this.load(),counts={};for(const m of data.messages)if(m.sender!==this.self&&!m.deleted&&m.receivedAt>(data.readAt?.[m.conversation]||0))counts[m.conversation]=(counts[m.conversation]||0)+1;return counts;}
   filePolicy(conversation, mode) {

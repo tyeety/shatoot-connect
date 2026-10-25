@@ -59,6 +59,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
         result.push({index,name:path.basename(file),extension,size:stat.size,directory:stat.isDirectory(),image});
       }return result;
     }
+    if(op==='reveal-attachment'){const files=history.files(value.token);if(value.index!==undefined&&(!Number.isInteger(value.index)||value.index<0||value.index>=files.length))throw new Error('This attachment is unavailable.');const file=files[value.index??0];if(!fs.existsSync(file))throw new Error('The file was moved or deleted.');shell.showItemInFolder(file);return;}
     if (op === 'open-attachment') { const files = history.files(value.token); if(value.index!==undefined&&(!Number.isInteger(value.index)||value.index<0||value.index>=files.length))throw new Error('This attachment is unavailable.');if(!fs.existsSync(files[value.index??0]))throw new Error('The file was moved or deleted.');const error=await shell.openPath(value.index!==undefined?files[value.index]:files.length===1?files[0]:path.dirname(files[0]));if(error)throw new Error(error);return; }
     if (op === 'approve' || op === 'grant') {
       if (!UUID.test(value.session) || !UUID.test(value.peer?.deviceId) || typeof value.peer.name !== 'string' || value.peer.name.length > 60) throw new Error('Invalid chat request.');

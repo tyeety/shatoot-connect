@@ -183,13 +183,13 @@ function state(event) {
 }
 const notices=require('./notifications.cjs').createNotifications({BrowserWindow,ipcMain,screen,language:()=>settings().language==='fa'?'fa':'en',windowsChanged:()=>{for(const s of states.values())syncCursorExclusions(s);},activity:()=>!app.isReady()||smoke||powerMonitor.getSystemIdleTime()<30});
 function chatFilesReceived(s,record,files){
-  let reading=false;
+  let reading=false,readAtBottom=false;
   for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed()){
     const view=s.chatViews?.get(win.webContents.id);
-    if(win.isVisible()&&!win.isMinimized()&&win.isFocused()&&view?.active&&view.conversation===record.conversation)reading=true;
+    if(win.isVisible()&&!win.isMinimized()&&win.isFocused()&&view?.active&&view.conversation===record.conversation){reading=true;if(view.atBottom!==false)readAtBottom=true;}
     win.webContents.send('chat-files-received',{conversation:record.conversation,id:record.id});
   }
-  if(reading)s.chatStore?.conversationState(record.conversation,{read:true});publishUnread(s);
+  if(readAtBottom)s.chatStore?.conversationState(record.conversation,{read:true});publishUnread(s);
   if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
 }
 const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, previewImage:file=>readProfilePhoto(file,true),catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
@@ -204,7 +204,7 @@ function unreadIcon(total){
   return require('electron').nativeImage.createFromBitmap(pixels,{width:32,height:32});
 }
 function publishUnread(s){const unread=s.chatStore?.unread()||{},total=Object.values(unread).reduce((a,b)=>a+b,0);for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed()){win.webContents.send('chat-unread',{unread,total});if(process.platform==='win32')win.setOverlayIcon(total?unreadIcon(total):null,total?`${total} unread messages`:'');}}
-ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active});if(value.active&&s.chatStore)s.chatStore.conversationState(value.conversation,{read:true});publishUnread(s);});
+ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();if(value.atBottom!==undefined&&typeof value.atBottom!=='boolean'||value.readThrough!==undefined&&(!Number.isSafeInteger(value.readThrough)||value.readThrough<0))throw new Error('Invalid chat position.');s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active,atBottom:value.atBottom});if(value.active&&s.chatStore&&(value.atBottom!==false||value.readThrough>0))s.chatStore.conversationState(value.conversation,{read:true,...(value.atBottom===false?{readThrough:value.readThrough}:{})});publishUnread(s);});
 ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message,{onActivate:()=>showMain(s)});});
 function configureStartup(enabled){
   if(!smoke && app.isPackaged)app.setLoginItemSettings({name:'Shatoot Connect',openAtLogin:enabled,path:process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),args:['--start-in-tray']});
@@ -650,7 +650,7 @@ ipcMain.handle('chat-clipboard',async(e,operation,token)=>{
   if(operation==='copy'){
     if(typeof token!=='string'||!s.chatStore)throw new Error('This attachment is unavailable.');
     const files=s.chatStore.files(token);if(files.some(file=>!fs.existsSync(file)))throw new Error('The file was moved or deleted.');
-    await nativeClipboard(s,{op:'write',files});return true;
+    const written=await nativeClipboard(s,{op:'write',files}),check=await nativeClipboard(s,{op:'read'});if(check.files.length!==files.length||check.files.some((file,index)=>path.resolve(file).toLowerCase()!==path.resolve(files[index]).toLowerCase()))throw new Error('Clipboard changed. Copy the file again.');return {copied:true,count:files.length,sequence:written.seq};
   }
   if(operation==='read'){
     const data=await nativeClipboard(s,{op:'read'});if(data.files.length)return {files:true};

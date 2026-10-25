@@ -2,8 +2,8 @@ const {test}=require('node:test');const assert=require('node:assert/strict');con
 const{installCollaboration}=require('../desktop/collaboration-host.cjs');const{ChatStore}=require('../desktop/chat-store.cjs');
 test('automatic reception defaults on, global and per-chat policies override both ways without granting control',async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'shatoot-chat-permission-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
-  const handlers=new Map(),s={identity:{deviceId:crypto.randomUUID()},language:'en',win:{}},prefs={};let prompts=0,answer;const completed=[],messages=[],opened=[];
-  const host=installCollaboration({ipcMain:{handle:(n,f)=>handlers.set(n,f)},state:()=>s,app:{getPath:name=>path.join(root,name)},safeStorage:{isEncryptionAvailable:()=>true,encryptString:text=>Buffer.from(text),decryptString:bytes=>bytes.toString()},dialog:{showMessageBox:async()=>{prompts++;return answer?answer():{response:0}}},shell:{openPath:async file=>{opened.push(file);return ""}},smoke:false,settings:()=>prefs,received:(_s,record,files)=>completed.push({record,files}),messageReceived:(_s,record)=>messages.push(record)});t.after(()=>host.close(s));
+  const handlers=new Map(),s={identity:{deviceId:crypto.randomUUID()},language:'en',win:{}},prefs={};let prompts=0,answer;const completed=[],messages=[],opened=[],revealed=[];
+  const host=installCollaboration({ipcMain:{handle:(n,f)=>handlers.set(n,f)},state:()=>s,app:{getPath:name=>path.join(root,name)},safeStorage:{isEncryptionAvailable:()=>true,encryptString:text=>Buffer.from(text),decryptString:bytes=>bytes.toString()},dialog:{showMessageBox:async()=>{prompts++;return answer?answer():{response:0}}},shell:{showItemInFolder:file=>revealed.push(file),openPath:async file=>{opened.push(file);return ""}},smoke:false,settings:()=>prefs,received:(_s,record,files)=>completed.push({record,files}),messageReceived:(_s,record)=>messages.push(record)});t.after(()=>host.close(s));
   const peer={deviceId:crypto.randomUUID(),name:'Guest'},session=crypto.randomUUID(),call=(op,value)=>handlers.get('collaboration')({},op,value),conversation=`p:${peer.deviceId}`;
   assert.equal(await call('approve',{session,peer}),true);assert.equal(prompts,0);assert.equal(s.captureAllowed,undefined);assert.equal(s.control,undefined);await call('contact',{peer});
   await call('peer-preview',{session,previewKind:'wallpaper',preview:'data:image/jpeg;base64,/9j/2Q=='});
@@ -20,7 +20,7 @@ test('automatic reception defaults on, global and per-chat policies override bot
   await handlers.get('collaboration-files')({},session,'sources',[source]);
   const sent={...text,id:crypto.randomUUID(),sender:s.identity.deviceId,kind:'file',text:'original.txt'};await call('append',{message:sent,outgoing:true});
   const attachment=await handlers.get('collaboration-files')({},session,'attach-sources',{id:sent.id,conversation});
-  assert.deepEqual(s.chatStore.files(attachment),[source]);await call('open-attachment',{token:attachment});assert.deepEqual(opened,[source]);
+  assert.deepEqual(s.chatStore.files(attachment),[source]);await call('open-attachment',{token:attachment});assert.deepEqual(opened,[source]);await call('reveal-attachment',{token:attachment});assert.deepEqual(revealed,[source]);await assert.rejects(call('reveal-attachment',{token:attachment,index:5}),/unavailable/);
   await assert.rejects(handlers.get('collaboration-files')({},session,'attach-sources',{id:text.id,conversation}),/Invalid outgoing/);
   const voiceBytes=Buffer.from([0x1a,0x45,0xdf,0xa3,0x80,0x81,0x82,0x83]),voiceFiles=await handlers.get('collaboration-files')({},session,'voice','data:audio/webm;base64,'+voiceBytes.toString('base64'));
   assert.match(voiceFiles[0].name,/^Voice-[a-f0-9-]+\.webm$/);
