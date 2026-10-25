@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),{WebSocketServer}=require('ws');
-module.exports=async({host,states,app,dialog,update,log,artifacts})=>{
+module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})=>{
   const run=code=>host.webContents.executeJavaScript(code),pause=ms=>new Promise(r=>setTimeout(r,ms));
   const until=async fn=>{for(let i=0;i<400;i++){if(await fn())return;await pause(50)}throw Error('Connection UI timed out: '+fn.toString())};
   await until(()=>run('window.shatootconnectReady===true'));
@@ -71,7 +71,17 @@ module.exports=async({host,states,app,dialog,update,log,artifacts})=>{
     await run("document.querySelector('#chat-cancel-connect').click();true");await until(()=>clients.size===0);await until(()=>run('collaboration.connectAttempts.size===0 && collaboration.sessions.size===0'));
     log('Coordinator and chat waiting states cancel through actual buttons without leftover sessions');
     await run("document.querySelector('#messenger-dialog').close();true");
-    for(const language of ['en','fa']){await run(`window.i18n.setLanguage('${language}');true`);await pause(100);fs.writeFileSync(path.join(artifacts,`connections-${language}.png`),(await host.webContents.capturePage()).toPNG())}
+    for(const language of ['en','fa']){
+      await run(`window.i18n.setLanguage('${language}');status('');true`);await pause(450);
+      const layout=await run("(()=>{const main=document.querySelector('main'),footer=main.querySelector('footer').getBoundingClientRect(),panel=document.querySelector('#network-panel').getBoundingClientRect(),list=document.querySelector('#network-list'),card=document.querySelector('.host-card'),button=[...card.querySelectorAll('.full')].find(b=>b.getClientRects().length),box=button.getBoundingClientRect(),cb=card.getBoundingClientRect();return{bottom:Math.abs(footer.bottom-innerHeight),panelBottom:footer.top-panel.bottom,listMax:getComputedStyle(list).maxHeight,hostBottom:cb.bottom-box.bottom,hostPadding:parseFloat(getComputedStyle(card).paddingBottom),overflow:document.documentElement.scrollHeight-innerHeight,pills:document.querySelectorAll('.card .pill').length,status:document.querySelector('#session-status').textContent,headings:[...document.querySelectorAll('.card-top')].every(e=>!!e.querySelector('h2')),icons:[...document.querySelectorAll('.favorite-actions .icon-button')].every(b=>{const r=b.getBoundingClientRect(),i=b.querySelector('.mi').getBoundingClientRect();return Math.abs((r.left+r.right-i.left-i.right)/2)<1&&Math.abs((r.top+r.bottom-i.top-i.bottom)/2)<1})}})()");
+      if(layout.bottom>1||layout.panelBottom>2||layout.listMax!=='none'||Math.abs(layout.hostBottom-layout.hostPadding-1)>1||layout.overflow>1||layout.pills||!layout.headings||!layout.icons||layout.status.includes('LAN is ready'))throw Error('Main layout failed in '+language+': '+JSON.stringify(layout));
+      fs.writeFileSync(path.join(artifacts,`connections-${language}.png`),(await host.webContents.capturePage()).toPNG());
+    }
+    await run("document.querySelector('#allow-firewall').click();true");await until(()=>run("document.querySelector('#action-snackbar')?.textContent===window.i18n.translate('Firewall access repaired.')&&!document.querySelector('#allow-firewall').disabled"));
+    if(!await run("document.querySelector('#open-settings').nextElementSibling.id==='allow-firewall'"))throw Error('Firewall button is not immediately after Settings');
+    const focusPeer=createWindow();await until(()=>focusPeer.webContents.executeJavaScript('window.shatootconnectReady===true'));
+    try{for(let i=0;i<8;i++){focusPeer.show();focusPeer.focus();await pause(60);host.show();host.focus();await pause(60);const capture=await host.webContents.capturePage();if(capture.isEmpty())throw Error('Focus/screenshot returned an empty image');if(host.webContents.isCrashed())throw Error('Renderer crashed during focus/screenshot');}}finally{focusPeer.destroy();}
+    log('English/Persian main layout fills the window, footer/host button stay at bottom, edit icons center; header firewall feedback and repeated native focus/screenshot passed');
     update.emit({state:'available',version:'99.0.0'});await until(()=>run("!document.querySelector('#update-notice').hidden"));
     for(const language of ['en','fa']){
       await run(`window.i18n.setLanguage('${language}');document.querySelector('#settings-dialog').showModal();selectSettingsTab('updates');true`);

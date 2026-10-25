@@ -17,6 +17,12 @@ if (smoke) {
   process.on('uncaughtException', error => { smokeLog(`uncaught: ${error.stack}`); app.exit(1); });
   process.on('unhandledRejection', error => { smokeLog(`unhandled: ${error?.stack || error}`); app.exit(1); });
 }
+if(!smoke){
+  const diagnostic=require('./diagnostics.cjs').diagnosticLog(path.join(app.getPath('userData'),'logs'),app.getVersion());
+  process.on('uncaughtExceptionMonitor',(error,origin)=>diagnostic('uncaught-exception',{name:error?.name,code:error?.code,stack:error?.stack,origin}));
+  app.on('render-process-gone',(_event,_contents,details)=>diagnostic('renderer-exit',details));
+  app.on('child-process-gone',(_event,details)=>diagnostic('child-process-exit',details));
+}
 const states = new Map();
 let localServer, tray, quitting = false;
 let settingsCache;

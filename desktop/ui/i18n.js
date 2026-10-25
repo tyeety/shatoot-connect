@@ -2,6 +2,7 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['اجازهٔ دسترسی فایروال','Allow firewall access'],
 ['پروفایل ذخیره شد.','Profile saved.'],
 ['سیستم‌ها','Computers'],['سیستم ذخیره‌شده','Saved computer'],['اتصال اخیر','Recent connection'],
 ['تنظیمات گفتگو','Conversation settings'],

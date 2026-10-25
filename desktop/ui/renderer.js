@@ -511,7 +511,7 @@ $('local-server').onclick = guarded(async () => {
 $('host-start').onclick = guarded(async () => {
   if (role !== 'idle') return;
   incomingEnabled = true; registrationWanted = config.internetEnabled !== false; updateControls();
-  if (!registrationWanted) { await api.directListener(); status('LAN is ready. No Internet server is required.'); return; }
+  if (!registrationWanted) { await api.directListener(); status(''); return; }
   if (socket?.readyState === WebSocket.OPEN) register(); else await connect();
 });
 $('host-stop').onclick = () => {
@@ -630,7 +630,7 @@ function renderHostCredentials() {
   if (!registered) hostPasswordValue = config.fixedPassword || direct?.password || '';
   $('host-password').textContent = hostPasswordValue ? (hostPasswordShown ? hostPasswordValue : '••••••••') : '—';
 }
-function renderDirectInfo(info) { window.shatootconnectDirect = info; $('direct-password').textContent = '••••••••'; $('direct-addresses').textContent = info.addresses.join(' / ') || `127.0.0.1:${info.port}`; updateControls(); if(role==='idle'&&!registered)status('LAN is ready. No Internet server is required.'); }
+function renderDirectInfo(info) { window.shatootconnectDirect = info; $('direct-password').textContent = '••••••••'; $('direct-addresses').textContent = info.addresses.join(' / ') || `127.0.0.1:${info.port}`; updateControls(); if(role==='idle'&&!registered)status(''); }
 api.onDirectInfo(renderDirectInfo);
 api.onConnectFavorite(id => guarded(() => connectFavorite(id))());
 function selectSettingsTab(name, focus = false) {
@@ -650,7 +650,7 @@ for (const button of document.querySelectorAll('[data-settings-tab]')) {
 $('internet-enabled').onchange = guarded(async () => {
   config.internetEnabled = await api.internetEnabled($('internet-enabled').checked); registrationWanted = config.internetEnabled;
   clearTimeout(reconnectTimer);
-  if (!config.internetEnabled) { const previous=socket; socket=null; previous?.close(); registered=false; internetId=''; serverState(false,'Internet server disabled; LAN ready'); if (sessionRoute==='server' && role!=='idle') stopSession(false); updateControls(); status('LAN is ready. No Internet server is required.'); }
+  if (!config.internetEnabled) { const previous=socket; socket=null; previous?.close(); registered=false; internetId=''; serverState(false,'Internet server disabled; LAN ready'); if (sessionRoute==='server' && role!=='idle') stopSession(false); updateControls(); status(''); }
   else connect().catch(e=>{status(e.message,true);scheduleReconnect();});
 });
 $('show-guest-cursor').onchange = guarded(async () => { config.showGuestCursor = await api.showGuestCursor($('show-guest-cursor').checked); });

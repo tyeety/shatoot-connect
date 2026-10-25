@@ -13,6 +13,18 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.19.2 — 2026-10-25
+
+### Changed
+
+- Compact share/connect headers place their icon beside the title and remove the redundant This device/Remote device labels. Consistent card/control spacing, centered edit icons and bottom-aligned host actions replace conflicting legacy CSS.
+- Nearby computers use the remaining main-window height, with security/emergency-disconnect information at the bottom. Removed the idle LAN-ready sentence.
+- A firewall button immediately after Settings retries Windows firewall access using the existing explicit administrator approval and private/domain LAN rules; success/cancellation use the shared action feedback. Windows controls the native permission UI.
+
+### Added
+
+- Bounded local process diagnostics for fatal exceptions and renderer/GPU process exits. Chat, clipboard and profile payloads are excluded. The reported idle Alt+Tab/screenshot closure could not be reproduced; repeated native focus changes and window captures are covered by the UI smoke check.
+
 ## 0.19.1 — 2026-10-25
 
 ### Fixed

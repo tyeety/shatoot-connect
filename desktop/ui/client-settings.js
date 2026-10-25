@@ -18,7 +18,8 @@ window.installClientSettings = (config, profileChanged) => {
   $('remember-passwords').onchange=run(async()=>{config.rememberPasswords=await api.connections('remember',$('remember-passwords').checked);if(!config.rememberPasswords)document.getElementById('remote-password').value='';});
   $('startup-enabled').onchange=run(async()=>{config.startupEnabled=await api.lifecycle('startup',$('startup-enabled').checked);});
   $('clear-history').onclick=run(async()=>renderHistory(await api.connections('clear')));$('show-panels').onclick=run(()=>api.lifecycle('panels'));$('quit-app').onclick=()=>api.lifecycle('quit');
-  firewall.onclick = run(async () => { firewall.disabled = true; try { await api.repairFirewall(); $('settings-status').textContent = tr('Firewall access repaired.'); } finally { firewall.disabled = false; } });
+  const allowFirewall=async()=>{const controls=[firewall,$('allow-firewall')];for(const button of controls)button.disabled=true;try{await api.repairFirewall();$('settings-status').textContent=tr('Firewall access repaired.');window.actionNotice('Firewall access repaired.');window.messenger?.renderDiscovery(await api.discovery());}finally{for(const button of controls)button.disabled=false;}};
+  firewall.onclick=run(allowFirewall);$('allow-firewall').onclick=run(allowFirewall);
   function showProfile() { $('profile-name').value = config.name; $('profile-status').value = config.status; $('profile-photo-preview').src = config.avatar || 'assets/app-icon.png'; }
   async function acceptProfile(next) { Object.assign(config, next); showProfile(); await profileChanged(next); }
   $('profile-photo').onclick = run(async () => acceptProfile(await api.profilePhoto(false)));

@@ -195,3 +195,5 @@ Add user-visible changes under **Unreleased** in [CHANGELOG.md](CHANGELOG.md), u
 Commit to `main`, then create/push matching `v<version>`. The tagged Windows workflow validates version/changelog, tests/builds installer/portable/server packages, checks the installer lifecycle and publishes a GitHub Release using exactly that version's changelog section. Corrections after publication get a new version; do not overwrite published history. Never commit credentials, live configuration, user data, received files, signing keys or binaries.
 
 Bundled Vazirmatn/Material assets retain their licenses alongside the assets; the server bundle includes Node's runtime license. The owner has not yet specified a project-wide redistribution license.
+
+Process failures are recorded locally in the application profile's logs/process.log (rotated at 256 KiB, retaining one previous file). Only process/exception categories and stack frames are recorded; chat, clipboard and profile payloads are excluded. These logs do not upload automatically.
