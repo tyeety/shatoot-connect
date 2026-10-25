@@ -28,12 +28,17 @@ class ClientPreferences {
     const favorite=(this.read().favorites||[]).find(f=>{try{return f.name!==f.address&&keys.has(this.destination(f).key);}catch{return false;}});
     let preview='';try{if(card.preview&&card.previewKind==='wallpaper'){this.previewCache||=new Map();if(!this.previewCache.has(card.preview)){this.previewCache.set(card.preview,this.decrypt(card.preview));if(this.previewCache.size>200)this.previewCache.delete(this.previewCache.keys().next().value);}preview=this.previewCache.get(card.preview);}}catch{}
     const knownRoute=card.routes?.at(-1);
-    return {...value,pinned:card.pinned===true,deviceId:value.deviceId||card.deviceId,route:value.route||(knownRoute?{type:knownRoute.endpoint?'id':'lan',address:knownRoute.address,endpoint:knownRoute.endpoint}:null),displayName:card.alias||favorite?.name||card.name||value.name||value.address||'',avatar:card.avatar!==undefined?card.avatar:value.avatar||'',preview,previewAt:card.previewAt};
+    return {...value,pinned:card.pinned===true,pinKey:card._key||'',pinRank:card.pinRank||0,deviceId:value.deviceId||card.deviceId,route:value.route||(knownRoute?{type:knownRoute.endpoint?'id':'lan',address:knownRoute.address,endpoint:knownRoute.endpoint}:null),displayName:card.alias||favorite?.name||card.name||value.name||value.address||'',avatar:card.avatar!==undefined?card.avatar:value.avatar||'',preview,previewAt:card.previewAt};
   }
   pinComputer(value,pinned) {
     if(typeof pinned!=='boolean')throw new Error('Invalid pin setting.');
     const previous=this.card(value);this.rememberComputer({...value,name:previous?.name||value.name,preview:undefined});const old=this.card(value);if(!old)throw new Error('Computer not found.');
-    const cards={...(this.read().computerCards||{})};cards[old._key]={...old,pinned};delete cards[old._key]._key;this.write({computerCards:cards});return this.decorate(value);
+    const cards={...(this.read().computerCards||{})};cards[old._key]={...old,pinned};if(pinned&&!old.pinned)cards[old._key].pinRank=Math.max(0,...Object.values(cards).map(c=>c.pinRank||0))+1;delete cards[old._key]._key;this.write({computerCards:cards});return this.decorate(value);
+  }
+  reorderComputers(order) {
+    const pinned=this.computers().filter(c=>c.pinned).map(c=>c.pinKey);
+    if(!Array.isArray(order)||order.length!==pinned.length||new Set(order).size!==order.length||order.some(key=>!pinned.includes(key)))throw new Error('Pinned list changed. Try again.');
+    const cards={...(this.read().computerCards||{})};order.forEach((key,index)=>{cards[key]={...cards[key],pinRank:index};});this.write({computerCards:cards});
   }
   renameComputer(value,name) {
     if(typeof name!=='string'||name.trim().length>60)throw new Error('Enter a valid computer name.');
@@ -84,7 +89,7 @@ class ClientPreferences {
       if(existing){existing.at=Math.max(existing.at||0,record.at||0);existing.pinned=existing.pinned||record.pinned;existing.keys.add(key);if(!existing.deviceId)existing.deviceId=record.deviceId;}
       else rows.push({...record,keys:new Set([key])});
     }
-    return rows.sort((a,b)=>Number(b.pinned)-Number(a.pinned)||(b.at||0)-(a.at||0)||Number(b.saved)-Number(a.saved)||a.name.localeCompare(b.name)).map(({keys,...record})=>record);
+    return rows.sort((a,b)=>Number(b.pinned)-Number(a.pinned)||(a.pinned&&b.pinned?a.pinRank-b.pinRank:0)||(b.at||0)-(a.at||0)||Number(b.saved)-Number(a.saved)||a.name.localeCompare(b.name)).map(({keys,...record})=>record);
   }
   connected(value) {
     const target=this.destination(value), history=this.read().connectionHistory||[], previous=history.find(h=>h.key===target.key);

@@ -70,6 +70,7 @@ ipcMain.handle('computer-card',(e,operation,value={})=>{
   if(operation==='remember'){rememberComputer(value.peer||{},value.route||{});computerChanged();return preferences.decorate(value.peer,value.route);}
   if(operation==='rename'){const result=preferences.renameComputer(value.peer,value.name);computerChanged();return result;}
   if(operation==='pin'){const result=preferences.pinComputer(value.peer,value.pinned);computerChanged();return result;}
+  if(operation==='reorder-pins'){preferences.reorderComputers(value.order);computerChanged();return;}
   throw new Error('Invalid computer card operation.');
 });
 ipcMain.on('desktop-viewing',(e,value)=>{state(e).outgoingDesktop=value===true;});
@@ -288,7 +289,7 @@ ipcMain.handle('chat-call', (e, operation, args = []) => {
   return new Promise((resolve,reject) => { const timer = setTimeout(() => { chatPending.delete(id); reject(new Error('Chat operation timed out.')); }, operation === 'sendFiles' ? 1800000 : 75000); chatPending.set(id, { s, resolve, reject, timer }); s.win.webContents.send('chat-command', { id, operation, args }); });
 });
 ipcMain.on('chat-result', (e, data) => { const pending = chatPending.get(data?.id); if (!pending || pending.s.win.webContents !== e.sender || e.senderFrame !== e.sender.mainFrame) return; clearTimeout(pending.timer); chatPending.delete(data.id); data.error ? pending.reject(new Error(data.error)) : pending.resolve(data.value); });
-ipcMain.on('chat-publish', (e, value) => { const s = state(e); if (s.win.webContents !== e.sender) return; if(s.chatStore)value={...value,catalog:{...value.catalog,unread:s.chatStore.unread(),pins:{...s.chatStore.load().pins},lastSelected:s.chatStore.load().lastSelected||''}};if (s.chatWindow && !s.chatWindow.isDestroyed()) s.chatWindow.webContents.send('chat-snapshot', value); });
+ipcMain.on('chat-publish', (e, value) => { const s = state(e); if (s.win.webContents !== e.sender) return; if(s.chatStore)value={...value,catalog:{...value.catalog,unread:s.chatStore.unread(),pins:{...s.chatStore.load().pins},pinOrder:[...(s.chatStore.load().pinOrder||[])],lastSelected:s.chatStore.load().lastSelected||''}};if (s.chatWindow && !s.chatWindow.isDestroyed()) s.chatWindow.webContents.send('chat-snapshot', value); });
 let installingUpdate=false;
 ipcMain.handle('update', async (e, operation) => {
   state(e);

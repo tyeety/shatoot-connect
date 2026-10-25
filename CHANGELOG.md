@@ -13,6 +13,17 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.5 — 2026-10-25
+
+### Added
+
+- Drag pinned chat rows or pinned saved/recent computer cards to arrange them. A drop indicator shows the destination; Alt+Up/Down provides keyboard reordering. Chat order persists in encrypted history and connection order in local preferences, independently. Incoming messages, reconnects, saving a recent connection and recognized device-address changes preserve the chosen order. Unpinned items retain their normal recent-first ordering.
+- Reorder requests validate the complete current pinned set, rejecting stale, duplicate or foreign entries without replacing the stored order. Computer list refreshes wait until a drag ends so they cannot remove the dragged card mid-gesture. Other app text remains non-draggable.
+
+### Changed
+
+- Settings uses a vertical tab sidebar with independently scrollable content. English places the sidebar on the left; Persian/RTL places it on the right. All tabs, including dynamically added sections, support Up/Down and Home/End keyboard navigation. Light/dark themes and reduced-motion behavior are preserved.
+
 ## 0.20.4 — 2026-10-25
 
 ### Added

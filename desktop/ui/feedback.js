@@ -1,5 +1,16 @@
 'use strict';
 (()=>{
+ window.installPinnedReorder=(list,save)=>{
+  let source='',target=null,after=false;
+  const rows=()=>[...list.children].filter(row=>row.classList.contains('pinned-draggable'));
+  const clear=()=>{source='';target=null;delete list.dataset.reordering;for(const row of list.children)row.classList.remove('pin-dragging','pin-drop-before','pin-drop-after');list.dispatchEvent(new Event('pinned-reorder-end'));};
+  const commit=async order=>{try{await save(order);}catch(error){window.actionNotice(error.message||String(error));}finally{clear();}};
+  list.addEventListener('dragstart',event=>{const row=event.target.closest('.pinned-draggable');if(!row||row.parentElement!==list)return;source=row.dataset.pinKey;list.dataset.reordering='true';event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('application/x-shatoot-pinned',source);row.classList.add('pin-dragging');});
+  list.addEventListener('dragover',event=>{if(!source)return;event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect='move';const row=event.target.closest('.pinned-draggable');for(const item of list.children)item.classList.remove('pin-drop-before','pin-drop-after');target=row?.parentElement===list?row:null;if(target){after=event.clientY>target.getBoundingClientRect().top+target.clientHeight/2;if(target.dataset.pinKey!==source)target.classList.add(after?'pin-drop-after':'pin-drop-before');}const rect=list.getBoundingClientRect();if(event.clientY<rect.top+30)list.scrollBy(0,-18);else if(event.clientY>rect.bottom-30)list.scrollBy(0,18);});
+  list.addEventListener('drop',event=>{if(!source)return;event.preventDefault();event.stopPropagation();if(!target||target.dataset.pinKey===source){clear();return;}const order=rows().map(row=>row.dataset.pinKey).filter(key=>key!==source),index=order.indexOf(target.dataset.pinKey);if(index<0){clear();return;}order.splice(index+(after?1:0),0,source);source='';commit(order);});
+  document.addEventListener('dragend',()=>{if(source)clear();});
+  list.addEventListener('keydown',event=>{if(!event.altKey||!['ArrowUp','ArrowDown'].includes(event.key))return;const row=event.target.closest('.pinned-draggable');if(row?.parentElement!==list)return;event.preventDefault();const order=rows().map(item=>item.dataset.pinKey),index=order.indexOf(row.dataset.pinKey),next=index+(event.key==='ArrowUp'?-1:1);if(next<0||next>=order.length)return;[order[index],order[next]]=[order[next],order[index]];commit(order);});
+ };
  window.overlayScroll=scroller=>{
   const host=document.createElement('div');host.className='overlay-scroll-host';scroller.before(host);host.append(scroller);scroller.classList.add('overlay-scroller');
   const track=document.createElement('div'),thumb=document.createElement('div');track.className='overlay-scroll-track';thumb.className='overlay-scroll-thumb';track.append(thumb);host.append(track);track.setAttribute('aria-hidden','true');let frame,timer,drag;
@@ -15,6 +26,6 @@
  window.refreshFeedback=element=>{if(!element)return;element.classList.remove('data-feedback');void element.offsetWidth;element.classList.add('data-feedback');setTimeout(()=>element.classList.remove('data-feedback'),400);};
  window.actionNotice=text=>{noticeRevision++;let box=document.getElementById('action-snackbar');if(!box){box=document.createElement('output');box.id='action-snackbar';box.setAttribute('role','status');document.body.append(box);}const owner=[...document.querySelectorAll('dialog[open]')].at(-1)||document.body;if(box.parentElement!==owner)owner.append(box);const message=document.createElement('span');message.className='snackbar-message';message.textContent=window.i18n?.translate(text)||text;const confirm=document.createElement('button');confirm.type='button';confirm.className='snackbar-confirm';confirm.textContent=window.i18n?.translate('OK')||'OK';confirm.onclick=()=>{clearTimeout(timer);box.hidden=true;};box.replaceChildren(message,confirm);box.hidden=false;clearTimeout(timer);timer=setTimeout(()=>box.hidden=true,3500);};
  document.addEventListener('selectstart',event=>{if(!(event.target.nodeType===1?event.target:event.target.parentElement)?.closest('input,textarea,[contenteditable=true]'))event.preventDefault();});
- document.addEventListener('dragstart',event=>{if(!(event.target.nodeType===1?event.target:event.target.parentElement)?.closest('input,textarea,[contenteditable=true]'))event.preventDefault();});
+ document.addEventListener('dragstart',event=>{if(!(event.target.nodeType===1?event.target:event.target.parentElement)?.closest('input,textarea,[contenteditable=true],.pinned-draggable'))event.preventDefault();});
  document.addEventListener('click',event=>{const button=event.target.closest('button');if(!button||button.disabled)return;button.classList.remove('action-feedback');void button.offsetWidth;button.classList.add('action-feedback');setTimeout(()=>button.classList.remove('action-feedback'),400);},true);
 })();

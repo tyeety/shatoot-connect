@@ -66,3 +66,13 @@ test('partial read watermark marks only seen arrivals and cannot move backwards 
   store.conversationState(conversation,{read:true,readThrough:0});assert.equal(store.unread()[conversation],2);
   store.conversationState(conversation,{read:true,readThrough:Number.MAX_SAFE_INTEGER});assert.equal(store.unread()[conversation],undefined);assert.equal(store.load().readAt[conversation],messages[2].receivedAt);
 });
+
+test('manual pinned chat order survives reload, new messages and repinning; malformed reorders preserve state',t=>{
+  const{store,options,peer,other}=fixture(t),first='p:'+peer,second='p:'+other;
+  store.contact({deviceId:other,name:'Other'},{type:'lan',address:'192.168.1.11:8788'});
+  store.conversationState(first,{pinned:true});store.conversationState(second,{pinned:true});store.reorderPins([second,first]);
+  store.append({id:crypto.randomUUID(),conversation:first,sender:peer,name:'Peer',kind:'text',text:'New arrival'});
+  const reopened=new ChatStore(options);assert.deepEqual(reopened.list().pinOrder,[second,first]);
+  for(const order of [[first],[first,first],[first,'p:'+crypto.randomUUID()],null])assert.throws(()=>reopened.reorderPins(order),/Pinned list changed/);
+  assert.deepEqual(reopened.list().pinOrder,[second,first]);reopened.conversationState(second,{pinned:false});reopened.conversationState(second,{pinned:true});assert.deepEqual(reopened.list().pinOrder,[first,second]);
+});

@@ -14,6 +14,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   const own=document.createElement('button');own.id='chat-own-profile';own.type='button';own.className='small-button';own.onclick=()=>api.editProfile();document.querySelector('.chat-sidebar').prepend(own);
   const contacts=document.createElement('div');contacts.className='chat-contact-list';$('chat-conversations').before(contacts);contacts.append($('chat-conversations'),$('chat-new-group'));
   window.overlayScroll($('chat-conversations'));window.overlayScroll($('chat-messages'));
+  window.installPinnedReorder($('chat-conversations'),async order=>{await api.collaboration('reorder-pins',{order});await engine.refresh();});
   const jump=document.createElement('button');jump.id='chat-jump';jump.type='button';jump.className='icon-button';jump.innerHTML='<span class="mi arrow_forward" aria-hidden="true"></span><span class="unread-badge"></span>';jump.hidden=true;logElement.parentElement.append(jump);
   function updateJump(){jump.hidden=!selected||atBottom();jump.title=tr(pendingNew.size?'First unread message':'Scroll to latest');jump.setAttribute('aria-label',jump.title);const badge=jump.querySelector('.unread-badge');badge.hidden=!pendingNew.size;badge.textContent=String(pendingNew.size);}
   function updateDays(){const top=logElement.getBoundingClientRect().top;for(const group of logElement.children){const label=group.querySelector('.chat-day-label');label?.classList.toggle('is-stuck',group.getBoundingClientRect().top<top-1);}}
@@ -112,7 +113,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     const list = $('chat-conversations');
     const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar:c.avatar,preview:c.preview,name:displayName(c),detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, avatar:g.avatar,name: g.name,detail:g.description, status: 'Group' }))];
     const last=new Map((engine.catalog.conversations||[]).map(c=>[c.id,c.last?.receivedAt||0]));
-    items.sort((a,b)=>Number(!!engine.catalog.pins?.[b.id])-Number(!!engine.catalog.pins?.[a.id])||(last.get(b.id)||0)-(last.get(a.id)||0));
+    const pinRank=new Map((engine.catalog.pinOrder||[]).map((id,index)=>[id,index]));
+    items.sort((a,b)=>Number(!!engine.catalog.pins?.[b.id])-Number(!!engine.catalog.pins?.[a.id])||(engine.catalog.pins?.[a.id]&&engine.catalog.pins?.[b.id]?(pinRank.get(a.id)??Number.MAX_SAFE_INTEGER)-(pinRank.get(b.id)??Number.MAX_SAFE_INTEGER):0)||(last.get(b.id)||0)-(last.get(a.id)||0));
     const existing=new Map([...list.children].map(row=>[row.dataset.conversation,row]));
     for (let index=0;index<items.length;index++) {
       const item=items[index];let row=existing.get(item.id);existing.delete(item.id);
@@ -121,7 +123,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       b.setAttribute('aria-pressed',String(item.id===selected));name.textContent=item.name;const count=engine.catalog.unread?.[item.id]||0;if(count){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=count>99?'99+':String(count);name.append(badge);}detail.textContent=item.detail||'';const src=item.avatar||'assets/app-icon.png';if(image.getAttribute('src')!==src)image.src=src;
       if(!item.id.startsWith('g:')){let dot=b.querySelector('.presence-dot');if(!dot){dot=document.createElement('span');b.append(dot);}dot.className='presence-dot presence-'+(online(item.id.slice(2))?(contact(item.id.slice(2))?.status||'available'):discovery.peers.some(p=>p.deviceId===item.id.slice(2))?'available':'offline');}
       let preview=b.querySelector('.desktop-preview');b.classList.add('computer-preview');if(item.preview){if(!preview){preview=document.createElement('img');preview.className='desktop-preview';preview.alt='';preview.draggable=false;b.prepend(preview);}if(preview.getAttribute('src')!==item.preview)preview.src=item.preview;}else preview?.remove();
-      const pinned=!!engine.catalog.pins?.[item.id];pin.title=tr(pinned?'Unpin chat':'Pin chat');pin.setAttribute('aria-label',pin.title);pin.setAttribute('aria-pressed',String(pinned));if(list.children[index]!==row)list.insertBefore(row,list.children[index]||null);
+      const pinned=!!engine.catalog.pins?.[item.id];row.draggable=pinned;row.classList.toggle('pinned-draggable',pinned);row.dataset.pinKey=item.id;pin.title=tr(pinned?'Unpin chat':'Pin chat');pin.setAttribute('aria-label',pin.title);pin.setAttribute('aria-pressed',String(pinned));if(list.children[index]!==row)list.insertBefore(row,list.children[index]||null);
     }
     for(const row of existing.values())row.remove();
     const group = selected.startsWith('g:') && engine.group(selected.slice(2)), peer = selected.startsWith('p:') && contact(selected.slice(2));

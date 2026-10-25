@@ -19,6 +19,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if(op==='message')return history.history({conversation:value.conversation,limit:100}).find(m=>m.id===value.id)||history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation);
     if(op==='history')return history.history(value).map(m=>({...m,displayName:decorateComputer({deviceId:m.sender,name:m.name}).displayName||m.name}));
     if(op==='conversation-state')return history.conversationState(value.conversation,value);
+    if(op==='reorder-pins')return history.reorderPins(value.order);
     if (op === 'file-policy') return history.filePolicy(value.conversation,value.mode);
     if (op === 'pending') return history.pending(value.peer);
     if(op==='peer-preview'){const g=grant(s,value.session);if(value.previewKind!=='wallpaper')return false;if(typeof value.preview!=='string'||value.preview.length>90000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.preview))throw new Error('Invalid desktop preview.');rememberComputer({deviceId:g.peer.deviceId,preview:value.preview,previewKind:'wallpaper'},undefined,true);return true;}

@@ -3,7 +3,7 @@ window.i18n = (() => {
   let language = 'en';
   const entries = [
     ['باز کردن مقصد اعلان انجام نشد.','Could not open the notification destination.'],
-    ['تأیید','OK'],
+    ['تأیید','OK'],['فهرست پین‌ها تغییر کرده است. دوباره تلاش کنید.','Pinned list changed. Try again.'],
     ['اجازهٔ دسترسی فایروال','Allow firewall access'],
 ['پروفایل ذخیره شد.','Profile saved.'],
 ['سیستم‌ها','Computers'],['سیستم ذخیره‌شده','Saved computer'],['اتصال اخیر','Recent connection'],

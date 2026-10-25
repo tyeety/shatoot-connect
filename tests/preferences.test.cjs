@@ -28,6 +28,17 @@ test('connection pins persist across save, identity resolution and new connectio
   reopened.pinComputer({deviceId},false);assert.equal(reopened.computers()[0].address,second.address);assert.equal(reopened.computers().find(r=>r.saved).pinned,false);assert.equal(Object.values(storage().computerCards).length,1);
   assert.throws(()=>p.pinComputer(first,'yes'),/Invalid pin/);
 });
+
+test('manual connection order persists across reconnect, address identity migration and saving a recent computer',()=>{
+  const{preferences:p}=fixture(),first={address:'192.168.1.20'},second={address:'192.168.1.21'},third={address:'192.168.1.22'};
+  p.connected(first);p.connected(second);p.connected(third);p.pinComputer(first,true);p.pinComputer(second,true);
+  let pinned=p.computers().filter(c=>c.pinned);p.reorderComputers(pinned.map(c=>c.pinKey).reverse());p.connected(first);p.save({...second,name:'Second'});
+  const deviceId=crypto.randomUUID();p.rememberComputer({deviceId,name:'First'},{...first});const reopened=new ClientPreferences(p);
+  assert.deepEqual(reopened.computers().map(c=>c.address),[second.address,first.address,third.address]);
+  pinned=reopened.computers().filter(c=>c.pinned);assert.equal(pinned[1].pinKey,deviceId);
+  for(const order of [[pinned[0].pinKey],[pinned[0].pinKey,pinned[0].pinKey],['__proto__',pinned[1].pinKey],null])assert.throws(()=>reopened.reorderComputers(order),/Pinned list changed/);
+  reopened.reorderComputers(pinned.map(c=>c.pinKey).reverse());assert.equal(reopened.computers()[0].address,first.address);
+});
 test('a chosen computer nickname survives resaving credentials and keeps the shortcut identity',()=>{
   const{preferences}=fixture();const id=preferences.save({name:'دفتر مرکزی',address:'192.168.1.10',password:'secret'});preferences.markShortcut(id);const shortcut=preferences.shortcutName(id);
   preferences.save({address:'192.168.1.10',password:'new-secret'});assert.equal(preferences.get(id).name,'دفتر مرکزی');

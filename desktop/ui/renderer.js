@@ -294,7 +294,7 @@ function renderHostCursor() {
 }
 new ResizeObserver(renderHostCursor).observe($('video-stage'));
 $('remote-video').addEventListener('resize',()=>{const video=$('remote-video');if(role==='viewer'&&video.videoWidth&&!document.fullscreenElement)requestAnimationFrame(()=>api.fitVideo({width:video.videoWidth,height:video.videoHeight,extraWidth:innerWidth-$('video-stage').clientWidth,extraHeight:innerHeight-$('video-stage').clientHeight}).catch(()=>{}));});
-document.addEventListener('dragstart',event=>{if(!event.target.closest('input,textarea,[contenteditable=true]'))event.preventDefault();});
+document.addEventListener('dragstart',event=>{if(!event.target.closest('input,textarea,[contenteditable=true],.pinned-draggable'))event.preventDefault();});
 api.onKeyboardApplied(data => { if (role === 'host' && controlChannel?.readyState === 'open') controlChannel.send(JSON.stringify(data)); if (!data.ok && allowedControl) { input({ type: 'release' }); status(tr('Keyboard sync failed; typing paused'), true); if (layoutSync) layoutSync.expected = ''; api.currentKeyboard().then(layout => { guestKeyboardLayout = layout; sendKeyboardLayout(); }).catch(e => status(e.message, true)); } });
 async function applyProfile(name) {
   if (!config.profiles[name] || !stream) return;
@@ -562,12 +562,17 @@ async function joinTarget(record) {
 $('cancel-connection').onclick=()=>{if(!outgoingAttempt)return;stopSession(true);status('Connection cancelled.');};
 $('join').onclick = guarded(joinTarget);
 let computersRevision=0;
+window.installPinnedReorder($('favorites-list'),async order=>{await api.computerCard('reorder-pins',{order});});
+$('favorites-list').addEventListener('pinned-reorder-end',()=>renderComputers());
 function renderFavorites(records){config.favorites=records;return renderComputers();}
 async function renderComputers(){
+  if($('favorites-list').dataset.reordering==='true')return;
   const revision=++computersRevision,records=await api.connections('computers');if(revision!==computersRevision)return;
+  if($('favorites-list').dataset.reordering==='true')return;
   const list=$('favorites-list');list.replaceChildren();$('favorites-empty').hidden=records.length>0;
   for(const record of records){
     const row=document.createElement('div');row.className=record.saved?'favorite-row':'history-row';row.dataset.address=record.address;row.dataset.saved=String(record.saved);row.dataset.connectedAt=String(record.at||0);applyComputerPreview(row,record);
+    row.draggable=record.pinned;row.classList.toggle('pinned-draggable',record.pinned);row.dataset.pinKey=record.pinKey;
     const marker=document.createElement('span');marker.className='computer-kind mi '+(record.saved?'star_outline':'schedule');marker.title=tr(record.saved?'Saved computer':'Recent connection');marker.setAttribute('role','img');marker.setAttribute('aria-label',marker.title);
     const connectButton=document.createElement('button');connectButton.className=record.saved?'favorite-connect':'history-connect';connectButton.disabled=role!=='idle';
     const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/app-icon.png';avatar.alt='';
@@ -641,13 +646,13 @@ function selectSettingsTab(name, focus = false) {
     $(button.getAttribute('aria-controls')).hidden = !selected; if (selected && focus) button.focus();
   }
 }
-for (const button of document.querySelectorAll('[data-settings-tab]')) {
-  button.onclick = () => selectSettingsTab(button.dataset.settingsTab);
-  button.onkeydown = event => { const tabs = [...document.querySelectorAll('[data-settings-tab]')], index = tabs.indexOf(button); let next;
-    if (event.key === 'Home') next=0; else if (event.key === 'End') next=tabs.length-1; else if (['ArrowLeft','ArrowRight'].includes(event.key)) next=(index+(event.key === 'ArrowRight' ? 1 : tabs.length-1))%tabs.length;
-    if (next !== undefined) { event.preventDefault(); selectSettingsTab(tabs[next].dataset.settingsTab, true); }
-  };
-}
+document.querySelector('.settings-tabs').setAttribute('aria-orientation','vertical');
+document.querySelector('.settings-tabs').addEventListener('keydown',event=>{
+  const button=event.target.closest('[data-settings-tab]');if(!button)return;
+  const tabs=[...document.querySelectorAll('[data-settings-tab]')],index=tabs.indexOf(button);let next;
+  if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else if(['ArrowUp','ArrowDown'].includes(event.key))next=(index+(event.key==='ArrowDown'?1:tabs.length-1))%tabs.length;
+  if(next!==undefined){event.preventDefault();selectSettingsTab(tabs[next].dataset.settingsTab,true);}
+});
 $('internet-enabled').onchange = guarded(async () => {
   config.internetEnabled = await api.internetEnabled($('internet-enabled').checked); registrationWanted = config.internetEnabled;
   clearTimeout(reconnectTimer);
