@@ -1,5 +1,15 @@
 'use strict';
 (()=>{
+ window.overlayScroll=scroller=>{
+  const host=document.createElement('div');host.className='overlay-scroll-host';scroller.before(host);host.append(scroller);scroller.classList.add('overlay-scroller');
+  const track=document.createElement('div'),thumb=document.createElement('div');track.className='overlay-scroll-track';thumb.className='overlay-scroll-thumb';track.append(thumb);host.append(track);track.setAttribute('aria-hidden','true');let frame,timer,drag;
+  const update=()=>{frame=0;const height=scroller.clientHeight,total=scroller.scrollHeight;track.hidden=total<=height+1;const size=Math.max(24,height*height/Math.max(total,1));thumb.style.height=size+'px';thumb.style.transform=`translateY(${(height-size)*scroller.scrollTop/Math.max(1,total-height)}px)`;};
+  const schedule=()=>{if(!frame)frame=requestAnimationFrame(update);};
+  scroller.addEventListener('scroll',()=>{schedule();host.classList.add('scrolling');clearTimeout(timer);timer=setTimeout(()=>host.classList.remove('scrolling'),900);},{passive:true});
+  new ResizeObserver(schedule).observe(scroller);new MutationObserver(schedule).observe(scroller,{childList:true,subtree:true});
+  track.onpointerdown=event=>{event.preventDefault();const r=thumb.getBoundingClientRect();if(event.target!==thumb)scroller.scrollTop=(event.clientY-track.getBoundingClientRect().top-scroller.clientHeight*scroller.clientHeight/scroller.scrollHeight/2)*scroller.scrollHeight/scroller.clientHeight;drag={y:event.clientY,top:scroller.scrollTop};track.setPointerCapture(event.pointerId);};
+  track.onpointermove=event=>{if(drag)scroller.scrollTop=drag.top+(event.clientY-drag.y)*(scroller.scrollHeight-scroller.clientHeight)/Math.max(1,scroller.clientHeight-thumb.clientHeight);};track.onpointerup=track.onpointercancel=()=>{drag=null;};schedule();
+ };
  let timer,dataRevision=0,noticeRevision=0;
  window.withActionFeedback=async(control,work)=>{if(!control?.setAttribute)return work();const before=dataRevision,noticeBefore=noticeRevision,dialogs=[...document.querySelectorAll('dialog[open]')];control.setAttribute('aria-busy','true');control.classList.add('action-pending');try{const result=await work();await Promise.resolve();const after=[...document.querySelectorAll('dialog[open]')];if(before===dataRevision&&noticeBefore===noticeRevision&&dialogs.length===after.length&&dialogs.every((d,i)=>d===after[i])&&!document.querySelector('.status-line.error')&&!['install-update','update-notice'].includes(control.id))window.actionNotice('Done');return result;}finally{control.removeAttribute('aria-busy');control.classList.remove('action-pending');}};
  window.refreshFeedback=element=>{if(!element)return;element.classList.remove('data-feedback');void element.offsetWidth;element.classList.add('data-feedback');setTimeout(()=>element.classList.remove('data-feedback'),400);};

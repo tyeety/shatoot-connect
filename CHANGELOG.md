@@ -13,6 +13,40 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.19.0 — 2026-10-25
+
+### Added
+
+- One computer list combining saved systems and connection history. Each system appears once, with a muted outline star for saved connections or a clock for recent connections, sorted together by the last successful connection. Canonical LAN addresses and known device identities prevent duplicate saved/recent cards; saved credentials, names and shortcut identities are retained.
+- Automatic small desktop-card JPEG exchange over established chat connections, refreshed once per minute and cached encrypted for offline cards. Both peers need this feature. Thumbnail sharing is separate from full remote-screen/control permission.
+- Copy actual file/voice attachments to the Windows file clipboard and paste copied Explorer/chat files into a conversation with Ctrl+V or Paste. Text and clipboard-image paste remain supported. Files retain the existing reception settings, transfer grants and hash verification.
+
+### Changed
+
+- Compact icon-only Rename actions, muted computer-type markers in the physical top-right corner, and removal of the two redundant ID/password helper sentences. Restyle action snackbars as passive status notices with an information icon and a subtle side accent rather than a button-like outline.
+- Simplify the chat window: remove the extra heading, close, Connect/Disconnect and Show main window actions; reconnect known chats automatically. Move incoming-file reception preferences into contact/conversation settings. Use a circular combined Record/Send action inside the message field, with file upload below it, and a floating New group action over the contact list.
+- Put Copy and attachment Open actions next to each other opposite the timestamp. Replace native chat-list/message scrollbar gutters with faint translucent overlay thumbs while preserving wheel, keyboard and thumb-drag scrolling. Fix desktop-card image stacking under the readable purple overlay.
+
+### Compatibility
+
+- Includes the previously local-only 0.18.2 and 0.18.3 changes. Existing settings, encrypted credentials, saved computers, shortcuts and chat history are retained. No coordinator upgrade is required for these client changes; ordinary messaging/desktop connections remain compatible with earlier clients. Automatic chat desktop thumbnails require upgraded clients at both ends.
+
+## 0.18.3 — 2026-10-24
+
+### Changed
+
+- Local build: remove the chat heading/extra close button and use faint translucent scrollbar thumbs over the contact/message content without reserving a scrollbar gutter. Keep scrolling and thumb dragging available; simplify the address-field focus border.
+- Place attachment Open and Copy actions together opposite the timestamp. Copying a file/voice attachment places its actual original/downloaded files on the Windows file clipboard, so they can be pasted into Explorer or chat. Missing/pending attachments cannot be copied as misleading filename text.
+- Paste copied Explorer/chat files directly into the selected chat using Ctrl+V or Paste. Keep image and plain-text paste working through the combined composer; clipboard file paths remain in the local main process and file transfer still uses its existing grants, reception policy and content hashes.
+
+## 0.18.2 — 2026-10-24
+
+### Changed
+
+- Local build: align message Copy/edit/delete controls opposite the timestamp, remove chat Connect/Disconnect and Show main window actions, and reconnect known chats automatically.
+- Move incoming-file reception preferences into the contact-name/settings dialog. Place a combined circular Record/Send action inside the message field, with attachment upload beneath it; typing changes Record to Send. Keep New group floating over the bottom-right of the scrolling contact list.
+- Exchange small desktop JPEG previews automatically over established chat connections, refresh every minute and retain the last image encrypted for offline cards. This explicitly shares a desktop thumbnail independently of full remote-screen/control permission; both clients need this feature. Fix card stacking so the desktop image is visible underneath the purple overlay and readable foreground content.
+
 ## 0.18.1 — 2026-10-24
 
 ### Added

@@ -36,6 +36,11 @@ module.exports=async({host,states,app,dialog,update,log,artifacts})=>{
     await until(()=>run("config.favorites.some(f=>f.name==='حسابداری')"));
     const renamed=await run('api.favoriteGet(config.favorites[0].id)');
     if(renamed.id!==favorite.id||renamed.password!==favorite.password)throw Error('Renaming changed saved credentials/identity');
+    await run("api.connections('connected',{address:'192.168.99.254',name:'Recent computer'}).then(renderHistory)");
+    await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='false'"));
+    await run(`api.connections('connected',{address:'${address}',name:'Saved computer'}).then(renderHistory)`);
+    await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='true'"));
+    if(!await run("document.querySelectorAll('#favorites-list>div').length===2 && !document.querySelector('#connection-history') && !!document.querySelector('.favorite-row .computer-kind.star_outline') && !!document.querySelector('.history-row .computer-kind.schedule') && document.querySelector('.rename-computer').textContent==='' && document.querySelectorAll('.connection-grid .muted').length===0"))throw Error('Combined computer list, markers, icon-only rename or removed helper text regressed');
     for(let i=0;i<3;i++){
       greet=i===2;joined=false;
       await run("document.querySelector('.favorite-connect').click();true");

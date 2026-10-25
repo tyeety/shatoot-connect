@@ -26,8 +26,6 @@
   api.onChatSnapshot(snapshot => { changed?.(snapshot); messenger.renderDiscovery(snapshot.discovery); if (snapshot.selected && snapshot.selected !== initial.selected) { initial.selected = snapshot.selected; messenger.select(snapshot.selected); } });
   messenger.renderDiscovery(initial.discovery); messenger.open();
   if (initial.selected) await messenger.select(initial.selected);
-  const heading = document.querySelector('#messenger-dialog .settings-heading');
-  const show = document.createElement('button'); show.type = 'button'; show.className = 'small-button'; show.textContent = window.i18n.translate('Show main window'); show.onclick = () => api.showMain(); heading.prepend(show);
   document.getElementById('messenger-dialog').addEventListener('close', () => api.closeChat());
   window.shatootconnectChatReady = true;
 })().catch(error => { document.body.textContent = error.message; });

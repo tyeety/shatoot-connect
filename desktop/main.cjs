@@ -53,6 +53,12 @@ const preferences = new (require('./preferences.cjs').ClientPreferences)({ read:
 function computerChanged(){for(const s of states.values())for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed())win.webContents.send('computer-cards-changed');}
 function rememberComputer(peer,route,preview=false){preferences.rememberComputer({...peer,preview:preview?peer.preview:undefined},route);}
 function decorateDiscovery(value){return {...value,peers:value.peers.map(peer=>preferences.decorate(peer))};}
+let desktopCardCapture;
+ipcMain.handle('desktop-card-preview',async e=>{
+  state(e);
+  if(!desktopCardCapture){desktopCardCapture=(async()=>{const sources=await desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:320,height:180},fetchWindowIcons:false});const source=sources.find(s=>s.display_id===String(screen.getPrimaryDisplay().id))||sources[0];return source&&!source.thumbnail.isEmpty()?'data:image/jpeg;base64,'+source.thumbnail.toJPEG(65).toString('base64'):'';})();setTimeout(()=>{desktopCardCapture=null;},30000).unref();}
+  return desktopCardCapture;
+});
 ipcMain.handle('computer-card',(e,operation,value={})=>{
   state(e);
   if(operation==='resolve')return preferences.decorate(value.peer,value.route);
@@ -181,7 +187,7 @@ function chatFilesReceived(s,record,files){
   }
   if(!reading){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500)});}
 }
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route)=>{rememberComputer(peer,route);computerChanged();}, received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
 ipcMain.handle('voice-recording',(event,enabled)=>{
   const s=state(event);if(s.owner||typeof enabled!=='boolean')throw new Error('Invalid microphone request.');
   s.voicePermissions||=new Map();if(enabled)s.voicePermissions.set(event.sender.id,Date.now()+15000);else s.voicePermissions.delete(event.sender.id);
@@ -408,6 +414,7 @@ ipcMain.handle('favorite-get', (e, id) => { state(e); const record=preferences.g
 ipcMain.handle('connections', (e, operation, value) => {
   state(e);
   if(operation==='history')return preferences.history();
+  if(operation==='computers')return preferences.computers();
   if(operation==='recall')return preferences.recall(value);
   if(operation==='attempt')return preferences.attempt(value);
   if(operation==='connected')return preferences.connected(value);
@@ -589,7 +596,7 @@ ipcMain.handle('exit-fullscreen', e => { const s = state(e); if (s.win.isFullScr
 ipcMain.handle('copy-text', (e, text) => {
   const s=state(e);
   if (typeof text !== 'string' || text.length > 1000000) throw new Error('Invalid clipboard text');
-  if(smoke){s.copiedText=text;return;}
+  if(smoke){s.copiedText=text;s.testClipboard={seq:(s.testClipboard?.seq||0)+1,text,files:[],supported:true};return;}
   return clipboard.writeText(text);
 });
 
@@ -619,6 +626,21 @@ function nativeClipboard(s, value) {
   }
   return new Promise((resolve, reject) => { const id = crypto.randomUUID(), requests = s.clipboardRequests; const timer = setTimeout(() => { requests.delete(id); reject(new Error('Clipboard timed out.')); }, 5000); requests.set(id, { resolve, reject, timer }); s.clipboardProc.stdin.write(JSON.stringify({ ...value, id }) + '\n'); });
 }
+ipcMain.handle('chat-clipboard',async(e,operation,token)=>{
+  const s=state(e);
+  if(operation==='copy'){
+    if(typeof token!=='string'||!s.chatStore)throw new Error('This attachment is unavailable.');
+    const files=s.chatStore.files(token);if(files.some(file=>!fs.existsSync(file)))throw new Error('The file was moved or deleted.');
+    await nativeClipboard(s,{op:'write',files});return true;
+  }
+  if(operation==='read'){
+    const data=await nativeClipboard(s,{op:'read'});if(data.files.length)return {files:true};
+    const image=smoke?null:clipboard.readImage();const png=image&&!image.isEmpty()?image.toPNG():null;
+    if(png&&png.length>10*1024**2)throw new Error('Clipboard image is too large.');
+    return {files:false,text:data.text||'',image:png?'data:image/png;base64,'+png.toString('base64'):''};
+  }
+  throw new Error('Invalid clipboard operation.');
+});
 ipcMain.handle('exchange', async (e, operation, value) => {
   const s = state(e);
   if (operation === 'viewer-start') { s.exchangeAllowed = true; return; }

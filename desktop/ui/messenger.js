@@ -8,10 +8,14 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   const displayName=peer=>peer?.displayName||peer?.name||'';
   const previewCard=(element,peer)=>{element.classList.add('computer-preview');if(peer.preview){const image=document.createElement('img');image.className='desktop-preview';image.alt='';image.src=peer.preview;image.draggable=false;element.prepend(image);}};
   const own=document.createElement('button');own.id='chat-own-profile';own.type='button';own.className='small-button';own.onclick=()=>api.editProfile();document.querySelector('.chat-sidebar').prepend(own);
+  const contacts=document.createElement('div');contacts.className='chat-contact-list';$('chat-conversations').before(contacts);contacts.append($('chat-conversations'),$('chat-new-group'));
+  window.overlayScroll($('chat-conversations'));window.overlayScroll($('chat-messages'));
+  $('chat-new-group').title=tr('New group');$('chat-new-group').setAttribute('aria-label',tr('New group'));$('chat-new-group').querySelector('span:not(.mi)').className='sr-only';
+  $('chat-connect').hidden=true;
 
   const fileSetting=document.createElement('label');fileSetting.className='chat-file-setting';fileSetting.hidden=true;
   const fileCaption=document.createElement('span');fileCaption.textContent=tr('Incoming files');const filePolicy=document.createElement('select');filePolicy.id='chat-file-policy';filePolicy.setAttribute('aria-label',tr('Incoming files'));
-  for(const[value,text]of [['inherit','Use global setting'],['accept','Receive automatically'],['ask','Ask before receiving files']]){const option=document.createElement('option');option.value=value;option.textContent=tr(text);filePolicy.append(option);}fileSetting.append(fileCaption,filePolicy);document.querySelector('.chat-thread-heading').after(fileSetting);
+  for(const[value,text]of [['inherit','Use global setting'],['accept','Receive automatically'],['ask','Ask before receiving files']]){const option=document.createElement('option');option.value=value;option.textContent=tr(text);filePolicy.append(option);}fileSetting.append(fileCaption,filePolicy);
   function reportView(){return api.chatView({conversation:selected,active:!!selected&&$('messenger-dialog').open&&document.hasFocus()&&$('messenger-dialog').contains(document.activeElement)});}
   for(const event of ['focusin','focusout','visibilitychange'])document.addEventListener(event,()=>queueMicrotask(()=>reportView().catch(()=>{})));
   for(const event of ['focus','blur'])window.addEventListener(event,()=>reportView().catch(()=>{}));
@@ -53,16 +57,18 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       const meta = document.createElement('small'); const date = new Date(row.at); meta.textContent = new Intl.DateTimeFormat(window.i18n.language === 'fa' ? 'fa-IR' : 'en', { dateStyle: 'short', timeStyle: 'short' }).format(date);
       if (own) meta.textContent += ' · ' + tr(row.pending.length ? (row.kind === 'file' ? 'Not delivered to all recipients' : 'Queued') : row.status === 'delivered' ? 'Delivered' : 'Sent');
       if(row.editedAt&&!row.deleted)meta.textContent+=' · '+tr('Edited');
-      item.append(name, text, meta);
+      item.append(name, text);
+      const footer=document.createElement('footer');footer.className='chat-message-footer';footer.append(meta);
       if(row.deleted)item.classList.add('deleted');
       else {
-        if (row.attachment) item.append(button(own?'Open sent files':'Open received files', () => api.collaboration('open-attachment', { token: row.attachment }), 'folder'));
         voice?.attachment(item,row);
         const actions=document.createElement('div');actions.className='chat-message-actions';
-        actions.append(button('Copy',()=>api.copyText(row.text),'content_copy'));
+        if(row.attachment)actions.append(button(own?'Open sent files':'Open received files',()=>api.collaboration('open-attachment',{token:row.attachment}),'folder'));
+        const copy=button('Copy',()=>row.kind==='file'?api.chatClipboard('copy',row.attachment):api.copyText(row.text),'content_copy');copy.disabled=row.kind==='file'&&!row.attachment;actions.append(copy);
         if(own){if(row.kind==='text')actions.append(button('Edit message',()=>editMessage(row),'edit'));actions.append(button('Delete message',async()=>{await engine.changeMessage(row.conversation,row.id,'',true);await load(false);},'delete'));}
-        item.append(actions);
+        footer.append(actions);
       }
+      item.append(footer);
       log.append(item);
     }
     if (scroll && nearBottom) log.scrollTop = log.scrollHeight;
@@ -75,14 +81,14 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar:c.avatar,preview:c.preview,name:displayName(c),detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, avatar:g.avatar,name: g.name,detail:g.description, status: 'Group' }))];
     for (const item of items) { const b = document.createElement('button'); b.className = 'chat-conversation'; b.type = 'button'; b.setAttribute('aria-pressed', String(item.id === selected)); const name = document.createElement('b'), status = document.createElement('small'); name.textContent = item.name; status.textContent = tr(item.status) + (item.detail ? ' · ' + item.detail : ''); { const image = document.createElement('img'); image.src=item.avatar||'assets/app-icon.png'; image.className = 'profile-avatar'; image.alt = ''; b.append(image); } b.append(name,status);previewCard(b,item); b.onclick = run(() => select(item.id)); list.append(b); }
     const group = selected.startsWith('g:') && engine.group(selected.slice(2)), peer = selected.startsWith('p:') && contact(selected.slice(2));
-    if($('chat-rename'))$('chat-rename').hidden=!selected.startsWith('p:');
+    if($('chat-rename')){$('chat-rename').hidden=!selected;$('chat-rename').title=tr(selected.startsWith('g:')?'Conversation settings':'Rename saved computer');}
     $('chat-edit-group').hidden=!group||group.owner!==self.deviceId;
     $('chat-title').textContent = group?.name || displayName(peer) || tr('Select a conversation');
     $('chat-peer-status').textContent = group ? `${tr(group.owner === self.deviceId || online(group.owner) ? 'Group owner online' : 'Group owner offline')} · ${group.members.map(m => displayName(contact(m.deviceId))||displayName(m)).join(', ')}` : peer ? tr(online(peer.deviceId) ? 'Connected' : 'Offline') : '';
     $('chat-text').disabled = !selected; $('chat-send').disabled = !selected || busy; $('chat-send-files').disabled = !selected || busy;
-    voice?.sync();$('chat-reconnect').hidden = true; $('chat-disconnect').hidden = !peer || !online(peer.deviceId);
+    voice?.sync();
     $('chat-progress').textContent = selected && progress.get(selected) || '';
-    fileSetting.hidden=!selected;filePolicy.value=engine.catalog.filePolicies?.[selected]||'inherit';
+    filePolicy.value=engine.catalog.filePolicies?.[selected]||'inherit';
     if (refreshHistory && $('messenger-dialog').open && selected && rows.length <= 100) { clearTimeout(historyTimer); historyTimer = setTimeout(() => load(false).catch(error), 80); }
   }
   function renderDiscovery(value) {
@@ -107,30 +113,34 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('refresh-discovery').onclick = run(async () => {renderDiscovery(await api.discovery());window.refreshFeedback($('network-list'));});
   api.onDiscovery(renderDiscovery);
   $('chat-connect-form').onsubmit = run(async () => { const address = $('chat-address').value.trim(); await start({ type: address.includes('.') || address.includes(':') ? 'lan' : 'id', address }); });
-  $('chat-reconnect').onclick = run(async () => { const route = routeFor(selected.slice(2)); if (!route) throw new Error('Enter the contact ID or LAN IP to reconnect.'); await start(route); });
-  $('chat-disconnect').onclick = run(() => engine.close(engine.peer(selected.slice(2))));
   $('chat-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
   $('chat-older').onclick = run(() => load(true));
-  $('chat-compose').onsubmit = run(async () => { const text = $('chat-text').value; await engine.send(selected, text); $('chat-text').value = ''; await load(false); $('chat-messages').scrollTop = $('chat-messages').scrollHeight; });
-  $('chat-text').addEventListener('paste',async event=>{try{
-    const image=[...(event.clipboardData?.items||[])].find(item=>item.kind==='file'&&item.type.startsWith('image/'));
-    if(!image||!selected)return;event.preventDefault();const file=image.getAsFile();if(!file)return;
+  $('chat-compose').onsubmit = run(async () => { const text = $('chat-text').value;if(voice?.active()||!text.trim()){voice?.activate();return;} await engine.send(selected, text); $('chat-text').value = '';voice?.sync(); await load(false); $('chat-messages').scrollTop = $('chat-messages').scrollHeight; });
+  async function pasteClipboard(event){const target=selected;if(!target)return;event?.preventDefault();try{
+    const data=await api.chatClipboard('read');if(target!==selected)return;
+    if(data.files){await files('clipboard-sources');return;}
+    const image=[...(event?.clipboardData?.items||[])].find(item=>item.kind==='file'&&item.type.startsWith('image/'));
+    if(!image){if(data.image){await files('clipboard-image',data.image);return;}const text=event?.clipboardData?.getData('text/plain')??data.text;if(text){$('chat-text').setRangeText(text,$('chat-text').selectionStart,$('chat-text').selectionEnd,'end');$('chat-text').dispatchEvent(new Event('input',{bubbles:true}));}return;}
+    const file=image.getAsFile();if(!file)return;
     if(file.size>10*1024**2)throw new Error('Clipboard image is too large.');
-    const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Invalid clipboard image.'));reader.readAsDataURL(file);});
-    await files('clipboard-image',data);
-  }catch(e){error(e);}});
-  $('chat-text').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-compose').requestSubmit(); } };
+    const imageData=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Invalid clipboard image.'));reader.readAsDataURL(file);});
+    await files('clipboard-image',imageData);
+  }catch(e){error(e);}}
+  $('chat-text').addEventListener('paste',pasteClipboard);
+  $('chat-text').onkeydown = event => {if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='v'){event.preventDefault();pasteClipboard();return;} if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-compose').requestSubmit(); } };
   async function files(operation = 'pick', value) { if (busy) throw new Error('A file transfer is already in progress.'); busy = true; render(); try { await engine.sendFiles(selected, operation, value); } finally { busy = false; render(); } }
   voice=window.installVoiceMessages({api,conversation:()=>selected,available:()=>!!selected&&!busy,send:(conversation,data)=>engine.sendFiles(conversation,'voice',data),error});
   $('chat-send-files').onclick = run(() => files());
   $('messenger-dialog').ondragover = event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = selected ? 'copy' : 'none'; } };
   $('messenger-dialog').ondrop = run(async event => { if (!selected || !event.dataTransfer.files.length) return; await files('drop', [...event.dataTransfer.files]); });
   const rename=button('Rename saved computer',async()=>{
-    const peer=contact(selected.slice(2));if(!peer)return;
+    const peer=contact(selected.slice(2)),group=engine.group(selected.slice(2));if(!peer&&!group)return;
     let dialog=$('chat-name-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='chat-name-dialog';dialog.innerHTML='<form id="chat-name-form"><h2>Rename saved computer</h2><label for="chat-local-name">Computer nickname</label><input id="chat-local-name" maxlength="60"><div class="inline-setting"><button type="submit" class="small-button">Save</button><button type="button" id="chat-name-cancel" class="small-button">Cancel</button></div><p id="chat-name-error" class="error"></p></form>';document.body.append(dialog);}
-    $('chat-local-name').value=peer.displayName||peer.name;dialog.showModal();$('chat-local-name').focus();$('chat-local-name').select();$('chat-name-cancel').onclick=()=>dialog.close();
-    $('chat-name-form').onsubmit=async event=>{event.preventDefault();try{await api.computerCard('rename',{peer:{...peer,...peer.route},name:$('chat-local-name').value});await engine.refresh();dialog.close();render(true);}catch(e){$('chat-name-error').textContent=e.message;}};
-  },'person');rename.id='chat-rename';document.querySelector('.chat-thread-heading').append(rename);
+    $('chat-local-name').after(fileSetting);fileSetting.hidden=false;filePolicy.value=engine.catalog.filePolicies?.[selected]||'inherit';
+    dialog.querySelector('h2').textContent=tr(peer?'Rename saved computer':'Conversation settings');$('chat-local-name').readOnly=!peer;
+    $('chat-local-name').value=peer?peer.displayName||peer.name:group.name;dialog.showModal();$('chat-local-name').focus();$('chat-local-name').select();$('chat-name-cancel').onclick=()=>dialog.close();
+    $('chat-name-form').onsubmit=async event=>{event.preventDefault();try{if(peer)await api.computerCard('rename',{peer:{...peer,...peer.route},name:$('chat-local-name').value});await engine.refresh();dialog.close();render(true);}catch(e){$('chat-name-error').textContent=e.message;}};
+  },'edit');rename.id='chat-rename';document.querySelector('.chat-thread-heading').append(rename);
   const groupEditor=async existing=>{
     editingGroup=existing;const list = $('chat-group-members'); list.replaceChildren(); $('chat-group-error').textContent = ''; $('chat-group-name').value = existing?.name||'';
     groupAvatar=existing?.avatar||'';$('chat-group-avatar').src=groupAvatar||'assets/app-icon.png';$('chat-group-description').value=existing?.description||'';
@@ -150,7 +160,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     dialog.querySelector('h2').textContent=tr('Edit message');dialog.querySelector('[type=submit]').textContent=tr('Save changes');const cancel=dialog.querySelector('[type=button]');cancel.textContent=tr('Cancel');cancel.onclick=()=>dialog.close();dialog.querySelector('.error').textContent='';$('message-edit-text').value=row.text;
     $('message-edit-form').onsubmit=async event=>{event.preventDefault();const save=dialog.querySelector('[type=submit]');save.disabled=true;try{await engine.changeMessage(row.conversation,row.id,$('message-edit-text').value);dialog.close();await load(false);}catch(e){dialog.querySelector('.error').textContent=tr(e.message);}finally{save.disabled=false;}};dialog.showModal();$('message-edit-text').focus();
   }
-  if(!detached)setInterval(()=>engine.reconnectKnown().catch(()=>{}),15000);
+  if(!detached)setInterval(()=>engine.reconnectKnown().catch(()=>{}),5000);
   engine.ready.then(()=>{render();if(!detached)engine.reconnectKnown().catch(()=>{});}).catch(error); api.discovery().then(renderDiscovery).catch(error);
   window.addEventListener('shatoot-language-change', () => { renderDiscovery(discovery); renderMessages(false);publish(); });
   return { engine, open, select, start, renderDiscovery, snapshot };

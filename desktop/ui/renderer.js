@@ -59,7 +59,7 @@ function updateControls() {
   $('cancel-connection').hidden=!outgoingAttempt;$('cancel-server').hidden=!serverAttempt;
   $('shared-cursor').disabled = role !== 'idle';
   $('unattended').disabled = role !== 'idle' || requestPending || !config?.fixedPassword; $('fixed-password').disabled = role !== 'idle' || requestPending; $('save-fixed-password').disabled = role !== 'idle' || requestPending;
-  for (const button of document.querySelectorAll('.favorite-connect')) button.disabled = role !== 'idle' || requestPending;
+  for (const button of document.querySelectorAll('.favorite-connect,.history-connect')) button.disabled = role !== 'idle' || requestPending;
   $('remote-id').disabled = role !== 'idle'; $('remote-password').disabled = role !== 'idle';
   $('server-url').disabled = role !== 'idle'; $('connect-server').disabled = role !== 'idle'; $('local-server').disabled = role !== 'idle';
   $('copy-id').disabled = !hosting; $('copy-password').disabled = !hosting;
@@ -562,22 +562,23 @@ async function joinTarget(record) {
 }
 $('cancel-connection').onclick=()=>{if(!outgoingAttempt)return;stopSession(true);status('Connection cancelled.');};
 $('join').onclick = guarded(joinTarget);
-function renderFavorites(records) {
-  config.favorites = records;
-  const list = $('favorites-list'); list.replaceChildren();
-  $('favorites-empty').hidden = records.length > 0;
-  for (const record of records) {
-    const row = document.createElement('div'); row.className = 'favorite-row';applyComputerPreview(row,record);
-    const connectButton = document.createElement('button'); connectButton.className = 'favorite-connect'; connectButton.disabled = role !== 'idle';
-    const name = document.createElement('b'); name.textContent = record.displayName||record.name;
-    const address = document.createElement('small'); address.textContent = record.address; address.dir = 'ltr';
-    {const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/app-icon.png';avatar.alt='';connectButton.append(avatar,name,address);} connectButton.onclick = guarded(() => connectFavorite(record.id));
-    const actions = document.createElement('div'); actions.className = 'favorite-actions';
-    for (const [icon, title, action] of [['screen_share','Connect to a computer',()=>connectFavorite(record.id)],['person','Rename saved computer',async()=>saveComputer(await api.favoriteGet(record.id))],['shortcut', 'Create desktop shortcut', async () => { await api.favoriteShortcut(record.id); toast('Desktop shortcut created.'); }], ['close', 'Delete saved connection', async () => renderFavorites(await api.favoriteDelete(record.id))]]) {
-      const button = document.createElement('button'); button.className = 'icon-button'; button.title = tr(title); button.setAttribute('aria-label', tr(title));
-      const image = document.createElement('span'); image.className = `mi ${icon}`; image.setAttribute('aria-hidden', 'true'); button.append(image);if(title==='Rename saved computer'){button.classList.add('rename-computer');const label=document.createElement('span');label.textContent=tr('Rename');button.append(label);} button.onclick = guarded(action); actions.append(button);
-    }
-    row.append(connectButton, actions); list.append(row);
+let computersRevision=0;
+function renderFavorites(records){config.favorites=records;return renderComputers();}
+async function renderComputers(){
+  const revision=++computersRevision,records=await api.connections('computers');if(revision!==computersRevision)return;
+  const list=$('favorites-list');list.replaceChildren();$('favorites-empty').hidden=records.length>0;
+  for(const record of records){
+    const row=document.createElement('div');row.className=record.saved?'favorite-row':'history-row';row.dataset.address=record.address;row.dataset.saved=String(record.saved);row.dataset.connectedAt=String(record.at||0);applyComputerPreview(row,record);
+    const marker=document.createElement('span');marker.className='computer-kind mi '+(record.saved?'star_outline':'schedule');marker.title=tr(record.saved?'Saved computer':'Recent connection');marker.setAttribute('role','img');marker.setAttribute('aria-label',marker.title);
+    const connectButton=document.createElement('button');connectButton.className=record.saved?'favorite-connect':'history-connect';connectButton.disabled=role!=='idle';
+    const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/app-icon.png';avatar.alt='';
+    const name=document.createElement('b');name.textContent=record.displayName||record.name;const address=document.createElement('small');address.textContent=record.address;address.dir='ltr';connectButton.append(avatar,name,address);
+    const resolve=()=>record.saved?api.favoriteGet(record.id):api.connections('get',record.id);
+    connectButton.onclick=guarded(async()=>connectRecord(await resolve()));
+    const actions=document.createElement('div');actions.className='favorite-actions';
+    const entries=record.saved?[['screen_share','Connect to a computer',async()=>connectRecord(await resolve())],['edit','Rename saved computer',async()=>saveComputer(await resolve())],['shortcut','Create desktop shortcut',async()=>{await api.favoriteShortcut(record.id);toast('Desktop shortcut created.');}],['close','Delete saved connection',async()=>renderFavorites(await api.favoriteDelete(record.id))]]:[['person','Save computer',async()=>saveComputer(await resolve())]];
+    for(const[icon,title,action]of entries){const b=document.createElement('button');b.className='icon-button';if(title==='Rename saved computer')b.classList.add('rename-computer');b.title=tr(title);b.setAttribute('aria-label',b.title);const i=document.createElement('span');i.className='mi '+icon;i.setAttribute('aria-hidden','true');b.append(i);b.onclick=guarded(action);actions.append(b);}
+    row.append(marker,connectButton,actions);list.append(row);
   }
 }
 async function connectFavorite(id) {
@@ -611,10 +612,7 @@ async function saveComputer(value){
   });
 }
 $('quick-save').onclick=guarded(()=>saveComputer({address:$('remote-id').value,password:$('remote-password').value,endpoint:$('server-url').value,serverKey:$('server-key').value}));
-function renderHistory(records){
-  const list=$('connection-history'); list.replaceChildren(); $('history-empty').hidden=records.length>0;
-  for(const record of records){const row=document.createElement('div');row.className='history-row';const reconnect=document.createElement('button');reconnect.className='history-connect';const name=document.createElement('b'),detail=document.createElement('small');name.textContent=record.displayName||record.name;applyComputerPreview(row,record);detail.textContent=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{dateStyle:'short',timeStyle:'short'}).format(record.at);const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/app-icon.png';avatar.alt='';reconnect.append(avatar,name,detail);reconnect.onclick=guarded(async()=>connectRecord(await api.connections('get',record.id)));const save=document.createElement('button');save.className='icon-button';save.title=tr('Save computer');save.setAttribute('aria-label',save.title);const icon=document.createElement('span');icon.className='mi person';save.append(icon);save.onclick=guarded(async()=>saveComputer(await api.connections('get',record.id)));row.append(reconnect,save);list.append(row);}
-}
+function renderHistory(){return renderComputers();}
 let recallTimer;
 $('remote-id').addEventListener('input',()=>{const revision=++recallRevision;clearTimeout(recallTimer);$('remote-password').value='';const address=$('remote-id').value,endpoint=$('server-url').value;if(!config?.rememberPasswords)return;recallTimer=setTimeout(async()=>{try{const password=await api.connections('recall',{address,endpoint});if(revision===recallRevision && role==='idle' && $('remote-id').value===address && $('server-url').value===endpoint && !$('remote-password').value)$('remote-password').value=password;}catch{}},180);});
 $('server-url').addEventListener('input',()=>{$('remote-id').dispatchEvent(new Event('input'));});

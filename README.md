@@ -6,13 +6,15 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 The chat window uses a blue speech-bubble icon and a role-first **Chats · Shatoot Connect** title, distinct from the main purple application icon. Both update buttons keep a dedicated download percentage visible in English and Persian, even when the status text is clipped in a narrow header.
 
-## Version 0.18.1
+## Version 0.19.0
+
+The main sidebar combines saved and recent computers into one list, sorted by the last successful connection. Saved systems have a muted outline star; unsaved recent systems have a clock. A saved system does not also appear as a recent row. Rename is an icon action; saving, credentials and existing shortcuts retain their identities.
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.18.1-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.18.1-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.18.1-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.19.0-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.19.0-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.19.0-win-x64.zip` | Coordinator, runtime and service manager |
 
 Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. An exact application version match is not required: remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
@@ -34,9 +36,9 @@ Setup checks the OS/architecture, destination, write access, destination/TEMP di
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.18.1-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.18.1-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.18.1-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.19.0-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.19.0-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.19.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.
@@ -77,9 +79,9 @@ Computer cards retain a small JPEG thumbnail of the last desktop you received in
 
 ## Private chat and history
 
-Open **Chats and files**, enter an Internet ID/private LAN IP or click a nearby device's chat button. Known chats reconnect automatically on startup and periodically, preferring a discovered LAN route and falling back to the saved LAN/Internet route. Selecting a contact or sending text/files also connects without a separate Connect click. Offline text remains queued. Ordinary messages connect without a recipient approval prompt by default. Settings > Chat and files can restore explicit chat approval. Chat needs no desktop password and grants no screen, mouse, keyboard or clipboard access. ID chat requires both devices on the same updated coordinator; LAN chat needs no coordinator/STUN/TURN.
+Open **Chats and files**, enter an Internet ID/private LAN IP or click a nearby device's chat button. Known chats reconnect automatically on startup and periodically, preferring a discovered LAN route and falling back to the saved LAN/Internet route. Selecting a contact or sending text/files also connects without a separate Connect click. Offline text remains queued. Ordinary messages connect without a recipient approval prompt by default. Settings > Chat and files can restore explicit chat approval. Chat needs no desktop password. Clients with the desktop-card feature exchange a small desktop JPEG thumbnail on connection and once per minute; the last image is encrypted locally and remains on offline cards. This shares a desktop preview independently of full remote-screen, mouse, keyboard or clipboard access. Both clients need the feature; older clients retain normal chat/file compatibility. ID chat requires both devices on the same updated coordinator; LAN chat needs no coordinator/STUN/TURN.
 
-A separate reliable WebRTC data connection carries messages/files. The coordinator sees invitation and ICE/SDP signaling, not their contents. Direct traffic bypasses the coordinator; optional TURN relays encrypted transport and consumes relay bandwidth. The messenger runs in a separate window. Closing either main/chat UI keeps the background engine and connected sessions alive in the tray; use the tray or Show main window to restore the UI. Quit completely in Settings > Application or the tray exits the process and ends sessions; **Disconnect chat** does not end a desktop session.
+A separate reliable WebRTC data connection carries messages/files. The coordinator sees invitation and ICE/SDP signaling, not their contents. Direct traffic bypasses the coordinator; optional TURN relays encrypted transport and consumes relay bandwidth. The messenger runs in a separate window. Closing either main/chat UI keeps the background engine and connected sessions alive in the tray; use the tray to restore the main UI. Quit completely in Settings > Application or the tray exits the process and ends sessions; Known chats reconnect automatically; there is no separate Connect/Disconnect chat action.
 
 Contacts, groups, transcripts and queued text are atomically saved in a DPAPI-encrypted `%APPDATA%\shatoot-connect\chat-<device-id>.dat` file. Search and **Load older messages** operate locally. A delivery acknowledgement follows recipient persistence; it is not a human read receipt. Text to disconnected saved contacts queues until a new approved connection. There is no server-hosted offline mailbox. Limits are 50,000 messages / 32 MiB; full or unreadable history reports an error without silently overwriting the old transcript. Received file contents are ordinary Downloads files, not encrypted database blobs.
 

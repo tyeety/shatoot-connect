@@ -10,6 +10,13 @@ function fixture() {
     validateDirect: address => { if (!/^192\.168\.\d+\.\d+(?::\d+)?$/.test(address)) throw Error('Invalid LAN IP'); return address; } };
   return { preferences: new ClientPreferences(options), storage: () => stored };
 }
+test('combined computers deduplicate saved/recent destinations and sort every row by its last connection',()=>{
+  const {preferences:p}=fixture();p.save({address:'192.168.1.10:8788',name:'Saved',password:'secret'});p.connected({address:'192.168.1.10'});p.connected({address:'192.168.1.11',name:'Recent'});
+  let rows=p.computers();assert.equal(rows.length,2);assert.equal(rows.filter(r=>r.saved).length,1);assert.equal(rows.find(r=>r.saved).address,'192.168.1.10:8788');
+  assert.equal(rows[0].address,'192.168.1.11');assert.equal(rows[0].saved,false);
+  const savedAt=rows.find(r=>r.saved).at;p.connected({address:'192.168.1.10'});rows=p.computers();assert.equal(rows[0].saved,true);assert.ok(rows[0].at>=savedAt);
+  p.save({address:'192.168.1.11',name:'Now saved'});assert.equal(p.computers().length,2);assert.ok(p.computers().every(r=>r.saved));
+});
 test('a chosen computer nickname survives resaving credentials and keeps the shortcut identity',()=>{
   const{preferences}=fixture();const id=preferences.save({name:'دفتر مرکزی',address:'192.168.1.10',password:'secret'});preferences.markShortcut(id);const shortcut=preferences.shortcutName(id);
   preferences.save({address:'192.168.1.10',password:'new-secret'});assert.equal(preferences.get(id).name,'دفتر مرکزی');

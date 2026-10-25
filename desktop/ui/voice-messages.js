@@ -2,16 +2,17 @@
 window.installVoiceMessages = ({api,conversation,available,send,error}) => {
   const tr=text=>window.i18n.translate(text), players=new Map();
   const actions=document.createElement('div');actions.className='voice-actions';
-  const record=document.createElement('button');record.id='chat-record-voice';record.type='button';record.className='small-button';
+  const record=document.getElementById('chat-send');record.className='icon-button chat-primary-action';
   const icon=document.createElement('span');icon.className='mi mic';icon.setAttribute('aria-hidden','true');
   const caption=document.createElement('span'),clock=document.createElement('output');clock.className='voice-clock';clock.setAttribute('aria-live','off');
-  record.append(icon,caption);
+  record.replaceChildren(icon,caption);caption.className='sr-only';
   const cancel=document.createElement('button');cancel.id='chat-cancel-voice';cancel.type='button';cancel.className='icon-button';cancel.innerHTML='<span class="mi close" aria-hidden="true"></span>';
-  actions.append(record,clock,cancel);document.querySelector('#chat-send-files').after(actions);
+  actions.append(clock,cancel);document.querySelector('#chat-compose').append(actions);
   let recording=null,starting=false,generation=0,sending=false;
   function sync(){
     record.disabled=starting||sending||(!recording&&!available());record.classList.toggle('voice-recording',!!recording);
-    icon.className=`mi ${recording?'voice_stop':'mic'}`;caption.textContent=tr(recording?'Send voice':'Record voice');record.title=caption.textContent;
+    const typing=!!document.getElementById('chat-text').value.trim();
+    icon.className=`mi ${recording?'voice_stop':typing?'send':'mic'}`;caption.textContent=tr(recording?'Send voice':typing?'Send':'Record voice');record.title=caption.textContent;record.setAttribute('aria-label',caption.textContent);
     cancel.hidden=!recording&&!starting;cancel.title=tr('Cancel recording');cancel.setAttribute('aria-label',cancel.title);
     clock.hidden=!recording;
   }
@@ -49,7 +50,9 @@ window.installVoiceMessages = ({api,conversation,available,send,error}) => {
     }catch(e){if(recording?.stream===stream){recording.discard=true;release(recording);recording=null;}stream?.getTracks().forEach(track=>track.stop());if(revision===generation)error(e.message==='Voice recording is not supported.'?e:new Error('Microphone unavailable. Check microphone access in Windows Settings.'));}
     finally{if(revision===generation){starting=false;await api.voiceRecording(false).catch(()=>{});}sync();}
   }
-  record.onclick=()=>{if(recording)stop();else start();};cancel.onclick=()=>stop(true);
+  function activate(){if(recording)stop();else start();}
+  record.onclick=event=>{if(recording||!document.getElementById('chat-text').value.trim()){event.preventDefault();activate();}};cancel.onclick=()=>stop(true);
+  document.getElementById('chat-text').addEventListener('input',sync);
   function reset(){stop(true);for(const entry of players.values()){entry.audio.pause();URL.revokeObjectURL(entry.url);}players.clear();}
   function attachment(item,row){
     if(!row.attachment||!/^Voice-[a-f0-9-]{36}\.webm$/i.test(row.text))return;
@@ -71,5 +74,5 @@ window.installVoiceMessages = ({api,conversation,available,send,error}) => {
     };
   }
   document.getElementById('messenger-dialog').addEventListener('close',reset);window.addEventListener('beforeunload',reset);window.addEventListener('shatoot-language-change',sync);
-  sync();return {sync,reset,attachment};
+  sync();return {sync,reset,attachment,activate,active:()=>!!recording||starting};
 };

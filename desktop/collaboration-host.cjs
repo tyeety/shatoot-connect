@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { ChatStore } = require('./chat-store.cjs');
 const { Transfers } = require('./transfers.cjs');
 const { UUID } = require('./discovery.cjs');
-function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {}, messageReceived = () => {} }) {
+function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, clipboardRead=async()=>({files:[]}), decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {}, messageReceived = () => {} }) {
   function store(s) {
     if (!s.identity) throw new Error('The device is not initialized.');
     return s.chatStore ||= new ChatStore({ file: path.join(app.getPath('userData'), `chat-${s.identity.deviceId}.dat`), self: s.identity.deviceId,
@@ -19,6 +19,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if(op==='history')return history.history(value).map(m=>({...m,displayName:decorateComputer({deviceId:m.sender,name:m.name}).displayName||m.name}));
     if (op === 'file-policy') return history.filePolicy(value.conversation,value.mode);
     if (op === 'pending') return history.pending(value.peer);
+    if(op==='peer-preview'){const g=grant(s,value.session);if(typeof value.preview!=='string'||value.preview.length>90000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.preview))throw new Error('Invalid desktop preview.');rememberComputer({deviceId:g.peer.deviceId,preview:value.preview},undefined,true);return true;}
     if (op === 'contact') {
       const route = value.route;
       if (route && (typeof route !== 'object' || !['lan', 'id'].includes(route.type) || typeof route.address !== 'string' || route.address.length > 300 || (route.endpoint && (typeof route.endpoint !== 'string' || route.endpoint.length > 500)))) throw new Error('Invalid contact address.');
@@ -79,6 +80,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     const s = state(event), g = grant(s, session), history = store(s);
     if (op === 'pick') { const picked = await dialog.showOpenDialog(s.chatWindow || s.win, { properties: ['openFile', 'multiSelections'] }); return picked.canceled ? [] : g.send.offer(picked.filePaths); }
     if (op === 'sources') return g.send.offer(value);
+    if(op==='clipboard-sources'){const data=await clipboardRead(s);return data.files.length?g.send.offer(data.files):[];}
     if (op === 'received-sources') return g.send.offer(history.files(value));
     if(op==='voice') {
       if(typeof value!=='string'||value.length>14*1024**2||!/^data:audio\/webm(?:;codecs=opus)?;base64,[A-Za-z0-9+/]+=*$/.test(value))throw new Error('Invalid voice message.');

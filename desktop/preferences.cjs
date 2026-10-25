@@ -72,9 +72,18 @@ class ClientPreferences {
     this.write({connectionPasswords:cache});
   }
   history() { return (this.read().connectionHistory||[]).map(({id,address,endpoint,name,at,count})=>this.decorate({id,address,endpoint,name,at,count})); }
+  computers(){
+    const rows=[];
+    for(const record of [...this.list().map(r=>({...r,saved:true,at:0})),...this.history().map(r=>({...r,saved:false}))]){
+      const key=this.destination(record).key,existing=rows.find(r=>r.keys.has(key)||(record.deviceId&&r.deviceId===record.deviceId));
+      if(existing){existing.at=Math.max(existing.at||0,record.at||0);existing.keys.add(key);if(!existing.deviceId)existing.deviceId=record.deviceId;}
+      else rows.push({...record,keys:new Set([key])});
+    }
+    return rows.sort((a,b)=>(b.at||0)-(a.at||0)||Number(b.saved)-Number(a.saved)||a.name.localeCompare(b.name)).map(({keys,...record})=>record);
+  }
   connected(value) {
     const target=this.destination(value), history=this.read().connectionHistory||[], previous=history.find(h=>h.key===target.key);
-    const record={...target,id:previous?.id||crypto.randomUUID(),name:String(value.name||previous?.name||target.address).slice(0,60),at:Date.now(),count:(previous?.count||0)+1};
+    const record={...target,id:previous?.id||crypto.randomUUID(),name:String(value.name||previous?.name||target.address).slice(0,60),at:Math.max(Date.now(),(history[0]?.at||0)+1),count:(previous?.count||0)+1};
     this.write({connectionHistory:[record,...history.filter(h=>h.key!==target.key)].slice(0,200)}); return this.history();
   }
   saveHistory(id) { const h=this.history().find(h=>h.id===id); if(!h)throw new Error('Connection history entry not found.');return this.save({...h,password:this.recall(h)}); }

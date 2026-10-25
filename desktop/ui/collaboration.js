@@ -20,7 +20,7 @@
         const nearby=this.nearby?.some(p=>p.deviceId===peer.deviceId);
         if((!nearby&&!peer.route)||(nearby&&this.self.deviceId>peer.deviceId)||Date.now()<(this.retries.get(peer.deviceId)||0))continue;
         if(!nearby&&peer.route?.type==='id'&&!this.internet().registered)continue;
-        this.retries.set(peer.deviceId,Date.now()+60000);
+        this.retries.set(peer.deviceId,Date.now()+5000);
         this.ensurePeer(peer.deviceId,true).catch(()=>{});
       }}finally{this.reconnecting=false;}
     }
@@ -108,7 +108,7 @@
     }
     bind(s, channel) {
       s.channel = channel; channel.bufferedAmountLowThreshold = 131072;
-      channel.onopen = () => { clearTimeout(s.timer); s.resolve(s); this.notify(); this.rpc(s,'profile',this.self).then(result=>{s.features=result?.features||[];return this.flush(s)}).catch(e=>this.error(e.message));this.flush(s).catch(e=>this.error(e.message)); };
+      channel.onopen = () => { clearTimeout(s.timer); s.resolve(s); this.notify(); this.rpc(s,'profile',this.self).then(result=>{s.features=result?.features||[];this.sendPreview(s).catch(()=>{});return this.flush(s)}).catch(e=>this.error(e.message));this.flush(s).catch(e=>this.error(e.message));s.previewTimer=setInterval(()=>this.sendPreview(s).catch(()=>{}),60000); };
       channel.onclose = () => this.close(s, 'Chat connection closed.');
       channel.onmessage = event => {
         if (typeof event.data !== 'string' || event.data.length > 64000) return this.close(s, 'Invalid chat packet.');
@@ -161,8 +161,9 @@
       if (op === 'profile') {
         if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
         Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status });
-        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1']};
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1','desktop-card-preview-v1']};
       }
+      if(op==='desktop-card-preview'){await this.api.collaboration('peer-preview',{session:s.id,preview:value});await this.refresh();return true;}
       if (op === 'group') {
         if (value?.owner !== s.peer.deviceId) throw new Error('Only the group owner can invite members.');
         if (!this.group(value.id) && !await this.api.collaboration('approve-group', { session: s.id, group: value })) return false;
@@ -202,6 +203,7 @@
       for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});
       return message;
     }
+    async sendPreview(s){if(s.closed||!s.features?.includes('desktop-card-preview-v1')||s.previewBusy)return;s.previewBusy=true;try{const preview=await this.api.desktopCardPreview();if(preview&&preview!==s.lastPreview){await this.rpc(s,'desktop-card-preview',preview);s.lastPreview=preview;}}finally{s.previewBusy=false;}}
     async changeMessage(conversation,id,text,removed=false){
       await this.ready;const rows=await this.api.collaboration('history',{conversation,limit:100,search:''});let row=rows.find(m=>m.id===id);
       if(!row)row=await this.api.collaboration('message',{conversation,id});
@@ -306,7 +308,7 @@
       if (!s || s.closed) return; s.closed = true; clearTimeout(s.timer);
       if (notifyRemote) try { s.route.send({ type: 'collab-leave', session: s.id }); } catch {}
       s.pc?.close(); s.route.socket?.close(); for (const p of s.pending.values()) { clearTimeout(p.timer); p.reject(new Error(reason)); } for (const f of s.frames.values()) clearTimeout(f.timer);
-      s.pending.clear(); s.frames.clear(); s.reject(new Error(reason)); this.sessions.delete(s.id); this.api.collaboration('end', { session: s.id }).catch(() => {}); this.notify();
+      clearInterval(s.previewTimer);s.pending.clear(); s.frames.clear(); s.reject(new Error(reason)); this.sessions.delete(s.id); this.api.collaboration('end', { session: s.id }).catch(() => {}); this.notify();
     }
   }
   window.CollaborationClient = CollaborationClient;

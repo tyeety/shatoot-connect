@@ -99,6 +99,8 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   overlayDisconnect: () => ipcRenderer.send('overlay-disconnect'),
   onHostDisconnect: callback => ipcRenderer.on('host-disconnect', () => callback()),
   copyText: text => ipcRenderer.invoke('copy-text', text),
+  chatClipboard: (operation,token) => ipcRenderer.invoke('chat-clipboard',operation,token),
+  desktopCardPreview: () => ipcRenderer.invoke('desktop-card-preview'),
   onEmergency: callback => ipcRenderer.on('emergency-stop', () => callback()),
   onInputError: callback => ipcRenderer.on('input-error', () => callback())
 });
