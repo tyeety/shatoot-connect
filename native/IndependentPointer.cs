@@ -100,10 +100,22 @@ sealed class IndependentPointer {
             return;
         }
         if (button == 0 && target.NativeButton) {
-            // BM_CLICK delivers the pair atomically inside the standard button
-            // procedure, so physical host motion cannot cancel the remote click.
+            var style = GetWindowLong(target.Window, -16) & 0xf;
+            // Group frames are also class Button; they are never actionable.
+            if (style == 7 || !IsWindowEnabled(target.Window) || !IsWindowEnabled(target.Root)) return;
             PostMessage(target.Window, 0xF3, down ? (IntPtr)1 : IntPtr.Zero, IntPtr.Zero);
-            if (!down && At(x, y)?.Window == target.Window) PostMessage(target.Window, 0xF5, IntPtr.Zero, IntPtr.Zero);
+            if (!down && At(x, y)?.Window == target.Window) {
+                // Push buttons notify their immediate parent with BN_CLICKED.
+                // BM_CLICK synthesizes mouse messages and can fail in inactive
+                // property-sheet pages (including shield/Advanced Sharing
+                // buttons). Deliver the same command, once, without consulting
+                // or moving the host cursor. Stateful check/radio buttons still
+                // use their native procedure so their state changes normally.
+                if (style is 0 or 1 or 11 or 12 or 13 or 14 or 15) {
+                    var parent = GetParent(target.Window);
+                    if (parent != IntPtr.Zero && IsWindowEnabled(parent)) PostMessage(parent, 0x111, (IntPtr)(GetDlgCtrlID(target.Window) & 0xffff), target.Window);
+                } else PostMessage(target.Window, 0xF5, IntPtr.Zero, IntPtr.Zero);
+            }
             return;
         }
         uint message = button switch { 0 => down ? 0x201u : 0x202u, 2 => down ? 0x204u : 0x205u, _ => down ? 0x207u : 0x208u };
@@ -180,6 +192,23 @@ sealed class IndependentPointer {
             var pointer = new IndependentPointer();
             pointer.Move(point.X, point.Y); pointer.Button(0, true, point.X, point.Y); pointer.Button(0, false, point.X, point.Y); pointer.Wheel(0, 120); pointer.Release(); Pump();
             int normalClicks = clicks; bool hitExpectedButton = false;
+            // Property pages put push buttons inside overlapping group boxes.
+            // A hit on the group box must reach its sibling button, not BM_CLICK
+            // the non-interactive frame (the Sharing page uses this layout).
+            var page = CreateWindowEx(0x10000, "#32770", "Property page", 0x50000400, 5, 65, 280, 55, host, IntPtr.Zero, wc.Instance, IntPtr.Zero);
+            var advanced = CreateWindowEx(0, "BUTTON", "Advanced Sharing...", 0x50010000, 20, 22, 160, 24, page, (IntPtr)100, wc.Instance, IntPtr.Zero);
+            SendMessageTimeout(advanced, 0x160C, IntPtr.Zero, (IntPtr)1, 2, 100, out _);
+            var group = CreateWindowEx(0, "BUTTON", "Advanced Sharing", 0x50000007, 5, 2, 260, 50, page, IntPtr.Zero, wc.Instance, IntPtr.Zero);
+            // Forward the child page's command to the fixture owner.
+            SetWindowLongPtr(page, -4, Marshal.GetFunctionPointerForDelegate(procedure));
+            SetWindowPos(group, IntPtr.Zero, 0, 0, 0, 0, 0x0013);
+            Pump(); var advancedPoint = new POINT { X = 30, Y = 12 }; ClientToScreen(advanced, ref advancedPoint);
+            var nested = new IndependentPointer(); bool nestedTarget = nested.At(advancedPoint.X, advancedPoint.Y)?.Window == advanced;
+            nested.Button(0, true, advancedPoint.X, advancedPoint.Y); nested.Button(0, false, advancedPoint.X, advancedPoint.Y); Pump();
+            int nestedClicks = clicks - normalClicks;
+            nested.Button(0, true, advancedPoint.X, advancedPoint.Y); nested.Button(0, false, advancedPoint.X + 190, advancedPoint.Y); Pump();
+            bool cancelledClick = clicks == normalClicks + nestedClicks;
+            DestroyWindow(page);
             var veil = CreateWindowEx(0x80000, name, "Protected overlay", 0x80000000, point.X - 10, point.Y - 10, 100, 70, IntPtr.Zero, IntPtr.Zero, wc.Instance, IntPtr.Zero);
             try {
                 SetLayeredWindowAttributes(veil, 0, 160, 2); ShowWindow(veil, 4); SetWindowPos(veil, (IntPtr)(-1), 0, 0, 0, 0, 0x0053); Pump();
@@ -191,8 +220,9 @@ sealed class IndependentPointer {
             GetCursorPos(out var after);
             bool stable = before.X == after.X && before.Y == after.Y;
             bool movedByHelper = Native.CursorMoveCount != originalMoves;
-            Console.WriteLine(JsonSerializer.Serialize(new { ok = clicks == 2 && !movedByHelper, clicks, normalClicks, hitExpectedButton, clickedThroughOverlay = clicks == 2, cursorMovedByHelper = movedByHelper, cursorUnchanged = stable }));
-            return clicks == 2 && !movedByHelper ? 0 : 1;
+            bool ok = normalClicks == 1 && nestedTarget && nestedClicks == 1 && cancelledClick && clicks == 3 && !movedByHelper;
+            Console.WriteLine(JsonSerializer.Serialize(new { ok, clicks, normalClicks, nestedTarget, nestedClicks, cancelledClick, hitExpectedButton, clickedThroughOverlay = clicks - normalClicks - nestedClicks == 1, cursorMovedByHelper = movedByHelper, cursorUnchanged = stable }));
+            return ok ? 0 : 1;
         } finally { DestroyWindow(host); UnregisterClass(name, wc.Instance); GC.KeepAlive(procedure); }
     }
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
@@ -207,6 +237,9 @@ sealed class IndependentPointer {
     [DllImport("user32.dll")] static extern IntPtr ChildWindowFromPointEx(IntPtr window, POINT point, uint flags);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr window);
+    [DllImport("user32.dll", EntryPoint="GetWindowLongW")] static extern int GetWindowLong(IntPtr window, int index);
+    [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr window);
+    [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr window);
     [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr window, uint color, byte alpha, uint flags);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, uint attribute, out int value, int size);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out RECT rect);
@@ -227,6 +260,7 @@ sealed class IndependentPointer {
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] static extern bool DestroyWindow(IntPtr window);
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT point);
+    [DllImport("user32.dll", EntryPoint="SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
     [DllImport("user32.dll")] static extern bool PeekMessage(out MSG msg, IntPtr window, uint min, uint max, uint remove);
     [DllImport("user32.dll")] static extern bool TranslateMessage(ref MSG msg);
     [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref MSG msg);

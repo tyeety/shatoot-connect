@@ -92,8 +92,13 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   log('Real MediaRecorder/fake microphone voice encoded, transferred and decoded in chat; cancel released microphone; camera and unsolicited recording stayed denied');
   await run(chat,"document.querySelector('#chat-text').value='Combined send button';document.querySelector('#chat-text').dispatchEvent(new Event('input'));true");
   if(!await run(chat,"!!document.querySelector('#chat-send .send')"))throw Error('Typing did not switch Record to Send');
-  await run(chat,"document.querySelector('#chat-send').click();true");await until(()=>peer.chatStore.history({conversation:voiceConversation}).some(m=>m.text==='Combined send button'));
+  await run(chat,"document.querySelector('#action-snackbar .snackbar-confirm')?.click();document.querySelector('#chat-send').click();true");await until(()=>peer.chatStore.history({conversation:voiceConversation}).some(m=>m.text==='Combined send button'));
   await until(()=>run(chat,"!!document.querySelector('#chat-send .mic')&&!document.querySelector('#chat-text').value"));
+  if(!await run(chat,"!document.querySelector('#action-snackbar')||document.querySelector('#action-snackbar').hidden"))throw Error('Sending a chat message showed a redundant Done snackbar');
+  await run(chat,"document.querySelector('#chat-text').value='Enter send without snackbar';document.querySelector('#chat-text').dispatchEvent(new Event('input'));document.querySelector('#chat-text').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));true");
+  await until(()=>peer.chatStore.history({conversation:voiceConversation}).some(m=>m.text==='Enter send without snackbar'));
+  await until(()=>run(chat,"!document.querySelector('#chat-compose').hasAttribute('aria-busy')"));
+  if(!await run(chat,"!document.querySelector('#action-snackbar')||document.querySelector('#action-snackbar').hidden"))throw Error('Sending with Enter showed a redundant Done snackbar');
   if(!await run(chat,"(()=>{const box=document.querySelector('#chat-text').getBoundingClientRect(),send=document.querySelector('#chat-send').getBoundingClientRect(),file=document.querySelector('#chat-send-files').getBoundingClientRect();return send.top>=box.top&&send.right<=box.right&&file.top>=send.bottom&&file.bottom<=box.bottom&&getComputedStyle(document.querySelector('#chat-send')).borderRadius==='50%'&&!document.body.textContent.includes('Show main window')})()"))throw Error('Combined composer geometry/main-window action regressed');
   clear();viewer.show();viewer.focus();await until(()=>!chat.isFocused());
   await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Background text notification').then(()=>true)`);

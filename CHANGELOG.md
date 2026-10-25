@@ -13,6 +13,14 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.8 — 2026-10-25
+
+### Fixed
+
+- Sending chat text with the Send button or Enter no longer displays the generic Done snackbar. Pending/press feedback and actual error reporting remain available.
+- Independent remote clicks on standard Windows push buttons deliver a single BN_CLICKED command to the button's immediate parent instead of relying on BM_CLICK's simulated mouse pair. This covers nested property-page and shield buttons such as Advanced Sharing without moving the host cursor. Release outside the button cancels the click; check/radio buttons keep native state handling. Windows integrity and secure-desktop restrictions still apply; the host must run this version for the input change.
+- Native input regression checks now cover a nested property page with an overlapping group frame and shield button, one command per click, cancelled release and protected-overlay pass-through. Chat UI checks cover both Send and Enter without a redundant snackbar.
+
 ## 0.20.7 — 2026-10-25
 
 ### Added
