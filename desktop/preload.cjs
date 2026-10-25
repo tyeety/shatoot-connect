@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   chatPublish: snapshot => ipcRenderer.send('chat-publish', snapshot),
   onChatSnapshot: callback => ipcRenderer.on('chat-snapshot', (_event, value) => callback(value)),
   onChatCommand: callback => ipcRenderer.on('chat-command', async (_event, value) => { try { ipcRenderer.send('chat-result', { id: value.id, value: await callback(value.operation, value.args) }); } catch(error) { ipcRenderer.send('chat-result', { id: value.id, error: error.message }); } }),
+  appearance: value=>ipcRenderer.invoke('appearance',value),
+  onAppearance: callback=>ipcRenderer.on('appearance-changed',(_event,value)=>callback(value)),
   config: () => ipcRenderer.invoke('config'),
   lifecycle: (operation,value) => ipcRenderer.invoke('lifecycle',operation,value),
   notify: message => ipcRenderer.invoke('notify',message),

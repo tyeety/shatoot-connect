@@ -18,6 +18,12 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   if(owner.captureAllowed||peer.captureAllowed)throw Error('Chat thumbnail acquired remote screen/control permission');
   await run(host,'api.openChat()');await until(()=>owner.chatWindow);const chat=owner.chatWindow;
   await until(()=>run(chat,'window.shatootconnectChatReady===true'));
+  await run(host,"api.appearance('light')");await until(()=>run(chat,"document.documentElement.dataset.theme==='light'"));
+  const themed=notices.toast(host,'Light notification');await until(()=>notices.entries.size>0);const themedNotice=[...notices.entries.values()].find(r=>r.data.message==='Light notification');await until(()=>run(themedNotice.win,"document.documentElement.dataset.theme==='light'&&document.body.dataset.ready==='true'"));
+  if(!await run(themedNotice.win,"getComputedStyle(document.querySelector('.notice p')).color==='rgb(114, 93, 126)'"))throw Error('Notification palette did not follow the saved light theme');
+  themedNotice.finish(0);await themed;
+  await run(host,"api.appearance('dark')");await until(()=>run(chat,"document.documentElement.dataset.theme==='dark'"));
+  log('Open chat theme updates live and new notifications inherit the persisted theme');
   if(!chat.isContentProtected())throw Error('Chat is not excluded from remote screen capture');
   if(chat.getTitle()!=='Chats · Shatoot Connect'||chat.getTitle()===host.getTitle())throw Error('Native chat/main window titles are not distinct');
   if(!await run(chat,"document.title==='Chats · Shatoot Connect' && document.querySelector('link[rel=icon]')?.href.endsWith('/chat-icon.png')"))throw Error('Chat document title/favicon is not distinct');

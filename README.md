@@ -1,6 +1,6 @@
 # Shatoot Connect
 
-Windows remote desktop, nearby-computer discovery, private/group chat and file transfer. English is the default; Persian/RTL is available in the client and Server Manager. This repository contains the client, coordinator, Windows service manager, native input helper, tests and packaging sources.
+Windows remote desktop, nearby-computer discovery, private/group chat and file transfer. English is the default; Persian/RTL is available in the client and Server Manager. In the client, **Settings > Display and language > Theme** switches between Dark (default) and Light; the saved choice applies immediately to main/chat windows, notifications and connection panels. This repository contains the client, coordinator, Windows service manager, native input helper, tests and packaging sources.
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)
 

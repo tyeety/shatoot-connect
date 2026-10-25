@@ -1,0 +1,43 @@
+/* A light purple palette; remote video and wallpaper overlays retain contrast. */
+:root[data-theme=light]{color-scheme:light;--bg:#faf6ff;--card:#fff;--border:#d7c3e5;--text:#302039;--muted:#725d7e;--accent:#862cbb;--purple:#7400a8}
+html[data-theme=light] body{background:var(--bg);color:var(--text)}
+html[data-theme=light] :is(input,textarea,select){background:#fff;color:var(--text);border-color:#c9aedb}
+html[data-theme=light] input::placeholder{color:#867291}
+html[data-theme=light] :is(.sidebar,.network-panel,.server-card,.lan-credentials,.credentials){background:#f1e8f8;border-color:var(--border);color:var(--text)}
+html[data-theme=light] :is(.card,dialog,#messenger-dialog,#chat-group-dialog,#save-computer-dialog,#message-edit-dialog){background:#fff;color:var(--text);border-color:var(--border)}
+html[data-theme=light] :is(.muted,.footnote,.settings-page p,.network-peer-info small,.chat-conversation small,.favorite-connect small,.history-connect small,#favorites-empty,#history-empty){color:var(--muted)}
+html[data-theme=light] :is(.credentials strong,.brand .brand-connect,.favorite-connect,.history-connect){color:#7723a6}
+html[data-theme=light] :is(.small-button,.icon-button,.secondary,.pill){background:#f1e4f9;color:#642284;border-color:#c7a8d8}
+html[data-theme=light] :is(.small-button,.icon-button,.secondary):hover{background:#e7cff5}
+html[data-theme=light] :is(.primary,.chat-primary-action,#chat-new-group,.settings-tabs button[aria-selected=true]){background:#862cbb;color:#fff}
+html[data-theme=light] .settings-tabs button{color:var(--muted)}
+html[data-theme=light] :is(.stop,.session-toolbar button.stop){background:#ffe7ed;color:#9c2041;border-color:#e7a5b7}
+html[data-theme=light] :is(.tile-icon,.tile-icon.violet){background:#eddbf7;color:#862cbb;border-color:#d2a9e8}
+html[data-theme=light] :is(.favorite-row,.history-row,.network-peer,.chat-conversation){background:#f4eaf9;color:var(--text);border-color:var(--border)}
+html[data-theme=light] .chat-conversation[aria-pressed=true]{background:#e7cef6;border-color:#9f59c8}
+html[data-theme=light] .chat-messages{background:#f7f0fb}
+html[data-theme=light] .chat-message{background:#eee2f5;color:var(--text)}
+html[data-theme=light] .chat-message.own{background:#e2c7f2}
+html[data-theme=light] :is(.chat-message header,.chat-message small,.chat-thread-heading small){color:#735384}
+html[data-theme=light] .chat-pin{color:#7a389f}
+html[data-theme=light] .chat-conversation>.presence-dot{border-color:#f1e4f9}
+html[data-theme=light] .attachment-preview{background:#ffffff80;color:var(--text);border-color:#c7a8d8}
+html[data-theme=light] .attachment-extension{background:#e4cff2;color:#702599}
+html[data-theme=light] :is(#action-snackbar,#toast,.file-transfer-status){background:#fff;color:#48255c;border-color:#ad73cf;box-shadow:0 4px 18px #49225922}
+html[data-theme=light] #action-snackbar .snackbar-confirm{color:#7e25ac}
+html[data-theme=light] :is(.error,.status-line.error){color:#b5274d}
+html[data-theme=light] .session-toolbar{background:#f0e4f9ed!important;border-color:#c7a8d8}
+html[data-theme=light] .stats{background:#f1e8f8;color:#725d7e}
+html[data-theme=light] .stats b{color:#502368}
+html[data-theme=light] .computer-preview:has(.desktop-preview){background:#2b1b38;color:#fff}
+html[data-theme=light] .computer-preview:has(.desktop-preview) :is(b,small,.favorite-connect,.history-connect){color:#f8efff}
+html[data-theme=light] body:has(>.notice){background:#fffafff7;border-color:#c3a0d9}
+html[data-theme=light] .notice :is(p,header b){color:#725d7e}
+html[data-theme=light] body:has(>.participant){background:#faf2ffce;border-color:#c3a0d9}
+html[data-theme=light] .participant :is(span,small){color:#725d7e}
+
+html[data-theme=light] :is(label,.status-line,.favorites-heading,.history-heading,#server-status,#discovery-status,footer,.tag){color:var(--muted)}
+html[data-theme=light] .password-row code{color:var(--text)}
+html[data-theme=light] :is(.danger,#host-stop){background:#ffe7ed;color:#9c2041;border-color:#e7a5b7}
+html[data-theme=light] kbd{background:#ece0f4;color:#5c3d70;border-color:#c7a8d8}
+html[data-theme=light] body:has(>.participant) button{background:#ffe7ed;color:#9c2041;border-color:#e7a5b7}

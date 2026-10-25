@@ -13,6 +13,13 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.20.2 — 2026-10-25
+
+### Added
+
+- Settings > Display and language now offers Dark and Light themes, with translated English/Persian labels. Dark remains the default. The choice persists in the existing application settings and applies immediately to open main/chat windows, new notifications, host connection panels and native app appearance.
+- A light purple palette covers inputs, settings, chat messages, attachment cards, controls and notifications. Remote video remains unchanged; wallpaper-backed computer cards retain a dark overlay and readable labels.
+
 ## 0.20.1 — 2026-10-25
 
 ### Added

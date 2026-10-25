@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell, Tray, Menu, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell, Tray, Menu, powerMonitor, nativeTheme } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
@@ -267,7 +267,7 @@ function chatWindowTitle(s){return s.language==='fa'?'گفتگوها · Shatoot 
 function openChat(s,target) {
   if(target){s.chatTarget=target;s.win.webContents.send('chat-target',target);}
   if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show();if(s.chatWindow.isMinimized())s.chatWindow.restore();s.chatWindow.focus();if(target)s.chatWindow.webContents.send('chat-target',target);return; }
-  const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor: '#0a0e17', title:chatWindowTitle(s), icon:path.join(__dirname,'ui/assets/chat-icon.png'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor:settings().theme==='light'?'#faf6ff':'#160d20', title:chatWindowTitle(s), icon:path.join(__dirname,'ui/assets/chat-icon.png'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   win.on('page-title-updated',event=>event.preventDefault());
   s.chatWindow = win; win.setContentProtection(true); win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
   for(const host of states.values())syncCursorExclusions(host);
@@ -372,7 +372,7 @@ ipcMain.handle('discovery', event => { const s = state(event); s.discovery?.refr
 function createWindow() {
   const work = screen.getPrimaryDisplay().workArea;
   const win = new BrowserWindow({ width: Math.min(1100, work.width - 16), height: Math.min(720, work.height - 16), minWidth: Math.min(1000, work.width - 16), minHeight: Math.min(720, work.height - 16),
-    backgroundColor: '#160d20', title: 'Shatoot Connect', icon:path.join(__dirname,'ui/assets/app-icon.png'), show:smoke || !process.argv.includes('--start-in-tray'), autoHideMenuBar: true,
+    backgroundColor: settings().theme==='light'?'#faf6ff':'#160d20', title: 'Shatoot Connect', icon:path.join(__dirname,'ui/assets/app-icon.png'), show:smoke || !process.argv.includes('--start-in-tray'), autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
   const s = { win, source: null, control: false, helper: null, captureAllowed: false, language: 'en' };
   const contentsId = win.webContents.id;
@@ -406,7 +406,7 @@ ipcMain.handle('config', e => {
   try { if (saved.serverKeys?.[endpoint]) serverKey = safeStorage.decryptString(Buffer.from(saved.serverKeys[endpoint], 'base64')); } catch {}
   s.sharedCursor = saved.sharedCursor === true; s.showGuestCursor = saved.showGuestCursor !== false;
   const pendingFavorite = launchFavorite; launchFavorite = null;
-  return { rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles !== false, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
+  return { theme:saved.theme==='light'?'light':'dark',rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles !== false, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
 });
 ipcMain.handle('internet-enabled', (e,value)=>{state(e);if(typeof value!=='boolean')throw new Error('Invalid connection mode.');saveSettings({internetEnabled:value});return value;});
 ipcMain.handle('show-guest-cursor', (e,value)=>{const s=state(e);if(typeof value!=='boolean')throw new Error('Invalid cursor setting.');saveSettings({showGuestCursor:value});s.showGuestCursor=value;if(!value)hideGuestCursor(s);return value;});
@@ -531,6 +531,14 @@ ipcMain.handle('save-endpoint', (e, endpoint, serverKey = '') => {
   const serverKeys = settings().serverKeys || {};
   if (serverKey) serverKeys[result] = safeStorage.encryptString(serverKey).toString('base64'); else delete serverKeys[result];
   saveSettings({ endpoint: result, serverKeys }); return result;
+});
+ipcMain.handle('appearance',(event,value)=>{
+  if(event.senderFrame!==event.sender.mainFrame||!BrowserWindow.fromWebContents(event.sender))throw new Error('Unauthorized appearance request.');
+  if(value===undefined)return settings().theme==='light'?'light':'dark';
+  state(event);if(!['light','dark'].includes(value))throw new Error('Invalid theme.');saveSettings({theme:value});nativeTheme.themeSource=value;
+  for(const win of BrowserWindow.getAllWindows())if(!win.isDestroyed())win.webContents.send('appearance-changed',value);
+  for(const s of states.values())for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed())win.setBackgroundColor(value==='light'?'#faf6ff':'#160d20');
+  return value;
 });
 ipcMain.handle('language', (e, language) => {
   const s = state(e); s.language = language === 'fa' ? 'fa' : 'en'; saveSettings({ language: s.language });if(s.chatWindow&&!s.chatWindow.isDestroyed())s.chatWindow.setTitle(chatWindowTitle(s)); refreshTray(s); return s.language;
@@ -687,8 +695,9 @@ ipcMain.handle('exchange', async (e, operation, value) => {
 
 app.whenReady().then(async () => {
   smokeLog('app ready');
-  if (smoke) saveSettings({ favorites: [], connectionHistory:[], connectionPasswords:{},computerCards:{}, rememberPasswords:true, fixedPassword: null, language: 'en' });
+  if (smoke) saveSettings({ theme:'dark',favorites: [], connectionHistory:[], connectionPasswords:{},computerCards:{}, rememberPasswords:true, fixedPassword: null, language: 'en' });
   if(smoke&&(process.argv.includes('--chat-notification-smoke')||process.argv.includes('--connection-ui-smoke')))saveSettings({internetEnabled:false,autoAcceptFiles:true});
+  nativeTheme.themeSource=settings().theme==='light'?'light':'dark';
   // Microphone access is a short, window-specific grant after pressing Record.
   // Desktop capture keeps its independent source/approval checks and denies audio.
   const capturePermission = (wc, permission, details={}) => {
