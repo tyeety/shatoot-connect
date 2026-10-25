@@ -22,6 +22,18 @@ module.exports=async({host,states,app,dialog,update,log,artifacts})=>{
     if(!await run("api.profilePhoto(false).then(()=>false,()=>true)"))throw Error('Malformed profile photo was accepted');
     log('Real AVIF, WebP, animated GIF first frame, PNG and JPEG decode/crop/preview/profile persistence passed; malformed photo rejected');
   }finally{dialog.showOpenDialog=originalPicker;}
+  const clipboard=require('electron').clipboard,originalRead=clipboard.read;
+  try{
+    clipboard.read=async()=>[{types:['image/png'],getType:async()=>new Blob([Buffer.from(photos.png,'base64')],{type:'image/png'})}];
+    const image=await require('../desktop/clipboard-image.cjs').clipboardImage(clipboard);if(image!=='data:image/png;base64,'+photos.png)throw Error('Electron asynchronous clipboard image read failed');
+  }finally{clipboard.read=originalRead;}
+  await run("document.querySelector('#open-settings').click();document.querySelector('#tab-profile').click();true");
+  for(let i=0;i<2;i++){
+    await run("document.querySelector('#profile-name').value='Profile feedback test';document.querySelector('#profile-save').click();true");
+    await until(()=>run("document.querySelector('#settings-status').textContent===window.i18n.translate('Profile saved.')&&document.querySelector('#action-snackbar')?.textContent===window.i18n.translate('Profile saved.')&&!document.querySelector('#action-snackbar').hidden"));
+  }
+  await run("document.querySelector('#settings-dialog').close();true");
+  log('Actual Electron async clipboard API decoded PNG without readImage; Save Profile explicitly confirms changed and unchanged profiles');
   const server=new WebSocketServer({host:'127.0.0.1',port:0}),clients=new Set();
   let greet=false,joined=false;await new Promise(r=>server.once('listening',r));server.on('connection',ws=>{clients.add(ws);ws.once('close',()=>clients.delete(ws));ws.on('message',data=>{if(JSON.parse(data).type==='join')joined=true});if(greet)ws.send(JSON.stringify({type:'ready',direct:true,service:'ShatootConnect',protocol:2}))});
   const address='127.0.0.1:'+server.address().port;

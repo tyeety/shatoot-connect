@@ -7,3 +7,9 @@ test('cancel stops LAN validation and pending sockets; a late result cannot crea
 test('cancel settles an Internet wait immediately and leaves an established chat alone',async()=>{
  const f=client();await f.engine.ready;let resolve;f.internet(()=>new Promise(r=>resolve=r));const pending=f.engine.connect({type:'id',address:'123456789'});await new Promise(r=>setImmediate(r));const active={id:'active',outgoingAttempt:{},channel:{readyState:'open'}};f.engine.sessions.set('active',active);f.engine.cancelPending();await assert.rejects(pending,/cancelled/);resolve();await new Promise(r=>setImmediate(r));assert.equal(f.sent.length,0);assert.equal(f.engine.sessions.get('active'),active);f.engine.sessions.delete('active');
 });
+
+test('saved ID cards obtain metadata over background chat without a prior chat; other servers stay untouched',async()=>{
+ const f=client();await f.engine.ready;const attempts=[];f.engine.api.connections=async()=>[{address:'123456789',endpoint:'wss://example.test',name:'Saved computer'},{address:'987654321',endpoint:'wss://other.test'},{address:'192.168.1.10'}];
+ f.engine.connect=async route=>{attempts.push(route);};await f.engine.reconnectKnown();assert.equal(attempts.length,1);assert.equal(attempts[0].address,'123456789');assert.equal(attempts[0].type,'id');assert.equal(attempts[0].background,true);
+ await f.engine.reconnectKnown();assert.equal(attempts.length,1,'Retry throttle prevents repeated invitations');
+});

@@ -79,7 +79,7 @@ test('recent connections deduplicate and can be saved directly without a separat
 test('local names and encrypted offline previews follow LAN/ID identity without changing the published profile',()=>{
   const{preferences:p,storage}=fixture(),deviceId=crypto.randomUUID(),preview='data:image/jpeg;base64,YWJj';
   p.save({address:'192.168.1.20',name:'دفتر',password:'secret'});
-  p.rememberComputer({preview},{address:'192.168.1.20:8788'});
+  p.rememberComputer({preview,previewKind:'wallpaper'},{address:'192.168.1.20:8788'});
   p.rememberComputer({deviceId,name:'Amir',avatar:''},{address:'192.168.1.20'});
   assert.equal(p.decorate({deviceId,name:'Amir'}).displayName,'دفتر');assert.equal(p.decorate({deviceId}).preview,preview);assert.ok(!JSON.stringify(storage()).includes(preview));
   p.rememberComputer({deviceId,name:'Amir changed'},{address:'123456789',endpoint:'wss://one.example'});
@@ -89,4 +89,11 @@ test('local names and encrypted offline previews follow LAN/ID identity without 
   assert.equal(p.decorate({address:'123456789',endpoint:'wss://another.example'}).preview,'');
   p.renameComputer({deviceId},'');assert.equal(p.decorate({deviceId}).displayName,'New published name');
   assert.throws(()=>p.rememberComputer({preview:'data:image/svg+xml;base64,YWJj'},{address:'192.168.1.20'}),/Invalid desktop preview/);
+});
+
+test('wallpaper cache ignores legacy screenshots and does not rewrite identical wallpaper',()=>{
+ const{preferences:p,storage}=fixture(),deviceId=crypto.randomUUID(),preview='data:image/jpeg;base64,YWJj';
+ p.rememberComputer({deviceId,preview},{address:'192.168.1.20'});assert.equal(p.decorate({deviceId}).preview,'');
+ p.rememberComputer({deviceId,preview,previewKind:'wallpaper'});assert.equal(p.decorate({deviceId}).preview,preview);
+ const before=JSON.stringify(storage());assert.equal(p.rememberComputer({deviceId,preview,previewKind:'wallpaper'}),undefined);assert.equal(JSON.stringify(storage()),before);
 });

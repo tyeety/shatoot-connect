@@ -6,6 +6,7 @@ Native.SetProcessDpiAwarenessContext(new IntPtr(-4));
 if (args.Contains("--self-test")) { Environment.ExitCode = IndependentPointer.SelfTest(); return; }
 if (args.Contains("--keyboard-monitor")) { KeyboardSync.Monitor(); return; }
 if (args.Contains("--clipboard")) { ClipboardBridge.Run(); return; }
+if (args.Contains("--wallpaper")) { Wallpaper.Write(); return; }
 if (args.Length == 2 && args[0] == "--keyboard-grab" && long.TryParse(args[1], System.Globalization.NumberStyles.HexNumber, null, out var target)) { KeyboardGrab.Run(new IntPtr(target)); return; }
 if (args.Contains("--keyboard-self-test")) { Environment.ExitCode = KeyboardSync.SelfTest(); return; }
 if (args.Contains("--keyboard-hook-self-test")) { Environment.ExitCode = KeyboardGrab.Probe(); return; }

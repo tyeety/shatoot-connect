@@ -10,7 +10,7 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
   const rooms = new Map(), attempts = new Map(), connections = new Map();
   const handler = (req, res) => {
     if (req.url === '/presence' && directHostToken && presence) { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(presence())); return; }
-    if (req.url === '/profile' && directHostToken && deviceProfile) { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(deviceProfile())); return; }
+    if (req.url === '/profile' && directHostToken && deviceProfile) { Promise.resolve().then(deviceProfile).then(value=>{res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });res.end(JSON.stringify(value));},()=>{res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Profile unavailable'}));});return; }
     res.writeHead(req.url === '/health' ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(req.url === '/health' ? { ok: true, service: 'ShatootConnect signaling' } : { error: 'Not found' }));
   };

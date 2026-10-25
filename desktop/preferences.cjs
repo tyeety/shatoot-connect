@@ -17,16 +17,16 @@ class ClientPreferences {
     delete record._key;
     if(typeof value.name==='string')record.name=value.name.slice(0,60);
     if(value.avatar!==undefined)record.avatar=require('../shared/profile.cjs').profile(value).avatar;
-    if(value.preview!==undefined){if(typeof value.preview!=='string'||value.preview.length>90000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.preview))throw new Error('Invalid desktop preview.');record.preview=this.encrypt(value.preview);record.previewAt=Date.now();}
+    if(value.preview!==undefined){if(typeof value.preview!=='string'||value.preview.length>90000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.preview))throw new Error('Invalid desktop preview.');if(value.previewKind==='wallpaper'){let unchanged=false;try{unchanged=old.previewKind==='wallpaper'&&!!old.preview&&this.decrypt(old.preview)===value.preview;}catch{}if(!unchanged){record.preview=this.encrypt(value.preview);record.previewAt=Date.now();}record.previewKind='wallpaper';}}
     if(JSON.stringify(record)===JSON.stringify(cards[key]))return;
     if(old._key&&old._key!==key)delete cards[old._key];
     cards[key]=record;for(const id of Object.keys(cards).slice(0,Math.max(0,Object.keys(cards).length-200)))delete cards[id];
-    this.write({computerCards:cards});
+    this.write({computerCards:cards});return true;
   }
   decorate(value={},route={}) {
     const input={...value,...route},card=this.card(input)||{},keys=new Set([...this.cardRoutes(input),...(card.routes||[])].map(r=>r.key));
     const favorite=(this.read().favorites||[]).find(f=>{try{return f.name!==f.address&&keys.has(this.destination(f).key);}catch{return false;}});
-    let preview='';try{if(card.preview){this.previewCache||=new Map();if(!this.previewCache.has(card.preview)){this.previewCache.set(card.preview,this.decrypt(card.preview));if(this.previewCache.size>200)this.previewCache.delete(this.previewCache.keys().next().value);}preview=this.previewCache.get(card.preview);}}catch{}
+    let preview='';try{if(card.preview&&card.previewKind==='wallpaper'){this.previewCache||=new Map();if(!this.previewCache.has(card.preview)){this.previewCache.set(card.preview,this.decrypt(card.preview));if(this.previewCache.size>200)this.previewCache.delete(this.previewCache.keys().next().value);}preview=this.previewCache.get(card.preview);}}catch{}
     const knownRoute=card.routes?.at(-1);
     return {...value,deviceId:value.deviceId||card.deviceId,route:value.route||(knownRoute?{type:knownRoute.endpoint?'id':'lan',address:knownRoute.address,endpoint:knownRoute.endpoint}:null),displayName:card.alias||favorite?.name||card.name||value.name||value.address||'',avatar:card.avatar!==undefined?card.avatar:value.avatar||'',preview,previewAt:card.previewAt};
   }

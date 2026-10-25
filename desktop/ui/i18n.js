@@ -2,6 +2,7 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+['پروفایل ذخیره شد.','Profile saved.'],
 ['سیستم‌ها','Computers'],['سیستم ذخیره‌شده','Saved computer'],['اتصال اخیر','Recent connection'],
 ['تنظیمات گفتگو','Conversation settings'],
 ['ویرایش پیام','Edit message'],['حذف پیام','Delete message'],['پیام حذف شد','Message deleted'],['ویرایش شده','Edited'],['ویرایش گروه','Edit group'],['ذخیره تغییرات','Save changes'],['توضیحات گروه','Group description'],['کپی','Copy'],['انتخاب عکس','Choose photo'],['حذف عکس','Remove photo'],['برای همگام‌سازی تغییرات پیام، برنامهٔ طرف مقابل را به‌روزرسانی کنید.','Update the other computer to synchronize message changes.'],

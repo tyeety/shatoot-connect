@@ -9,6 +9,10 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(host,"document.querySelector('#auto-accept-files').checked=true;document.querySelector('#auto-accept-files').dispatchEvent(new Event('change'));true");await until(()=>run(host,'config.autoAcceptFiles===false'));
   await run(host,"document.querySelector('#auto-accept-files').checked=false;document.querySelector('#auto-accept-files').dispatchEvent(new Event('change'));true");await until(()=>run(host,'config.autoAcceptFiles===true'));
   const owner=states.get(host.webContents.id),peer=states.get(viewer.webContents.id),conversation=`p:${peer.identity.deviceId}`;
+  owner.discovery.ingest(Buffer.from(JSON.stringify(peer.discovery.presence())),'127.0.0.1');
+  await until(()=>run(host,`(async()=>{const value=await api.discovery();return value.peers.some(p=>p.deviceId==='${peer.identity.deviceId}'&&p.preview?.startsWith('data:image/jpeg;base64,'))})()`));
+  if(await run(host,`!!collaboration.peer('${peer.identity.deviceId}')`))throw Error('Wallpaper discovery needed a chat session');
+  log('LAN wallpaper is available before any chat or desktop connection');
   await run(viewer,`collaboration.connect({type:'lan',address:'127.0.0.1:${owner.directInfo.port}'}).then(()=>true)`);
   await until(()=>run(host,`collaboration.catalog.contacts.some(c=>c.deviceId==='${peer.identity.deviceId}'&&c.preview?.startsWith('data:image/jpeg;base64,'))`));
   if(owner.captureAllowed||peer.captureAllowed)throw Error('Chat thumbnail acquired remote screen/control permission');
@@ -147,13 +151,11 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"document.querySelector('#chat-local-name').value='دفتر حسابداری';document.querySelector('#chat-name-form').requestSubmit();true");
   await until(()=>run(chat,"document.querySelector('#chat-title').textContent==='دفتر حسابداری'"));
   if(!await run(viewer,"collaboration.self.name==='Published Amir'"))throw Error('Local nickname changed the published profile');
-  await run(host,`(async()=>{remoteComputer={deviceId:'${peer.identity.deviceId}',name:'Published Amir'};connectionAttempt={address:'127.0.0.1:${peer.directInfo.port}',endpoint:''};role='viewer';await api.desktopViewing(true);window.previewSource=document.createElement('canvas');previewSource.width=960;previewSource.height=540;const c=previewSource.getContext('2d');c.fillStyle='#317b78';c.fillRect(0,0,960,540);c.fillStyle='#c088ec';c.fillRect(200,100,500,300);document.querySelector('#remote-video').srcObject=previewSource.captureStream(1);await document.querySelector('#remote-video').play();return true})()`);
   await until(()=>run(chat,"!!document.querySelector('.chat-conversation .desktop-preview')"));
   await run(host,`api.favoriteSave({address:'127.0.0.1:${peer.directInfo.port}',name:'دفتر حسابداری'}).then(renderFavorites)`);
   await until(()=>run(host,"!!document.querySelector('.favorite-row .desktop-preview')"));
   await run(host,`(async()=>{await api.connections('connected',{address:'127.0.0.1:${peer.directInfo.port}',name:'Published Amir',peer:{deviceId:'${peer.identity.deviceId}',name:'Published Amir'}});renderHistory(await api.connections('history'));return true})()`);
   if(!await run(host,"!!document.querySelector('.favorite-connect .profile-avatar')&&document.querySelectorAll('#favorites-list>div').length===1"))throw Error('Saved/recent cards lack profile avatars');
-  await run(host,"role='idle';api.desktopViewing(false);for(const track of document.querySelector('#remote-video').srcObject.getTracks())track.stop();document.querySelector('#remote-video').srcObject=null;updateControls();true");
   await run(host,`collaboration.close(collaboration.peer('${peer.identity.deviceId}'));true`);await until(()=>run(chat,"document.querySelector('#chat-peer-status').textContent===window.i18n.translate('Offline')"));
   if(!await run(chat,"!!document.querySelector('.chat-conversation .desktop-preview') && !!document.querySelector('.chat-conversation .profile-avatar')"))throw Error('Offline preview/avatar disappeared');
   await run(viewer,'collaboration.nearby=[];collaboration.retries?.clear();collaboration.reconnectKnown().then(()=>true)');

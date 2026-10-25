@@ -9,8 +9,8 @@ const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const GROUP = '239.255.87.89', PORT = 8789;
 
 class Discovery extends EventEmitter {
-  constructor({ identity, name, port, discoveryPort = PORT, networkInterfaces, neighbors = process.platform === 'win32', ttl = 20000 } = {}) {
-    super(); Object.assign(this, { identity, name, port, discoveryPort, networkInterfaces, neighbors, ttl });
+  constructor({ identity, name, port, discoveryPort = PORT, networkInterfaces, neighbors = process.platform === 'win32', ttl = 20000,knownEndpoints=()=>[] } = {}) {
+    super(); Object.assign(this, { identity, name, port, discoveryPort, networkInterfaces, neighbors, ttl,knownEndpoints });
     this.peers = new Map(); this.senders = new Map(); this.errors = new Set(); this.closed = false; this.lastReply = new Map();
   }
   presence() { return { service: 'ShatootConnect', version: 1, kind: 'presence', deviceId: this.identity.deviceId, name: String(this.name).slice(0, 60), status: this.status || 'available', port: this.port, capabilities: ['desktop', 'chat', 'files', 'groups'] }; }
@@ -30,8 +30,8 @@ class Discovery extends EventEmitter {
   loadProfile(peer, address, port) {
     peer.profileAt = Date.now(); this.profileRequests = (this.profileRequests || 0) + 1;
     const request = http.get({ hostname: address, port, path: '/profile', localAddress: sourceAddress(address,this.networkInterfaces?.()), agent: false, timeout: 1500 }, response => {
-      let bytes = ''; response.on('data', chunk => { bytes += chunk; if (bytes.length > 26000) request.destroy(); });
-      response.on('end', () => { try { const value = JSON.parse(bytes); if (response.statusCode === 200 && !this.closed && value.deviceId === peer.deviceId && this.peers.get(peer.deviceId) === peer) { Object.assign(peer,require('../shared/profile.cjs').profile(value)); this.publish(); } } catch {} });
+      let bytes = ''; response.on('data', chunk => { bytes += chunk; if (bytes.length > 120000) request.destroy(); });
+      response.on('end', () => { try { const value = JSON.parse(bytes); if (response.statusCode === 200 && !this.closed && value.deviceId === peer.deviceId && this.peers.get(peer.deviceId) === peer) { Object.assign(peer,require('../shared/profile.cjs').profile(value));if(value.previewKind==='wallpaper'&&typeof value.preview==='string'&&value.preview.length<=90000&&/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.preview)){peer.preview=value.preview;peer.previewKind='wallpaper';}this.publish(); } } catch {} });
       response.on('error', () => {});
     });
     request.on('close', () => { this.profileRequests--; }); request.on('timeout', () => request.destroy()); request.on('error', () => {});
@@ -70,6 +70,7 @@ class Discovery extends EventEmitter {
       } else this.announce(this.senders.get(nic.address), nic);
     }
     for (const [id, peer] of this.peers) if (Date.now() - peer.lastSeen > this.ttl) this.peers.delete(id);
+    if(Date.now()-(this.knownProbeAt||0)>30000){this.knownProbeAt=Date.now();const endpoints=[...new Set(this.knownEndpoints())].slice(0,200);(async()=>{for(let i=0;i<endpoints.length&&!this.closed;i+=8)await Promise.allSettled(endpoints.slice(i,i+8).map(endpoint=>{try{const url=new URL(`http://${endpoint}`);return this.probe(url.hostname,Number(url.port)||8788);}catch{}}));})().catch(()=>{});}
     this.publish();
   }
   announce(sender, nic) {

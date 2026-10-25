@@ -51,20 +51,18 @@ const preferences = new (require('./preferences.cjs').ClientPreferences)({ read:
   encrypt: text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows credential encryption is unavailable.'); return safeStorage.encryptString(text).toString('base64'); },
   decrypt: text => safeStorage.decryptString(Buffer.from(text, 'base64')) });
 function computerChanged(){for(const s of states.values())for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed())win.webContents.send('computer-cards-changed');}
-function rememberComputer(peer,route,preview=false){preferences.rememberComputer({...peer,preview:preview?peer.preview:undefined},route);}
+function rememberComputer(peer,route,preview=false){return preferences.rememberComputer({...peer,preview:preview?peer.preview:undefined},route);}
 function decorateDiscovery(value){return {...value,peers:value.peers.map(peer=>preferences.decorate(peer))};}
-let desktopCardCapture;
+const wallpaperPreview=require('./wallpaper.cjs').wallpaperReader({nativeImage:require('electron').nativeImage,executable:nativeExecutable});
 ipcMain.handle('desktop-card-preview',async e=>{
   state(e);
-  if(!desktopCardCapture){desktopCardCapture=(async()=>{const sources=await desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:320,height:180},fetchWindowIcons:false});const source=sources.find(s=>s.display_id===String(screen.getPrimaryDisplay().id))||sources[0];return source&&!source.thumbnail.isEmpty()?'data:image/jpeg;base64,'+source.thumbnail.toJPEG(65).toString('base64'):'';})();setTimeout(()=>{desktopCardCapture=null;},30000).unref();}
-  return desktopCardCapture;
+  return wallpaperPreview();
 });
 ipcMain.handle('computer-card',(e,operation,value={})=>{
   state(e);
   if(operation==='resolve')return preferences.decorate(value.peer,value.route);
   if(operation==='remember'){rememberComputer(value.peer||{},value.route||{});computerChanged();return preferences.decorate(value.peer,value.route);}
   if(operation==='rename'){const result=preferences.renameComputer(value.peer,value.name);computerChanged();return result;}
-  if(operation==='preview'){const s=state(e);if(!s.outgoingDesktop)throw new Error('A received desktop session is required.');rememberComputer({...value.peer,preview:value.preview},value.route,true);computerChanged();return;}
   throw new Error('Invalid computer card operation.');
 });
 ipcMain.on('desktop-viewing',(e,value)=>{state(e).outgoingDesktop=value===true;});
@@ -480,7 +478,7 @@ ipcMain.handle('direct-listener', async e => {
     const hostToken = crypto.randomBytes(32).toString('hex');
     s.directHostToken = hostToken;
     const presence = () => ({ service: 'ShatootConnect', version: 1, kind: 'presence', deviceId: s.identity.deviceId, name: profile().name, status: profile().status, port: service.server.address()?.port, capabilities: ['desktop', 'chat', 'files', 'groups'] });
-    const service = createSignalingServer({ port: smoke ? 0 : 8788, directHostToken: hostToken, presence, deviceProfile: () => ({ ...profile(), deviceId: s.identity.deviceId }) });
+    const service = createSignalingServer({ port: smoke ? 0 : 8788, directHostToken: hostToken, presence, deviceProfile: async () => ({ ...profile(), deviceId: s.identity.deviceId,preview:await wallpaperPreview().catch(()=>''),previewKind:'wallpaper' }) });
     try {
       await service.listen(); s.directService = service;
       const port = service.server.address().port;
@@ -499,8 +497,8 @@ ipcMain.handle('direct-listener', async e => {
         ws.on('close', () => { clearTimeout(timer); reject(new Error('LAN listener closed.')); if (!s.win.isDestroyed()) s.win.webContents.send('direct-message', { type: 'ended', reason: 'LAN listener closed.' }); });
       });
       const addresses = Object.values(require('node:os').networkInterfaces()).flat().filter(n => n.family === 'IPv4' && !n.internal).map(n => `${n.address}:${port}`);
-      s.discovery = new (require('./discovery.cjs').Discovery)({ identity: s.identity, name: profile().name, port, ...(smoke ? { discoveryPort: 0, networkInterfaces: () => ({}), neighbors: false } : {}) }); s.discovery.status = profile().status;
-      s.discovery.on('change',value=>{for(const peer of value.peers)rememberComputer(peer);if(!s.win.isDestroyed())s.win.webContents.send('discovery',decorateDiscovery(value));});
+      s.discovery = new (require('./discovery.cjs').Discovery)({ identity: s.identity, name: profile().name, port,knownEndpoints:()=>preferences.computers().filter(r=>!r.endpoint).map(r=>r.address), ...(smoke ? { discoveryPort: 0, networkInterfaces: () => ({}), neighbors: false } : {}) }); s.discovery.status = profile().status;
+      s.discovery.on('change',value=>{let changed=false;for(const peer of value.peers)changed=rememberComputer(peer,{address:peer.endpoints[0]},peer.previewKind==='wallpaper')||changed;if(changed)computerChanged();if(!s.win.isDestroyed())s.win.webContents.send('discovery',decorateDiscovery(value));});
       s.discovery.start().catch(() => {});
       return s.directInfo = { addresses, port, password: credentials.password, fixedPassword: credentials.fixedPassword };
     } catch (error) { s.directSocket?.close(); await service.close(); s.directService = null; s.directInfo = null; throw error; }
@@ -635,9 +633,7 @@ ipcMain.handle('chat-clipboard',async(e,operation,token)=>{
   }
   if(operation==='read'){
     const data=await nativeClipboard(s,{op:'read'});if(data.files.length)return {files:true};
-    const image=smoke?null:clipboard.readImage();const png=image&&!image.isEmpty()?image.toPNG():null;
-    if(png&&png.length>10*1024**2)throw new Error('Clipboard image is too large.');
-    return {files:false,text:data.text||'',image:png?'data:image/png;base64,'+png.toString('base64'):''};
+    return {files:false,text:data.text||'',image:smoke?'':await require('./clipboard-image.cjs').clipboardImage(clipboard)};
   }
   throw new Error('Invalid clipboard operation.');
 });

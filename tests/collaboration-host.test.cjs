@@ -6,9 +6,9 @@ test('automatic reception defaults on, global and per-chat policies override bot
   const host=installCollaboration({ipcMain:{handle:(n,f)=>handlers.set(n,f)},state:()=>s,app:{getPath:name=>path.join(root,name)},safeStorage:{isEncryptionAvailable:()=>true,encryptString:text=>Buffer.from(text),decryptString:bytes=>bytes.toString()},dialog:{showMessageBox:async()=>{prompts++;return answer?answer():{response:0}}},shell:{openPath:async file=>{opened.push(file);return ""}},smoke:false,settings:()=>prefs,received:(_s,record,files)=>completed.push({record,files}),messageReceived:(_s,record)=>messages.push(record)});t.after(()=>host.close(s));
   const peer={deviceId:crypto.randomUUID(),name:'Guest'},session=crypto.randomUUID(),call=(op,value)=>handlers.get('collaboration')({},op,value),conversation=`p:${peer.deviceId}`;
   assert.equal(await call('approve',{session,peer}),true);assert.equal(prompts,0);assert.equal(s.captureAllowed,undefined);assert.equal(s.control,undefined);await call('contact',{peer});
-  await call('peer-preview',{session,preview:'data:image/jpeg;base64,/9j/2Q=='});
+  await call('peer-preview',{session,previewKind:'wallpaper',preview:'data:image/jpeg;base64,/9j/2Q=='});
   await assert.rejects(call('peer-preview',{session:crypto.randomUUID(),preview:'data:image/jpeg;base64,/9j/2Q=='}),/permission/);
-  await assert.rejects(call('peer-preview',{session,preview:'https://example.com/pixel'}),/Invalid desktop preview/);
+  await assert.rejects(call('peer-preview',{session,previewKind:'wallpaper',preview:'https://example.com/pixel'}),/Invalid desktop preview/);
   assert.equal(s.captureAllowed,undefined);assert.equal(s.control,undefined);
   const text={id:crypto.randomUUID(),conversation,sender:peer.deviceId,name:peer.name,kind:'text',text:'A background message'};
   const fakeGroup={id:crypto.randomUUID(),owner:crypto.randomUUID(),name:'Forged owner',members:[peer,{deviceId:s.identity.deviceId,name:'Me'}]};await assert.rejects(call('group',{...fakeGroup,session}),/Only the group owner/);

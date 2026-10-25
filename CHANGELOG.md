@@ -13,6 +13,14 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.19.1 — 2026-10-25
+
+### Fixed
+
+- Clipboard-image paste uses Electron's asynchronous ClipboardItem API instead of the removed clipboard.readImage method. Files still use the Windows file clipboard bridge.
+- Save Profile explicitly confirms success, including after photo/name changes and when saving unchanged values. Other actions no longer lose feedback because an unrelated computer or chat list rerendered.
+- Computer cards show the Windows wallpaper file rather than a screenshot. LAN discovery retrieves wallpaper for nearby and saved LAN computers before any chat or desktop connection; saved Internet-ID computers on the active server establish background chat for metadata. Wallpaper is bounded, cached encrypted for offline cards and refreshed periodically; obsolete screenshot caches are ignored. Both peers need the updated wallpaper feature; devices without a reachable peer or cached wallpaper retain a plain background. Solid-color Windows desktops are supported.
+
 ## 0.19.0 — 2026-10-25
 
 ### Added

@@ -22,6 +22,11 @@
         if(!nearby&&peer.route?.type==='id'&&!this.internet().registered)continue;
         this.retries.set(peer.deviceId,Date.now()+5000);
         this.ensurePeer(peer.deviceId,true).catch(()=>{});
+      }
+      const context=this.internet();if(context.registered)for(const card of await this.api.connections?.('computers')||[]){
+        if(!card.endpoint||card.endpoint!==context.endpoint||this.sessions.size>=14||this.connectAttempts.size>=2||this.catalog.contacts.some(c=>c.deviceId===card.deviceId&&card.deviceId))continue;
+        const key=`card:${card.endpoint}:${card.address}`;if(Date.now()<(this.retries.get(key)||0)||[...this.sessions.values()].some(s=>s.route.address===card.address&&s.route.endpoint===card.endpoint))continue;
+        this.retries.set(key,Date.now()+30000);this.connect({type:'id',address:card.address,endpoint:card.endpoint,deviceId:card.deviceId,name:card.name,background:true}).catch(()=>{});
       }}finally{this.reconnecting=false;}
     }
     async refresh() { this.catalog = await this.api.collaboration('list'); this.notify(); }
@@ -161,9 +166,9 @@
       if (op === 'profile') {
         if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
         Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status });
-        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1','desktop-card-preview-v1']};
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1']};
       }
-      if(op==='desktop-card-preview'){await this.api.collaboration('peer-preview',{session:s.id,preview:value});await this.refresh();return true;}
+      if(op==='desktop-card-preview'){if(value?.kind==='wallpaper'){await this.api.collaboration('peer-preview',{session:s.id,preview:value.preview,previewKind:'wallpaper'});await this.refresh();}return true;}
       if (op === 'group') {
         if (value?.owner !== s.peer.deviceId) throw new Error('Only the group owner can invite members.');
         if (!this.group(value.id) && !await this.api.collaboration('approve-group', { session: s.id, group: value })) return false;
@@ -203,7 +208,7 @@
       for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});
       return message;
     }
-    async sendPreview(s){if(s.closed||!s.features?.includes('desktop-card-preview-v1')||s.previewBusy)return;s.previewBusy=true;try{const preview=await this.api.desktopCardPreview();if(preview&&preview!==s.lastPreview){await this.rpc(s,'desktop-card-preview',preview);s.lastPreview=preview;}}finally{s.previewBusy=false;}}
+    async sendPreview(s){if(s.closed||!s.features?.includes('desktop-card-preview-v1')||s.previewBusy)return;s.previewBusy=true;try{const preview=await this.api.desktopCardPreview();if(preview&&preview!==s.lastPreview){await this.rpc(s,'desktop-card-preview',s.features.includes('wallpaper-card-v1')?{kind:'wallpaper',preview}:preview);s.lastPreview=preview;}}finally{s.previewBusy=false;}}
     async changeMessage(conversation,id,text,removed=false){
       await this.ready;const rows=await this.api.collaboration('history',{conversation,limit:100,search:''});let row=rows.find(m=>m.id===id);
       if(!row)row=await this.api.collaboration('message',{conversation,id});

@@ -6,9 +6,8 @@ let config, socket, connectPromise, role = 'idle', stream, pc, sender, controlCh
 let iceServers = [], candidates = [], peerGeneration = 0, allowedControl = false, statsTimer, joinTimer, previousStats;
 let profileName = 'speed', pointerFrame = 0, latestPointer, toastTimer, currentStats = {};
 let requestPending = false, messageQueue = Promise.resolve();
-let outgoingAttempt=null,serverAttempt=null,remoteComputer={},previewTimer;
+let outgoingAttempt=null,serverAttempt=null,remoteComputer={};
 function applyComputerPreview(element,record){element.classList.add('computer-preview');if(record.preview){const image=document.createElement('img');image.className='desktop-preview';image.src=record.preview;image.alt='';image.draggable=false;element.prepend(image);}}
-function saveDesktopPreview(){const video=$('remote-video');if(role!=='viewer'||video.readyState<2||!video.videoWidth||!connectionAttempt)return;try{const canvas=document.createElement('canvas');canvas.width=Math.min(320,video.videoWidth);canvas.height=Math.max(1,Math.round(canvas.width*video.videoHeight/video.videoWidth));if(canvas.height>240){canvas.width=Math.round(canvas.width*240/canvas.height);canvas.height=240;}canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);const preview=canvas.toDataURL('image/jpeg',.55);api.computerCard('preview',{peer:remoteComputer,route:{address:connectionAttempt.address,endpoint:connectionAttempt.endpoint},preview}).catch(()=>{});}catch{}}
 let registered = false, incomingEnabled = true, registrationWanted = true, internetId = '', reconnectTimer, reconnectAttempts = 0, forceRelay = false, requestSerial = 0;
 const iceErrors = [];
 let directSocket, sessionRoute = 'server', serverIce = [], serverRelay = false;
@@ -233,7 +232,7 @@ function createPeer() {
     if (pc !== active || generation !== peerGeneration) return;
     if (active.connectionState === 'connected') {
       clearTimeout(joinTimer);
-      outgoingAttempt=null;updateControls();clearInterval(previewTimer);if(role==='viewer'){previewTimer=setInterval(saveDesktopPreview,60000);setTimeout(saveDesktopPreview,500);}
+      outgoingAttempt=null;updateControls();
       status(role === 'host' ? 'مهمان متصل است. برای قطع فوری Ctrl + Shift + F12 را بزنید.' : 'متصل شد؛ برای ارسال موس و کیبورد، روی تصویر کلیک کنید.');
       startStats();
     } else if (active.connectionState === 'failed') {
@@ -327,7 +326,7 @@ async function exitVideoFullscreen() {
   finally { await api.exitFullscreen().catch(() => {}); }
 }
 function closePeer() {
-  saveDesktopPreview();clearInterval(previewTimer);remoteComputer={};
+  remoteComputer={};
   const attempt=outgoingAttempt;outgoingAttempt=null;attempt?.cancel();
   api.fitVideo(null).catch(()=>{});
   guestCursorPosition=null; keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); exchange?.close(); exchange = null;
@@ -487,8 +486,8 @@ stage.addEventListener('drop', event => {
   })();
 });
 window.addEventListener('beforeunload', () => { for (const track of stream?.getTracks() || []) { track.onended = null; track.stop(); } pc?.close(); socket?.close(); });
-$('remote-video').addEventListener('loadeddata', () => { $('video-placeholder').hidden = true;saveDesktopPreview(); });
-$('remote-video').addEventListener('playing',saveDesktopPreview);
+$('remote-video').addEventListener('loadeddata', () => { $('video-placeholder').hidden = true; });
+
 
 $('connect-server').onclick = guarded(async () => {
   config.internetEnabled = await api.internetEnabled(true); $('internet-enabled').checked = true;

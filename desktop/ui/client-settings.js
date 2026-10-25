@@ -23,7 +23,7 @@ window.installClientSettings = (config, profileChanged) => {
   async function acceptProfile(next) { Object.assign(config, next); showProfile(); await profileChanged(next); }
   $('profile-photo').onclick = run(async () => acceptProfile(await api.profilePhoto(false)));
   $('profile-photo-remove').onclick = run(async () => acceptProfile(await api.profilePhoto(true)));
-  $('profile-save').onclick = run(async () => acceptProfile(await api.profileSave({ name: $('profile-name').value, status: $('profile-status').value })));
+  $('profile-save').onclick = run(async () => {await acceptProfile(await api.profileSave({ name: $('profile-name').value, status: $('profile-status').value }));$('settings-status').textContent=tr('Profile saved.');window.actionNotice('Profile saved.');});
   $('auto-accept-files').checked = !config.autoAcceptFiles; $('require-chat-approval').checked = config.requireChatApproval;
   for (const id of ['auto-accept-files','require-chat-approval']) $(id).onchange = run(async () => { const result = await api.chatPreferences({ autoAcceptFiles: !$('auto-accept-files').checked, requireChatApproval: $('require-chat-approval').checked }); Object.assign(config,result); });
   const notice = document.createElement('button'); notice.id = 'update-notice'; notice.className = 'small-button'; notice.hidden = true; document.querySelector('main>header').append(notice);
