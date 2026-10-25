@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   appReady: () => ipcRenderer.invoke('app-ready'),
   update: operation => ipcRenderer.invoke('update', operation),
   onUpdate: callback => ipcRenderer.on('update-status', (_event, value) => callback(value)),
+  firewallStatus: (force=false) => ipcRenderer.invoke('firewall-status',force),
   repairFirewall: () => ipcRenderer.invoke('firewall-repair'),
   groupPhoto:id=>ipcRenderer.invoke('group-photo',id),
   profileSave: value => ipcRenderer.invoke('profile-save', value),

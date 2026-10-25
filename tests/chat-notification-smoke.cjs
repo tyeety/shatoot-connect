@@ -24,7 +24,9 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   if(chatIcon.isEmpty()||chatIcon.toPNG().equals(appIcon.toPNG()))throw Error('Chat icon is missing or identical to the main icon');
   await run(chat,"document.title='Shatoot Connect';true");await pause(50);if(chat.getTitle()!=='Chats · Shatoot Connect')throw Error('HTML replaced the native chat title');
   await run(chat,"document.title='Chats · Shatoot Connect';true");
-  await run(chat,`messenger.select('${conversation}').then(()=>true)`);host.close();chat.show();chat.focus();
+  await run(chat,`messenger.select('${conversation}').then(()=>true)`);
+  for(const language of ['en','fa']){await run(chat,`window.i18n.setLanguage('${language}');document.querySelector('#action-snackbar .snackbar-confirm')?.click();document.querySelector('.chat-conversation').click();true`);await pause(500);if(!await run(chat,"!document.querySelector('#action-snackbar')||document.querySelector('#action-snackbar').hidden"))throw Error('Selecting a contact showed a redundant snackbar');}
+  await run(chat,"window.i18n.setLanguage('en');true");host.close();chat.show();chat.focus();
   await run(chat,"document.querySelector('#chat-rename').click();true");await until(()=>run(chat,"document.querySelector('#chat-name-dialog')?.open"));
   await run(chat,"document.querySelector('#chat-file-policy').value='ask';document.querySelector('#chat-file-policy').dispatchEvent(new Event('change'));true");
   await until(()=>owner.chatStore.filePolicy(conversation)==='ask');

@@ -302,7 +302,9 @@ ipcMain.handle('update', async (e, operation) => {
   update.emit({state:'installing'});quitting = true; setTimeout(() => app.quit(), 300); return { state: 'installing' };
   }catch(error){update.emit({state:'error',error:error.message});throw error;}finally{installingUpdate=false;}
 });
-ipcMain.handle('firewall-repair', async e => { state(e); if (smoke) return true; return require('./firewall.cjs').repairFirewall(app.getPath('exe')); });
+let firewallCheck,firewallCheckedAt=0;
+ipcMain.handle('firewall-status',async(e,force=false)=>{const s=state(e);if(smoke)return s.firewallStatus||{needsRepair:false};if(!firewallCheck||force===true||Date.now()-firewallCheckedAt>30000){firewallCheckedAt=Date.now();firewallCheck=require('./firewall.cjs').firewallStatus(app.getPath('exe'));}return firewallCheck;});
+ipcMain.handle('firewall-repair',async e=>{const s=state(e);if(smoke){s.firewallStatus={needsRepair:false};return true;}try{return await require('./firewall.cjs').repairFirewall(app.getPath('exe'));}finally{firewallCheck=null;}});
 ipcMain.handle('chat-preferences', (e, value) => { state(e); if (!value || typeof value.autoAcceptFiles !== 'boolean' || typeof value.requireChatApproval !== 'boolean') throw new Error('Invalid chat settings.'); saveSettings({ autoAcceptFiles: value.autoAcceptFiles, requireChatApproval: value.requireChatApproval }); return value; });
 ipcMain.handle('profile-save', (e, value) => { const s = state(e); if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !require('../shared/profile.cjs').STATUSES.includes(value.status)) throw new Error('Enter a profile name and status.'); const next = { ...profile(), name: value.name.trim(), status: value.status }; saveSettings({ profile: next }); if (s.discovery) { s.discovery.name = next.name; s.discovery.status = next.status; s.discovery.refresh(); } if(s.directSocket?.readyState===1)s.directSocket.send(JSON.stringify({type:'profile',...next})); return next; });
 async function readProfilePhoto(file) {

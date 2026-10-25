@@ -30,7 +30,7 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
   await run("document.querySelector('#open-settings').click();document.querySelector('#tab-profile').click();true");
   for(let i=0;i<2;i++){
     await run("document.querySelector('#profile-name').value='Profile feedback test';document.querySelector('#profile-save').click();true");
-    await until(()=>run("document.querySelector('#settings-status').textContent===window.i18n.translate('Profile saved.')&&document.querySelector('#action-snackbar')?.textContent===window.i18n.translate('Profile saved.')&&!document.querySelector('#action-snackbar').hidden"));
+    await until(()=>run("document.querySelector('#settings-status').textContent===window.i18n.translate('Profile saved.')&&document.querySelector('#action-snackbar .snackbar-message')?.textContent===window.i18n.translate('Profile saved.')&&!document.querySelector('#action-snackbar').hidden"));
   }
   await run("document.querySelector('#settings-dialog').close();true");
   log('Actual Electron async clipboard API decoded PNG without readImage; Save Profile explicitly confirms changed and unchanged profiles');
@@ -77,7 +77,12 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
       if(layout.bottom>1||layout.panelBottom>2||layout.listMax!=='none'||Math.abs(layout.hostBottom-layout.hostPadding-1)>1||layout.overflow>1||layout.pills||!layout.headings||!layout.icons||layout.status.includes('LAN is ready'))throw Error('Main layout failed in '+language+': '+JSON.stringify(layout));
       fs.writeFileSync(path.join(artifacts,`connections-${language}.png`),(await host.webContents.capturePage()).toPNG());
     }
-    await run("document.querySelector('#allow-firewall').click();true");await until(()=>run("document.querySelector('#action-snackbar')?.textContent===window.i18n.translate('Firewall access repaired.')&&!document.querySelector('#allow-firewall').disabled"));
+    if(!await run("document.querySelector('#allow-firewall').hidden"))throw Error('Firewall shortcut visible despite allowed access');
+    const owner=states.get(host.webContents.id);for(const needsRepair of [null,false,true]){owner.firewallStatus={needsRepair};await run('refreshFirewallAction().then(()=>true)');if(!await run(`document.querySelector('#allow-firewall').hidden===${needsRepair!==true}`))throw Error('Firewall shortcut visibility disagrees with policy');}
+    await run("document.querySelector('#allow-firewall').click();true");await until(()=>run("document.querySelector('#action-snackbar .snackbar-message')?.textContent===window.i18n.translate('Firewall access repaired.')&&!document.querySelector('#allow-firewall').disabled"));
+    await until(()=>run("document.querySelector('#allow-firewall').hidden"));
+    if(!await run("(()=>{const b=document.querySelector('#action-snackbar .snackbar-confirm'),r=b.getBoundingClientRect();return r.width>=28&&r.height>=28&&b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()"))throw Error('Snackbar confirmation cannot receive pointer input');
+    await run("document.querySelector('#action-snackbar .snackbar-confirm').click();true");if(!await run("document.querySelector('#action-snackbar').hidden"))throw Error('Snackbar confirmation did not dismiss it');
     if(!await run("document.querySelector('#open-settings').nextElementSibling.id==='allow-firewall'"))throw Error('Firewall button is not immediately after Settings');
     const focusPeer=createWindow();await until(()=>focusPeer.webContents.executeJavaScript('window.shatootconnectReady===true'));
     try{for(let i=0;i<8;i++){focusPeer.show();focusPeer.focus();await pause(60);host.show();host.focus();await pause(60);const capture=await host.webContents.capturePage();if(capture.isEmpty())throw Error('Focus/screenshot returned an empty image');if(host.webContents.isCrashed())throw Error('Renderer crashed during focus/screenshot');}}finally{focusPeer.destroy();}

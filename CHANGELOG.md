@@ -13,6 +13,14 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.19.3 — 2026-10-25
+
+### Fixed
+
+- Selecting a chat contact or group no longer shows a redundant Done snackbar; click feedback and genuine errors remain available.
+- Snackbars include an English/Persian OK button for immediate dismissal while retaining automatic expiry. The confirmation remains clickable inside modal dialogs.
+- The header firewall shortcut starts hidden and appears only when a read-only check finds blocked/missing inbound permission for this executable on an active, enabled Windows firewall profile. Checks allow time for the initial Windows prompt, refresh on focus/periodically, and hide the shortcut after successful repair or when status cannot be determined. Settings retain manual repair. No peer/server reachability heuristic triggers this action.
+
 ## 0.19.2 — 2026-10-25
 
 ### Changed

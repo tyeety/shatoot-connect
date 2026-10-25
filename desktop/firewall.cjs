@@ -2,6 +2,26 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const quote = text => "'" + text.replace(/'/g, "''") + "'";
+function evaluateFirewall({profiles,rules}){
+  const covers=(ports,port)=>!ports||/^(\*|any)$/i.test(ports)||ports.split(',').some(value=>{const bounds=value.trim().split('-').map(Number);return bounds.length===1?bounds[0]===port:port>=bounds[0]&&port<=bounds[1];});
+  for(const profile of profiles){
+    if(!profile.enabled)continue;
+    const active=rules.filter(r=>r.enabled&&r.direction===1&&(r.profiles&profile.id));
+    if(active.some(r=>r.action===0&&(r.protocol===256||r.protocol===6&&covers(r.ports,8788)||r.protocol===17&&covers(r.ports,8789))))return{needsRepair:true};
+    if(profile.blockAll)return{needsRepair:true};
+    if(profile.defaultAction!==0)continue;
+    const allowed=active.filter(r=>r.action===1);
+    if(!allowed.some(r=>(r.protocol===256||r.protocol===6)&&covers(r.ports,8788))||!allowed.some(r=>(r.protocol===256||r.protocol===17)&&(!r.ports||/^(\*|any)$/i.test(r.ports))))return{needsRepair:true};
+  }
+  return{needsRepair:false};
+}
+function firewallStatus(executable,{run=require('node:child_process').execFile}={}){
+  const script=`$ErrorActionPreference='Stop';$program=${quote(executable)};$policy=New-Object -ComObject HNetCfg.FwPolicy2;
+$profiles=@(foreach($id in @(1,2,4)){if($policy.CurrentProfileTypes -band $id){@{id=$id;enabled=$policy.FirewallEnabled($id);defaultAction=[int]$policy.DefaultInboundAction($id);blockAll=$policy.BlockAllInboundTraffic($id)}}});
+$rules=@(foreach($r in $policy.Rules){if([Environment]::ExpandEnvironmentVariables($r.ApplicationName).Trim('"').Equals($program,[StringComparison]::OrdinalIgnoreCase)){@{enabled=$r.Enabled;direction=[int]$r.Direction;action=[int]$r.Action;profiles=[int]$r.Profiles;protocol=[int]$r.Protocol;ports=$r.LocalPorts}}});
+@{profiles=$profiles;rules=$rules}|ConvertTo-Json -Depth 4 -Compress`;
+  return new Promise(resolve=>run(path.join(process.env.SystemRoot||'C:\\Windows','System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{windowsHide:true,timeout:10000,maxBuffer:1048576},(error,output)=>{try{resolve(error?{needsRepair:null}:evaluateFirewall(JSON.parse(output)));}catch{resolve({needsRepair:null});}}));
+}
 function repairFirewall(executable) {
   const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
   const script = `$ErrorActionPreference='Stop'; $program=${quote(executable)};
@@ -17,4 +37,4 @@ New-NetFirewallRule -Name 'ShatootConnect-WebRTC-UDP' -DisplayName 'Shatoot Conn
     proc.on('error', reject); proc.on('exit', code => code === 0 ? resolve(true) : reject(new Error(code === 1223 ? 'Firewall permission was cancelled. You can retry at any time.' : 'Windows could not update firewall rules. Check your administrator or network policy.')));
   });
 }
-module.exports = { repairFirewall };
+module.exports = { repairFirewall,firewallStatus,evaluateFirewall };
