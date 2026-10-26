@@ -1,6 +1,6 @@
 {
   "name": "shatoot-connect",
-  "version": "0.21.4",
+  "version": "0.21.5",
   "description": "Windows remote desktop, LAN discovery, peer-to-peer chat, groups and file transfer",
   "main": "desktop/main.cjs",
   "private": true,

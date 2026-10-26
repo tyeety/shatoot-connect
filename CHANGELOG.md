@@ -13,6 +13,12 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.21.5 — 2026-10-26
+
+### Fixed
+
+- Nearby computers can discover reachable company devices over routed VPN connections without broadcast forwarding. Bounded TCP presence checks use saved private IPs and directly attached /24 networks, rotate through up to four blocks per minute, and refresh discovered peers every ten seconds. Other company subnets require a saved IP in each subnet.
+
 ## 0.21.4 — 2026-10-26
 
 ### Added
