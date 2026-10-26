@@ -4,14 +4,32 @@ const http = require('node:http');
 const { EventEmitter } = require('node:events');
 const { execFile } = require('node:child_process');
 const path = require('node:path');
-const { localAddress, interfaces, sourceAddress } = require('../shared/network.cjs');
+const { localAddress, interfaces, sourceAddress, ipv4 } = require('../shared/network.cjs');
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const GROUP = '239.255.87.89', PORT = 8789;
+
+// Probe only small private networks anchored by a known computer or local NIC.
+// Rotate across networks so a large address book cannot starve later entries.
+function discoveryTargets(endpoints, networks, offset = 0) {
+  const own = new Set(networks.map(n => n.address)), blocks = new Set();
+  for (const endpoint of endpoints) {
+    try { const ip = new URL(`http://${endpoint}`).hostname;
+      if (localAddress(ip) && !ip.startsWith('127.') && !ip.startsWith('169.254.')) blocks.add(ip.slice(0, ip.lastIndexOf('.')));
+    } catch {}
+  }
+  for (const nic of networks) if (nic.netmask === '255.255.255.0' && !nic.address.startsWith('169.254.')) blocks.add(nic.address.slice(0, nic.address.lastIndexOf('.')));
+  const list = [...blocks], targets = [];
+  for (let i = 0; i < Math.min(4, list.length); i++) {
+    const block = list[(offset + i) % list.length];
+    for (let host = 1; host < 255; host++) { const ip = `${block}.${host}`; if (!own.has(ip) && localAddress(ip) && ipv4(ip) !== null) targets.push(ip); }
+  }
+  return targets;
+}
 
 class Discovery extends EventEmitter {
   constructor({ identity, name, port, discoveryPort = PORT, networkInterfaces, neighbors = process.platform === 'win32', ttl = 20000,knownEndpoints=()=>[] } = {}) {
     super(); Object.assign(this, { identity, name, port, discoveryPort, networkInterfaces, neighbors, ttl,knownEndpoints });
-    this.peers = new Map(); this.senders = new Map(); this.errors = new Set(); this.closed = false; this.lastReply = new Map();
+    this.peers = new Map(); this.senders = new Map(); this.errors = new Set(); this.closed = false; this.lastReply = new Map(); this.requests = new Set();
   }
   presence() { return { service: 'ShatootConnect', version: 1, kind: 'presence', deviceId: this.identity.deviceId, name: String(this.name).slice(0, 60), status: this.status || 'available', port: this.port, capabilities: ['desktop', 'chat', 'files', 'groups'] }; }
   snapshot() { return { peers: [...this.peers.values()].map(p => ({ ...p, endpoints: [...p.endpoints.keys()] })), interfaces: interfaces(this.networkInterfaces?.()), errors: [...this.errors] }; }
@@ -70,7 +88,16 @@ class Discovery extends EventEmitter {
       } else this.announce(this.senders.get(nic.address), nic);
     }
     for (const [id, peer] of this.peers) if (Date.now() - peer.lastSeen > this.ttl) this.peers.delete(id);
-    if(Date.now()-(this.knownProbeAt||0)>30000){this.knownProbeAt=Date.now();const endpoints=[...new Set(this.knownEndpoints())].slice(0,200);(async()=>{for(let i=0;i<endpoints.length&&!this.closed;i+=8)await Promise.allSettled(endpoints.slice(i,i+8).map(endpoint=>{try{const url=new URL(`http://${endpoint}`);return this.probe(url.hostname,Number(url.port)||8788);}catch{}}));})().catch(()=>{});}
+    if (!this.knownProbing && Date.now() - (this.knownProbeAt || 0) >= 10000) {
+      this.knownProbeAt = Date.now(); this.knownProbing = true;
+      const endpoints = [...new Set([...this.knownEndpoints(), ...[...this.peers.values()].flatMap(p => [...p.endpoints.keys()])])].slice(0, 512);
+      (async () => { for (let i = 0; i < endpoints.length && !this.closed; i += 16) await Promise.allSettled(endpoints.slice(i, i + 16).map(endpoint => { try { const url = new URL(`http://${endpoint}`); return this.probe(url.hostname, Number(url.port) || 8788); } catch {} })); })().catch(() => {}).finally(() => { this.knownProbing = false; });
+    }
+    if (!this.sweeping && Date.now() - (this.sweepAt || 0) >= 60000) {
+      this.sweepAt = Date.now(); this.sweeping = true;
+      const targets = discoveryTargets(this.knownEndpoints(), active, this.sweepOffset || 0); this.sweepOffset = (this.sweepOffset || 0) + 4;
+      (async () => { for (let i = 0; i < targets.length && !this.closed; i += 16) await Promise.allSettled(targets.slice(i, i + 16).map(ip => this.probe(ip))); })().catch(() => {}).finally(() => { this.sweeping = false; });
+    }
     this.publish();
   }
   announce(sender, nic) {
@@ -85,7 +112,10 @@ class Discovery extends EventEmitter {
         response.on('end', () => { if (response.statusCode === 200 && !this.closed) this.ingest(Buffer.from(data), address); resolve(); });
         response.on('error', resolve);
       });
+      this.requests.add(request);
+      const deadline = setTimeout(() => request.destroy(), 1500);
       request.on('timeout', () => request.destroy()); request.on('error', resolve);
+      request.on('close', () => { clearTimeout(deadline); this.requests.delete(request); resolve(); });
     });
   }
   probeNeighbors() {
@@ -101,8 +131,9 @@ class Discovery extends EventEmitter {
   }
   close() {
     this.closed = true; clearInterval(this.timer); clearInterval(this.neighborTimer);
+    for (const request of this.requests) request.destroy();
     for (const sender of this.senders.values()) try { sender.close(); } catch {}
     this.senders.clear(); try { this.receiver?.close(); } catch {}
   }
 }
-module.exports = { Discovery, UUID };
+module.exports = { Discovery, UUID, discoveryTargets };

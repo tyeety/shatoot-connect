@@ -6,6 +6,38 @@ const crypto = require('node:crypto');
 const { once } = require('node:events');
 const { Discovery } = require('../desktop/discovery.cjs');
 const { localAddress, interfaces, sourceAddress } = require('../shared/network.cjs');
+
+test('VPN discovery probes the company network from saved IPs without scanning broad VPN routes', () => {
+  const { discoveryTargets } = require('../desktop/discovery.cjs');
+  const targets = discoveryTargets(['192.168.1.14:8788', '192.168.1.63', '8.8.8.8', '127.0.0.1'], [{address:'192.168.8.252',netmask:'255.255.255.0'}, {address:'10.8.0.2',netmask:'255.0.0.0'}]);
+  assert(targets.includes('192.168.1.99'));
+  assert(!targets.includes('192.168.8.252'));
+  assert(!targets.includes('192.168.1.0'));
+  assert(!targets.includes('192.168.1.255'));
+  assert(!targets.some(ip => ip.startsWith('10.') || ip.startsWith('8.') || ip.startsWith('127.')));
+  assert.equal(new Set(targets).size, targets.length);
+  const seeds = Array.from({length:6}, (_,i)=>`10.${i}.0.2`);
+  assert.equal(discoveryTargets(seeds, []).length, 1016);
+  assert(discoveryTargets(seeds, [], 4).includes('10.5.0.99'));
+});
+
+test('VPN sweep discovers an unsaved peer and refresh keeps it alive between sweeps', async t => {
+  const discovery = new Discovery({ identity:{deviceId:crypto.randomUUID()}, networkInterfaces:()=>({}), knownEndpoints:()=>['192.168.1.14:8788'], neighbors:false });
+  t.after(()=>discovery.close());
+  const id = crypto.randomUUID(), calls=[];
+  discovery.probe = async address => {
+    calls.push(address);
+    if(address==='192.168.1.99') discovery.ingest(Buffer.from(JSON.stringify({service:'ShatootConnect',version:1,deviceId:id,name:'Company',port:8788})),address);
+  };
+  discovery.refresh();
+  for(let i=0;i<50 && discovery.sweeping;i++) await new Promise(r=>setImmediate(r));
+  assert.equal(discovery.snapshot().peers[0].endpoints[0], '192.168.1.99:8788');
+  calls.length=0; discovery.knownProbeAt=0; discovery.refresh();
+  await new Promise(r=>setImmediate(r));
+  assert(calls.includes('192.168.1.99'));
+  assert(!calls.includes('192.168.1.98'));
+  discovery.close(); calls.length=0; discovery.refresh(); assert.equal(calls.length,0);
+});
 test('known LAN computers publish wallpaper without chat or screen approval; legacy screenshots are ignored',async t=>{
  const{createSignalingServer}=require('../server/index.cjs');let previewKind='wallpaper',requests=0;
  const deviceId=crypto.randomUUID(),preview='data:image/jpeg;base64,YWJj';let port;
