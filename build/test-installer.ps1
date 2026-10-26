@@ -141,7 +141,7 @@ public class VerifiedSetupFixture {
     $probeBytes = [Text.Encoding]::UTF8.GetBytes([Guid]::NewGuid().ToString())
     [IO.File]::WriteAllBytes($profileProbe, $probeBytes)
     $settings = Join-Path $profile 'connection.json'
-    if(!(Test-Path -LiteralPath $settings)){[IO.File]::WriteAllText($settings,'{"startupEnabled":false,"internetEnabled":false}');$createdSettings=$true}
+    if(!(Test-Path -LiteralPath $settings)){[IO.File]::WriteAllText($settings,'{"startupEnabled":false,"internetEnabled":false,"sharedCursor":false}');$createdSettings=$true}
     $settingsHash = if (Test-Path -LiteralPath $settings) { Get-ContentHash $settings } else { $null }
     $settingsBefore=if(Test-Path -LiteralPath $settings){Get-Content -LiteralPath $settings -Raw|ConvertFrom-Json}else{$null}
     Invoke-Setup $Installer "/S /currentuser /D=$installDir"
@@ -187,11 +187,13 @@ public class VerifiedSetupFixture {
         if($result.state -ne 'installed' -or $result.token -ne $updateToken -or (Test-Path -LiteralPath $updatePackage)){throw 'Installed update did not acknowledge restart/cleanup.'}
         Assert-Payload
         $settingsAfter=Get-Content -LiteralPath $settings -Raw|ConvertFrom-Json
+        if($settingsAfter.inputModeVersion -ne 1 -or $settingsAfter.sharedCursor -ne $true){throw 'The legacy profile did not migrate to shared mouse control.'}
         foreach($property in $settingsBefore.PSObject.Properties){
             $afterProperty=$settingsAfter.PSObject.Properties[$property.Name]
+            if($property.Name -eq 'sharedCursor' -and !$settingsBefore.PSObject.Properties['inputModeVersion']){if($afterProperty.Value -ne $true){throw 'Shared mouse migration failed.'};continue}
             if(!$afterProperty -or ($property.Value|ConvertTo-Json -Depth 100 -Compress) -cne ($afterProperty.Value|ConvertTo-Json -Depth 100 -Compress)){throw ('Installed update changed an existing preference: '+$property.Name)}
         }
-        foreach($property in $settingsAfter.PSObject.Properties){if(!$settingsBefore.PSObject.Properties[$property.Name] -and $property.Name -notin @('deviceId','deviceSecret')){throw ('Unexpected startup preference change: '+$property.Name)}}
+        foreach($property in $settingsAfter.PSObject.Properties){if(!$settingsBefore.PSObject.Properties[$property.Name] -and $property.Name -notin @('deviceId','deviceSecret','inputModeVersion','sharedCursor')){throw ('Unexpected startup preference change: '+$property.Name)}}
         if(!$settingsAfter.deviceId -or !$settingsAfter.deviceSecret){throw 'Packaged startup did not retain the device identity.'}
         # A first application launch initializes identity; retain this complete
         # profile byte-for-byte through the following uninstall checks.
