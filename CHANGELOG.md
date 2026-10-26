@@ -22,6 +22,24 @@ extracts the matching section and rejects missing or incomplete release notes.
 - Privacy heartbeat leases restore displays on connection loss, close, revoked consent or cover failure. Local emergency restoration revokes the affected sessions; simultaneous viewers keep independent requests.
 - Unit coverage for adaptive policy, asynchronous manual overrides and multi-monitor lifecycle; local real-RTC media acceptance verifies automatic/manual modes, simulated congestion, prior consent, additional viewers, capture exclusion and a native click through the cover.
 
+## 0.22.4 — 2026-10-26
+
+### Fixed
+
+- Remote keyboard input recovers a held Shift from native/DOM modifier snapshots before sending an ordinary key, so a missed initial modifier event no longer turns Shift+Slash into Slash. Shift events use the same key representation across capture handoffs; missing key-up, right Shift release, control pauses and session teardown clear the modifier consistently.
+- Unit and Electron UI tests cover Shift recovery, left/right modifiers, native/DOM handoff, key-up repair and session cleanup. A manual Windows text-field probe exercises the real input helper and stops when physical host input or focus changes interrupt the test.
+
+## 0.22.3 — 2026-10-26
+
+### Fixed
+
+- Translate the connection timeout, variable error details and guest-device fallback in the selected interface language, including switching between English and Persian after an error.
+
+### Changed
+
+- Application is the first and initially selected Settings page. Start with Windows in the tray remains on by default, includes an explanatory hint and save feedback, preserves an explicit off choice, and restores its checkbox if saving fails. Windows sign-in launches with --start-in-tray without opening the main window.
+- UI acceptance checks cover default-on startup, persistence when reopening the client, and timeout text in both languages.
+
 ## 0.22.2 — 2026-10-26
 
 ### Fixed

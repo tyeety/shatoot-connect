@@ -4,6 +4,11 @@ window.i18n = (() => {
   const entries = [
 ['کیفیت خودکار','Automatic quality'],['اجازه بده کنترل‌کننده نمایشگرهای این سیستم را پنهان کند','Allow remote controllers to hide this computer’s monitors'],['پیش از اتصال فعال کنید. Ctrl + Shift + F12 تصویر را برمی‌گرداند و اتصال را قطع می‌کند.','Enable before connecting. Ctrl + Shift + F12 restores displays and disconnects.'],['پنهان کردن نمایشگرهای مقابل','Hide remote monitors'],['نمایش دوبارهٔ نمایشگرهای مقابل','Restore remote monitors'],['این قابلیت باید پیش از اتصال در سیستم مقابل فعال شده باشد.','Privacy screen requires prior permission on the remote computer.'],['پنهان کردن نمایشگر در این سیستم در دسترس نیست.','Privacy screen is unavailable on this computer.'],
 
+
+    ['زمان انتظار اتصال تمام شد؛ تأیید میزبان و تنظیمات شبکه را بررسی کنید.','Connection timed out. Check host approval and network settings.'],
+    ['تنظیم کیفیت ناموفق بود: ','Quality change failed: '],['دستگاه مهمان','Guest device'],
+    ['به‌صورت پیش‌فرض روشن است. پس از ورود به ویندوز، برنامه در کنار ساعت اجرا می‌شود و پنجرهٔ اصلی باز نمی‌شود.','On by default. After you sign in to Windows, the app starts in the system tray without opening the main window.'],
+    ['تنظیم اجرای خودکار ذخیره شد.','Windows startup setting saved.'],
     ['ایموجی','Emoji'],['واکنش به پیام','React to message'],['پیام‌های زمان‌بندی‌شده','Scheduled messages'],['زمان‌بندی پیام','Schedule message'],['ارسال در (ساعت این سیستم)','Send at (this computer’s time)'],['زمان آینده را انتخاب کنید و متن پیام را بنویسید.','Choose a future time and enter a message.'],['پیام زمان‌بندی شد','Message scheduled'],['پیام زمان‌بندی‌شده‌ای وجود ندارد','No scheduled messages'],['لغو پیام زمان‌بندی‌شده','Cancel scheduled message'],['پیام زمان‌بندی‌شده قبلاً ارسال یا حذف شده است.','Scheduled message was already sent or removed.'],['برنامه را در Tray باز نگه دارید. اگر بسته باشد، پیام‌های عقب‌افتاده با اجرای دوباره ارسال می‌شوند.','Keep the app running in the tray. If it is closed, overdue messages send when it starts again.'],['چهره‌ها','Smileys'],['اشاره‌ها','Gestures'],['قلب‌ها و نمادها','Hearts and symbols'],['اشیا و طبیعت','Objects and nature'],['واکنش نامعتبر است.','Invalid reaction.'],['فرستندهٔ واکنش نامعتبر است.','Invalid reaction author.'],['تعداد پیام‌های زمان‌بندی‌شده به سقف مجاز رسیده است.','Scheduled message limit reached.'],
     ['خوانده شد','Seen'],['ارسال ناموفق','Send failed'],['در انتظار تحویل','Waiting for delivery'],
     ['نمایش پنجرهٔ چت در اتصال ریموت','Show the chat window in remote sessions'],
@@ -133,7 +138,11 @@ window.i18n = (() => {
   const fa = new Map(entries), en = new Map(entries.map(([a,b]) => [b,a]));
   function translate(value) {
     if (typeof value !== 'string') return value;
-    return language === 'fa' ? en.get(value) || value : fa.get(value) || value;
+    const dictionary = language === 'fa' ? en : fa;
+    if (dictionary.has(value)) return dictionary.get(value);
+    // Error prefixes have a variable detail, so translate each part separately.
+    for (const [source, target] of dictionary) if (source.endsWith(': ') && value.startsWith(source)) return target + translate(value.slice(source.length));
+    return value;
   }
   function apply() {
     document.documentElement.lang = language; document.documentElement.dir = language === 'fa' ? 'rtl' : 'ltr';

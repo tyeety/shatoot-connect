@@ -30,7 +30,8 @@
     "build:server-manager": "dotnet publish server-manager/ShatootConnect.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o server-manager/publish",
     "test:media-ui": "electron . --smoke-test --media-smoke",
     "test:ice-ui": "electron . --smoke-test --ice-smoke",
-    "test:connection-ui": "electron . --smoke-test --connection-ui-smoke"
+    "test:connection-ui": "electron . --smoke-test --connection-ui-smoke",
+    "test:keyboard-shift": "electron tests/keyboard-shift-probe.cjs"
   },
   "dependencies": {
     "ws": "8.22.0"

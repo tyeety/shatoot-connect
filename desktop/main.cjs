@@ -815,7 +815,9 @@ async function runSmoke(host) {
   const compactFit = await host.webContents.executeJavaScript(fullFormFit);
   if (await host.webContents.executeJavaScript("document.querySelector('#fixed-password').getClientRects().length > 0 || document.querySelector('#server-url').getClientRects().length > 0")) throw new Error('Advanced settings leaked onto main form');
   await host.webContents.executeJavaScript("document.querySelector('#open-settings').click(); true");
-  if (!await host.webContents.executeJavaScript("document.querySelector('#settings-dialog').open && document.querySelector('#server-url').getClientRects().length === 0 && document.querySelector('#fixed-password').getClientRects().length > 0 && document.querySelector('#show-host-cursor').checked")) throw new Error('Settings dialog or default cursor preference failed');
+  if (!await host.webContents.executeJavaScript("document.querySelector('#settings-dialog').open && !document.querySelector('#settings-general').hidden && document.querySelector('#server-url').getClientRects().length === 0")) throw new Error('Settings did not open on the Application page');
+  await host.webContents.executeJavaScript("selectSettingsTab('host');true");
+  if(!await host.webContents.executeJavaScript("document.querySelector('#fixed-password').getClientRects().length > 0 && document.querySelector('#show-host-cursor').checked"))throw new Error('Host settings or default cursor preference failed');
   await host.webContents.executeJavaScript("document.querySelector('#settings-dialog').close(); true");
   await delay(150);
   if (!compactFit) throw new Error('Inputs do not fit at 1000x720');

@@ -12,6 +12,7 @@ let registered = false, incomingEnabled = true, registrationWanted = true, inter
 const iceErrors = [];
 let directSocket, sessionRoute = 'server', serverIce = [], serverRelay = false;
 let exchange, keyboardGrabActive = false, layoutSync, hostCursor, hostPasswordValue = '', hostPasswordShown = false, lastLocalCursor;
+const guestShift = new window.GuestShiftState();
 let supportsFixedPassword = false, guestKeyboardLayout = '', keyboardTimer, keyboardQueue = Promise.resolve(), keyboardEpoch = 0, peerKeyboardSync = false;
 let connectionAttempt, recallRevision=0;
 let videoQuality,hostPrivacyAllowed=false,remotePrivacyAllowed=false,remotePrivacyActive=false,privacyHeartbeat;
@@ -286,7 +287,7 @@ function bindChannel(channel) {
     if (data.type === 'layout-sync' && channel.label === 'control' && allowedControl) { if (layoutSync.receive(data)) { guestKeyboardLayout = data.layout; api.applyKeyboard(data.layout).catch(e => status(e.message, true)); } return; }
     if (role !== 'host') return;
     if (data.type === 'profile' && channel.label === 'control' && config.profiles[data.name]) {
-      applyProfile(data.name,data.auto===true).catch(e => status(`تنظیم کیفیت ناموفق بود: ${e.message}`, true));
+      applyProfile(data.name,data.auto===true).catch(e => status(tr('Quality change failed: ') + tr(e.message), true));
     } else if (allowedControl) api.input(data);
   };
 }
@@ -347,7 +348,7 @@ function closePeer() {
   const attempt=outgoingAttempt;outgoingAttempt=null;attempt?.cancel();
   api.fitVideo(null).catch(()=>{});
   guestCursorPosition=null; keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); exchange?.close(); exchange = null;
-  keyboardEpoch++; guestKeyboardLayout = ''; layoutSync = null; hostCursor = null; $('host-cursor').hidden = true;
+  keyboardEpoch++; guestShift.reset(); guestKeyboardLayout = ''; layoutSync = null; hostCursor = null; $('host-cursor').hidden = true;
   peerKeyboardSync = false;
   remoteInputReason='ready';hostInputState={type:'input-state',reason:'ready'};
   exitVideoFullscreen().catch(() => {});
@@ -416,7 +417,7 @@ function position(event) {
   return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
 }
 function input(data, pointer = false) {
-  if (data.type === 'release') keyboardEpoch++;
+  if (data.type === 'release') { keyboardEpoch++; guestShift.reset(); }
   if (role !== 'viewer' || !allowedControl) return;
   if(remoteInputReason!=='ready'&&data.type!=='release')return;
   // Moves share the ordered stream with down/up. Only visual pointer markers
@@ -457,14 +458,16 @@ stage.addEventListener('wheel', e => {
   const factor = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
   input({ type: 'wheel', dx: Math.round(e.deltaX * factor), dy: Math.round(e.deltaY * factor), ...(position(e) || latestPointer || {}) });
 }, { passive: false });
-async function sendGuestKey(data, paste = false) {
+async function sendGuestKey(data, paste = false, shift) {
   const generation = peerGeneration, epoch = keyboardEpoch;
   keyboardQueue = keyboardQueue.then(async () => {
     if (generation !== peerGeneration || epoch !== keyboardEpoch || role !== 'viewer' || !allowedControl) return;
     if (paste && exchange) await exchange.flushClipboard();
     const layout = layoutSync?.expected || guestKeyboardLayout || await api.currentKeyboard();
     if (generation !== peerGeneration || epoch !== keyboardEpoch || role !== 'viewer' || !allowedControl) return;
-    guestKeyboardLayout = layout; input({ ...data, layout });
+    guestKeyboardLayout = layout;
+    if (remoteInputReason !== 'ready') return;
+    for (const packet of guestShift.packets(data, shift)) input({ ...packet, layout });
   }).catch(e => { if (generation === peerGeneration && epoch === keyboardEpoch) { input({ type: 'release' }); status(e.message, true); } });
 }
 api.onGrabbedKey(data => {
@@ -473,7 +476,7 @@ api.onGrabbedKey(data => {
   if (role !== 'viewer' || !allowedControl || document.activeElement !== stage) return;
   if (data.release) { input({ type: 'release' }); if (data.layoutSwitch) keyboardQueue = keyboardQueue.then(async () => { guestKeyboardLayout = await api.currentKeyboard(); sendKeyboardLayout(); }).catch(e => status(e.message, true)); return; }
   if (!peerKeyboardSync) return;
-  sendGuestKey({ type: 'physical-key', vk: data.vk, scan: data.scan, extended: data.extended, down: data.down }, data.down && ((data.ctrl && data.vk === 86) || (data.shift && data.vk === 45)));
+  sendGuestKey({ type: 'physical-key', vk: data.vk, scan: data.scan, extended: data.extended, down: data.down }, data.down && ((data.ctrl && data.vk === 86) || (data.shift && data.vk === 45)), data.shift);
 });
 for (const type of ['keydown', 'keyup']) stage.addEventListener(type, e => {
   if (!allowedControl) return;
@@ -483,7 +486,7 @@ for (const type of ['keydown', 'keyup']) stage.addEventListener(type, e => {
   const layoutShortcut = ((e.altKey || e.ctrlKey) && /^Shift/.test(e.code)) || (e.shiftKey && /^(Alt|Control)/.test(e.code)) || (e.metaKey && e.code === 'Space');
   if (layoutShortcut) { input({ type: 'release' }); return; }
   e.preventDefault();
-  sendGuestKey({ type: 'key', code: e.code, down: type === 'keydown' }, type === 'keydown' && ((e.ctrlKey && e.code === 'KeyV') || (e.shiftKey && e.code === 'Insert')));
+  sendGuestKey({ type: 'key', code: e.code, down: type === 'keydown' }, type === 'keydown' && ((e.ctrlKey && e.code === 'KeyV') || (e.shiftKey && e.code === 'Insert')), e.shiftKey);
 });
 stage.addEventListener('focus', () => { if (role === 'viewer' && allowedControl && peerKeyboardSync) api.keyboardGrab(true).catch(e => status(e.message, true)); });
 function releaseGuestKeyboard() { guestCursorPosition=null; sendGuestCursor({visible:false}); activeGuestPointers.clear(); keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); input({ type: 'release' }); }
@@ -544,7 +547,7 @@ $('host-stop').onclick = () => {
 async function joinTarget(record) {
   if(role!=='idle'||outgoingAttempt)return;
   const attempt=new window.ConnectionAttempt();outgoingAttempt=attempt;role='joining';updateControls();
-  joinTimer=setTimeout(()=>{if(outgoingAttempt!==attempt)return;stopSession(true);status('زمان انتظار اتصال تمام شد؛ تأیید میزبان و تنظیمات شبکه را بررسی کنید.',true);},60000);
+  joinTimer=setTimeout(()=>{if(outgoingAttempt!==attempt)return;stopSession(true);status('Connection timed out. Check host approval and network settings.',true);},60000);
   try{
     if(record?.endpoint){
       if(config.internetEnabled===false){config.internetEnabled=await attempt.wait(api.internetEnabled(true));$('internet-enabled').checked=true;}

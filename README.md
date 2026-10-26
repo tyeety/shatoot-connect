@@ -6,6 +6,8 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 The chat window uses a blue speech-bubble icon and a role-first **Chats · Shatoot Connect** title, distinct from the main purple application icon. Both update buttons keep a dedicated download percentage visible in English and Persian, even when the status text is clipped in a narrow header.
 
+**Settings > Application > Start with Windows in the tray** is on by default. Windows sign-in starts the app in the system tray without opening its main window. Turn it off to disable automatic startup; your choice is preserved across restarts and updates.
+
 ## Version 0.19.0
 
 The main sidebar combines saved and recent computers into one list, sorted by the last successful connection. Saved systems have a muted outline star; unsaved recent systems have a clock. A saved system does not also appear as a recent row. Rename is an icon action; saving, credentials and existing shortcuts retain their identities.

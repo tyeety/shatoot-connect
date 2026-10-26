@@ -11,15 +11,18 @@ window.installClientSettings = (config, profileChanged) => {
     const tab = document.createElement('button'); tab.id = `tab-${id}`; tab.dataset.settingsTab = id; tab.role = 'tab'; tab.setAttribute('aria-controls', `settings-${id}`); tab.setAttribute('aria-selected', 'false'); tab.tabIndex = -1; tab.textContent = tr(title); document.querySelector('.settings-tabs').append(tab);
     const page = document.createElement('section'); page.id = `settings-${id}`; page.role = 'tabpanel'; page.className = 'settings-page'; page.hidden = true; page.setAttribute('aria-labelledby', tab.id); page.innerHTML = content; $('settings-dialog').insertBefore(page, $('settings-status'));
   }
+  document.querySelector('.settings-tabs').prepend($('tab-general'));
+  const startupHint = document.createElement('p'); startupHint.id = 'startup-hint'; startupHint.className = 'footnote'; startupHint.textContent = tr('On by default. After you sign in to Windows, the app starts in the system tray without opening the main window.'); $('startup-enabled').setAttribute('aria-describedby', startupHint.id); $('startup-enabled').closest('label').after(startupHint);
+  selectSettingsTab('general');
   const themeLabel=document.createElement('label');themeLabel.htmlFor='appearance-theme';themeLabel.textContent=tr('Theme');const theme=document.createElement('select');theme.id='appearance-theme';for(const[value,label]of [['dark','Dark'],['light','Light']]){const option=document.createElement('option');option.value=value;option.textContent=tr(label);theme.append(option);}document.querySelector('label[for=language]').before(themeLabel,theme);theme.value=config.theme||'dark';
   window.addEventListener('shatoot-theme-change',()=>{theme.value=document.documentElement.dataset.theme;config.theme=theme.value;});
   const firewall = document.createElement('button'); firewall.id = 'repair-firewall'; firewall.className = 'small-button'; firewall.textContent = tr('Repair Windows Firewall access'); $('settings-lan').append(firewall);
   const firewallHint = document.createElement('p'); firewallHint.className = 'footnote'; firewallHint.textContent = tr('Requests Windows administrator permission. Allows this app on private and domain LAN networks; you can retry after cancelling.'); $('settings-lan').append(firewallHint);
   const run = fn => async event => { const control=event?.currentTarget;try { await window.withActionFeedback(control,fn); } catch (error) { $('settings-status').textContent = tr(error.message);window.actionNotice?.(error.message); } };
   theme.onchange=run(async()=>{config.theme=await api.appearance(theme.value);window.actionNotice('Theme changed.');});
-  $('remember-passwords').checked=config.rememberPasswords;$('startup-enabled').checked=config.startupEnabled;
+  $('remember-passwords').checked=config.rememberPasswords;$('startup-enabled').checked=config.startupEnabled!==false;
   $('remember-passwords').onchange=run(async()=>{config.rememberPasswords=await api.connections('remember',$('remember-passwords').checked);if(!config.rememberPasswords)document.getElementById('remote-password').value='';});
-  $('startup-enabled').onchange=run(async()=>{config.startupEnabled=await api.lifecycle('startup',$('startup-enabled').checked);});
+  $('startup-enabled').onchange=run(async()=>{try{config.startupEnabled=await api.lifecycle('startup',$('startup-enabled').checked);window.actionNotice('Windows startup setting saved.');}finally{$('startup-enabled').checked=config.startupEnabled!==false;}});
   $('clear-history').onclick=run(async()=>renderHistory(await api.connections('clear')));$('show-panels').onclick=run(()=>api.lifecycle('panels'));$('quit-app').onclick=()=>api.lifecycle('quit');
   let checkingFirewall=false;const firewallReadyAt=Date.now()+15000;
   const refreshFirewall=async(force=false)=>{if(checkingFirewall||!force&&Date.now()<firewallReadyAt)return;checkingFirewall=true;try{const value=await api.firewallStatus(force);$('allow-firewall').hidden=value.needsRepair!==true;}catch{$('allow-firewall').hidden=true;}finally{checkingFirewall=false;}};

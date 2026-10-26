@@ -1,6 +1,34 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { LayoutSync } = require('../desktop/ui/keyboard-sync.js');
+const { LayoutSync, GuestShiftState } = require('../desktop/ui/keyboard-sync.js');
+
+test('a captured shifted slash recovers missing Shift-down before sending the physical key', () => {
+  const state = new GuestShiftState(), slash = {type:'physical-key',vk:0xBF,scan:0x35,extended:false,down:true};
+  assert.deepEqual(state.packets(slash, true), [{type:'key',code:'ShiftLeft',down:true}, slash]);
+  assert.deepEqual(state.packets({...slash,down:false}, true), [{...slash,down:false}]);
+  assert.deepEqual(state.packets({type:'physical-key',vk:0xA1,scan:0x36,down:false}, true), [{type:'key',code:'ShiftLeft',down:false}]);
+  assert.deepEqual(state.packets(slash, false), [slash]);
+});
+
+test('DOM and native Shift events share one representation across capture handoff', () => {
+  const state = new GuestShiftState();
+  assert.deepEqual(state.packets({type:'key',code:'ShiftLeft',down:true}, true), [{type:'key',code:'ShiftLeft',down:true}]);
+  assert.deepEqual(state.packets({type:'physical-key',vk:0xA0,scan:0x2A,down:false}, true), [{type:'key',code:'ShiftLeft',down:false}]);
+  assert.deepEqual(state.packets({type:'physical-key',vk:0xA1,scan:0x36,down:true}, false), [{type:'key',code:'ShiftRight',down:true}]);
+  assert.deepEqual(state.packets({type:'key',code:'ShiftRight',down:false}, false), [{type:'key',code:'ShiftRight',down:false}]);
+  assert.equal(state.held.size, 0);
+});
+
+test('missing Shift-up is repaired before an unshifted key; both sides and release/reset stay consistent', () => {
+  const state = new GuestShiftState(), slash = {type:'key',code:'Slash',down:true};
+  state.packets({type:'key',code:'ShiftLeft',down:true}, true);
+  state.packets({type:'key',code:'ShiftRight',down:true}, true);
+  assert.deepEqual(state.packets(slash, true), [slash]);
+  assert.deepEqual(state.packets(slash, false), [{type:'key',code:'ShiftLeft',down:false},{type:'key',code:'ShiftRight',down:false},slash]);
+  state.packets(slash, true); state.reset();
+  assert.deepEqual(state.packets(slash, true), [{type:'key',code:'ShiftLeft',down:true},slash]);
+  assert.deepEqual(state.packets({type:'key',code:'ShiftRight',down:true}, true), [{type:'key',code:'ShiftRight',down:true},{type:'key',code:'ShiftLeft',down:false}]);
+});
 test('layout changes propagate in both directions without echo; stale updates cannot revert them', () => {
   const host = new LayoutSync(true), guest = new LayoutSync(false); host.ready = guest.ready = true;
   assert.equal(host.observe('00000409'), undefined);

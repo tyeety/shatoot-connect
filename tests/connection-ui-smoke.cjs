@@ -11,6 +11,13 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
   await run("document.querySelector('#quality').value='auto';document.querySelector('#quality').dispatchEvent(new Event('change'));true");await until(()=>run('config.autoQuality===true'));
   await run("document.querySelector('#allow-privacy-screen').checked=false;document.querySelector('#allow-privacy-screen').dispatchEvent(new Event('change'));true");await until(()=>run('config.allowPrivacyScreen===false'));
   if(!await run("api.privacyScreen(true).then(()=>false,()=>true)"))throw Error('Privacy request without hosting/consent was accepted');
+
+  if(!await run("config.startupEnabled===true&&document.querySelector('#startup-enabled').checked&&document.querySelector('.settings-tabs').firstElementChild.id==='tab-general'&&!document.querySelector('#settings-general').hidden"))throw Error('Default-on tray startup is missing from the first settings page');
+  await run("document.querySelector('#startup-enabled').checked=false;document.querySelector('#startup-enabled').dispatchEvent(new Event('change'));true");
+  await until(()=>run("config.startupEnabled===false&&!document.querySelector('#startup-enabled').disabled"));
+  const startupWindow=createWindow();
+  try{await until(()=>startupWindow.webContents.executeJavaScript('window.shatootconnectReady===true'));if(!await startupWindow.webContents.executeJavaScript("config.startupEnabled===false&&!document.querySelector('#startup-enabled').checked"))throw Error('Disabled Windows startup did not persist when reopening');}finally{startupWindow.destroy();}
+  await run("document.querySelector('#startup-enabled').checked=true;document.querySelector('#startup-enabled').dispatchEvent(new Event('change'));true");await until(()=>run('config.startupEnabled===true'));
   if(!await run("config.sharedCursor===true&&document.querySelector('#shared-cursor').checked"))throw Error('Shared mouse was not the migrated/default input mode');
   await run("api.sharedCursor(false)");const limited=createWindow();
   try{await until(()=>limited.webContents.executeJavaScript('window.shatootconnectReady===true'));if(!await limited.webContents.executeJavaScript("config.sharedCursor===false&&!document.querySelector('#shared-cursor').checked"))throw Error('Explicit independent mode did not survive reopening');}finally{limited.destroy();await run("api.sharedCursor(true)");}
@@ -121,6 +128,8 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     log('Coordinator and chat waiting states cancel through actual buttons without leftover sessions');
     await run("document.querySelector('#messenger-dialog').close();true");
     for(const language of ['en','fa']){
+      await run(`window.i18n.setLanguage('${language}');status('زمان انتظار اتصال تمام شد؛ تأیید میزبان و تنظیمات شبکه را بررسی کنید.',true);true`);
+      if(!await run(`document.querySelector('#session-status').textContent===window.i18n.translate('Connection timed out. Check host approval and network settings.')`))throw Error('Connection timeout used the wrong language in '+language);
       await run(`window.i18n.setLanguage('${language}');status('');true`);await pause(450);
       const layout=await run("(()=>{const main=document.querySelector('main'),footer=main.querySelector('footer').getBoundingClientRect(),panel=document.querySelector('#network-panel').getBoundingClientRect(),list=document.querySelector('#network-list'),card=document.querySelector('.host-card'),button=[...card.querySelectorAll('.full')].find(b=>b.getClientRects().length),box=button.getBoundingClientRect(),cb=card.getBoundingClientRect();return{bottom:Math.abs(footer.bottom-innerHeight),panelBottom:footer.top-panel.bottom,listMax:getComputedStyle(list).maxHeight,hostBottom:cb.bottom-box.bottom,hostPadding:parseFloat(getComputedStyle(card).paddingBottom),overflow:document.documentElement.scrollHeight-innerHeight,pills:document.querySelectorAll('.card .pill').length,status:document.querySelector('#session-status').textContent,headings:[...document.querySelectorAll('.card-top')].every(e=>!!e.querySelector('h2')),icons:[...document.querySelectorAll('.favorite-actions .icon-button')].every(b=>{const r=b.getBoundingClientRect(),i=b.querySelector('.mi').getBoundingClientRect();return Math.abs((r.left+r.right-i.left-i.right)/2)<1&&Math.abs((r.top+r.bottom-i.top-i.bottom)/2)<1})}})()");
       if(layout.bottom>1||layout.panelBottom>2||layout.listMax!=='none'||Math.abs(layout.hostBottom-layout.hostPadding-1)>1||layout.overflow>1||layout.pills||!layout.headings||!layout.icons||layout.status.includes('LAN is ready'))throw Error('Main layout failed in '+language+': '+JSON.stringify(layout));
@@ -155,6 +164,18 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     await run("animationProbe.disconnect();document.querySelector('#refresh-discovery').click();true");await until(()=>run("document.querySelector('#network-list').classList.contains('data-feedback')"));
     log('Update progress stays visible outside Settings and a failed update reports its error');
     if(!await run("!!document.querySelector('.favorite-actions .mi.shortcut') && !!document.querySelector('.favorite-actions .mi.screen_share')"))throw Error('Saved computer actions omitted shortcut/connect icons');
+    await run("window.shiftPackets=[];role='viewer';allowedControl=true;peerKeyboardSync=true;guestKeyboardLayout='00000409';controlChannel={readyState:'open',bufferedAmount:0,send:value=>shiftPackets.push(JSON.parse(value)),close:()=>{}};showSession();stage.focus();true");
+    host.webContents.send('grabbed-key',{vk:0xBF,scan:0x35,extended:false,down:true,shift:true,ctrl:false});
+    await until(()=>run('shiftPackets.length===2'));
+    for(const data of [{vk:0xBF,scan:0x35,down:false,shift:true},{vk:0xA1,scan:0x36,down:false,shift:true},{vk:0xBF,scan:0x35,down:true,shift:false},{vk:0xBF,scan:0x35,down:false,shift:false}])host.webContents.send('grabbed-key',{extended:false,ctrl:false,...data});
+    await until(()=>run('shiftPackets.length===6'));
+    if(!await run("shiftPackets[0].code==='ShiftLeft'&&shiftPackets[0].down&&shiftPackets[1].type==='physical-key'&&shiftPackets[3].code==='ShiftLeft'&&!shiftPackets[3].down&&shiftPackets.every(p=>p.layout==='00000409')"))throw Error('Native Shift snapshot did not recover and release the remote modifier');
+    await run("stage.dispatchEvent(new KeyboardEvent('keydown',{code:'ShiftRight',shiftKey:true,bubbles:true,cancelable:true}));true");await until(()=>run('shiftPackets.length===7'));
+    host.webContents.send('grabbed-key',{vk:0xA1,scan:0x36,extended:false,down:false,shift:true});await until(()=>run('shiftPackets.length===8'));
+    if(!await run("shiftPackets[6].code==='ShiftRight'&&shiftPackets[6].type==='key'&&shiftPackets[7].code==='ShiftRight'&&!shiftPackets[7].down"))throw Error('DOM/native Shift handoff used mismatched key representations');
+    await run("sendGuestKey({type:'key',code:'Slash',down:true},false,true).then(()=>true)");await run('stopSession(false);true');
+    if(!await run('guestShift.held.size===0'))throw Error('Session teardown retained a Shift modifier');
+    log('Native modifier snapshots recover held Shift, DOM/native handoff releases the same key, and teardown resets modifiers');
     await run("window.sentEnd=[];role='viewer';sessionRoute='lan-viewer';directSocket={readyState:1,send:value=>sentEnd.push(JSON.parse(value)),close:()=>{}};updateControls();api.fitVideo({width:3840,height:2160}).then(()=>true)");
     const initial=host.getContentBounds(),target={width:Math.min(720,initial.width),height:Math.min(440,initial.height)};host.setContentSize(target.width,target.height);await run('api.fitVideo(null).then(()=>true)');await run('api.fitVideo({width:3840,height:2160}).then(()=>true)');
     const remembered=host.getContentBounds();if(remembered.width>target.width+2||remembered.height>target.height+2||initial.width<remembered.width)throw Error('Remote window did not respect last size/available display');

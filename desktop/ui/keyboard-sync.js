@@ -20,4 +20,32 @@ class LayoutSync {
     return true;
   }
 }
-if (typeof module !== 'undefined') module.exports = { LayoutSync }; else window.LayoutSync = LayoutSync;
+// Native capture and DOM fallback can take over while Shift is already held.
+// Use one key representation for modifiers and recover a missing down/up from
+// the modifier snapshot on the next ordinary key, on the same ordered stream.
+class GuestShiftState {
+  constructor() { this.held = new Set(); this.recovered = false; }
+  reset() { this.held.clear(); this.recovered = false; }
+  packets(data, shift) {
+    let code = data.code;
+    if (data.type === 'physical-key') {
+      if (data.vk === 0xA1 || data.vk === 0x10 && data.scan === 0x36) code = 'ShiftRight';
+      else if (data.vk === 0xA0 || data.vk === 0x10) code = 'ShiftLeft';
+    }
+    if (code === 'ShiftLeft' || code === 'ShiftRight') {
+      if (this.recovered) {
+        this.recovered = false; this.held.delete('ShiftLeft');
+        if (!data.down) return [{ type: 'key', code: 'ShiftLeft', down: false }];
+        this.held.add(code);
+        return code === 'ShiftRight' ? [{ type: 'key', code, down: true }, { type: 'key', code: 'ShiftLeft', down: false }] : [{ type: 'key', code, down: true }];
+      }
+      if (data.down) this.held.add(code); else this.held.delete(code);
+      return [{ type: 'key', code, down: data.down }];
+    }
+    const packets = [];
+    if (shift === true && !this.held.size) { this.held.add('ShiftLeft'); this.recovered = true; packets.push({ type: 'key', code: 'ShiftLeft', down: true }); }
+    else if (shift === false && this.held.size) { for (const code of this.held) packets.push({ type: 'key', code, down: false }); this.reset(); }
+    packets.push(data); return packets;
+  }
+}
+if (typeof module !== 'undefined') module.exports = { LayoutSync, GuestShiftState }; else { window.LayoutSync = LayoutSync; window.GuestShiftState = GuestShiftState; }
