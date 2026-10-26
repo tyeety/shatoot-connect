@@ -281,7 +281,7 @@ function bindChannel(channel) {
     if (data.type === 'layout-sync' && channel.label === 'control' && allowedControl) { if (layoutSync.receive(data)) { guestKeyboardLayout = data.layout; api.applyKeyboard(data.layout).catch(e => status(e.message, true)); } return; }
     if (role !== 'host') return;
     if (data.type === 'profile' && channel.label === 'control' && config.profiles[data.name]) {
-      applyProfile(data.name).catch(e => status(`تنظیم کیفیت ناموفق بود: ${e.message}`, true));
+      applyProfile(data.name).catch(e => status(tr('Quality change failed: ') + tr(e.message), true));
     } else if (allowedControl) api.input(data);
   };
 }
@@ -532,7 +532,7 @@ $('host-stop').onclick = () => {
 async function joinTarget(record) {
   if(role!=='idle'||outgoingAttempt)return;
   const attempt=new window.ConnectionAttempt();outgoingAttempt=attempt;role='joining';updateControls();
-  joinTimer=setTimeout(()=>{if(outgoingAttempt!==attempt)return;stopSession(true);status('زمان انتظار اتصال تمام شد؛ تأیید میزبان و تنظیمات شبکه را بررسی کنید.',true);},60000);
+  joinTimer=setTimeout(()=>{if(outgoingAttempt!==attempt)return;stopSession(true);status('Connection timed out. Check host approval and network settings.',true);},60000);
   try{
     if(record?.endpoint){
       if(config.internetEnabled===false){config.internetEnabled=await attempt.wait(api.internetEnabled(true));$('internet-enabled').checked=true;}
