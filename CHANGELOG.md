@@ -13,6 +13,19 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.21.0 — 2026-10-26
+
+### Changed
+
+- Shared mouse control is now the default, with a one-time migration of existing installations. The limited independent pointer remains available by disabling Use shared mouse in Host and access. Remote moves, clicks and wheel events use absolute SendInput coordinates across the virtual desktop, and moves travel on the ordered button/key channel to preserve drag ordering.
+- All host sessions in one app instance use one native input worker. Only one authorized viewer can inject input at a time; held buttons/keys prevent handoff. A controller's idle turn expires after two seconds with no held inputs. Physical host mouse/keyboard activity preempts remote input and pauses all viewers until the host is quiet for two seconds with no physical buttons/keys held. Viewer status explains host activity or another controller.
+
+### Fixed
+
+- Focus loss, channel failure, session end and helper EOF release held remote inputs. Ending one non-controlling viewer does not release the active viewer's keys. The optional independent mode cancels unfinished button/menu actions instead of invoking them during release. Physical host keys/buttons are not artificially released, and host activity discards borrowed keyboard-layout restoration so it cannot override the host's layout choice.
+- Late one-way input, presence and signaling events from a closed window are rejected without throwing an uncaught IPC error. Frame and session validation remain enforced.
+- Native regression coverage drives the real stdin worker and Windows input stream to drag, select text, resize a window and release a held button on EOF, and verifies injected input does not trigger the physical-host monitor. Arbitration tests cover held drags/keys, idle handoff, host priority and invalid packets. The capture quality test now checks source-relative resolution and actual constraints on smaller displays.
+
 ## 0.20.9 — 2026-10-25
 
 ### Fixed

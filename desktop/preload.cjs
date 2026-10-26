@@ -111,5 +111,6 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   chatClipboard: (operation,token) => ipcRenderer.invoke('chat-clipboard',operation,token),
   desktopCardPreview: () => ipcRenderer.invoke('desktop-card-preview'),
   onEmergency: callback => ipcRenderer.on('emergency-stop', () => callback()),
-  onInputError: callback => ipcRenderer.on('input-error', () => callback())
+  onInputError: callback => ipcRenderer.on('input-error', () => callback()),
+  onInputState: callback => ipcRenderer.on('input-state', (_event, data) => callback(data))
 });

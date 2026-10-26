@@ -49,6 +49,7 @@ sealed class KeyboardSync {
         }
         originals.Clear();
     }
+    public void Forget() => originals.Clear();
     public static void Monitor() {
         var requests = new System.Collections.Concurrent.ConcurrentQueue<string>(); int ended = 0;
         _ = Task.Run(() => { string? line; while ((line = Console.ReadLine()) != null) if (line.Length <= 64) requests.Enqueue(line); Volatile.Write(ref ended, 1); });

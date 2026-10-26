@@ -4,6 +4,7 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
   const run=code=>host.webContents.executeJavaScript(code),pause=ms=>new Promise(r=>setTimeout(r,ms));
   const until=async fn=>{for(let i=0;i<400;i++){if(await fn())return;await pause(50)}throw Error('Connection UI timed out: '+fn.toString())};
   await until(()=>run('window.shatootconnectReady===true'));
+  if(!await run("config.sharedCursor===true&&document.querySelector('#shared-cursor').checked"))throw Error('Shared mouse was not the migrated/default input mode');
   await run("document.querySelector('#settings-dialog').showModal();window.tabSelects=[];window.originalSelectSettingsTab=selectSettingsTab;selectSettingsTab=(...args)=>{tabSelects.push(args[0]);return originalSelectSettingsTab(...args)};true");
   for(const tab of ['host','lan','display','internet','general','profile','chat','updates']){
     const point=await run(`(()=>{const r=document.querySelector('#tab-${tab}').getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);

@@ -20,6 +20,21 @@ if (smoke) {
 const crashProbe=smoke&&process.argv.includes('--crash-recorder-smoke');
 const diagnostic=smoke&&!crashProbe?()=>{}:require('./diagnostics.cjs').installProcessDiagnostics({app,process,crashReporter:require('electron').crashReporter});
 const states = new Map();
+let hostInputHelper;
+const inputControl=new (require('./input-control.cjs').InputControl)({
+  release:s=>{if(s.helper?.stdin.writable)s.helper.stdin.write('{"type":"release"}\n{"type":"layout-stop"}\n');},
+  changed:()=>publishInputControl()
+});
+let configuredController;
+function publishInputControl(){
+  const owner=inputControl.owner;
+  if(owner&&owner!==configuredController&&owner.helper?.stdin.writable&&owner.inputBounds){owner.helper.stdin.write(JSON.stringify({type:'bounds',...owner.inputBounds,sharedCursor:owner.sharedCursor!==false})+'\n');syncCursorExclusions(owner);}
+  configuredController=owner;
+  for(const s of states.values())if(s.control&&s.hostInput&&!s.win.isDestroyed()){
+    const reason=inputControl.reason(s);if(s.inputReason!==reason){s.inputReason=reason;s.win.webContents.send('input-state',{type:'input-state',reason});}
+  }
+}
+setInterval(()=>{inputControl.tick();publishInputControl();},150).unref();
 let localServer, tray, quitting = false;
 let settingsCache;
 const profile = () => ({ ...require('../shared/profile.cjs').profile(settings().profile), name: settings().profile?.name || require('node:os').hostname() });
@@ -69,7 +84,7 @@ ipcMain.handle('computer-card',(e,operation,value={})=>{
   if(operation==='reorder-pins'){preferences.reorderComputers(value.order);computerChanged();return;}
   throw new Error('Invalid computer card operation.');
 });
-ipcMain.on('desktop-viewing',(e,value)=>{state(e).outgoingDesktop=value===true;});
+ipcMain.on('desktop-viewing',(e,value)=>{const s=state(e,false);if(s)s.outgoingDesktop=value===true;});
 let launchFavorite = process.argv.find(value => /^--connect-saved=[a-f0-9-]{36}$/.test(value))?.split('=')[1];
 let stableLauncher;
 function getLauncher(){
@@ -98,15 +113,17 @@ function identity() {
 if(!smoke){const locked=app.requestSingleInstanceLock();if(!locked||process.argv.includes('--quit-if-background'))app.quit();}
 
 function release(s) {
+  inputControl.drop(s);
   hideGuestCursor(s);
   s.control = false;
   s.exchangeAllowed = false; s.grab?.stdin.end(); s.grab = null;
   s.transfers?.reset().catch(() => {}); s.clipboardProc?.stdin.end(); s.clipboardProc = null;
-  if (s.helper?.stdin.writable) s.helper.stdin.write('{"type":"release"}\n{"type":"layout-stop"}\n');
+  if (!s.hostInput&&s.helper?.stdin.writable) s.helper.stdin.write('{"type":"release"}\n{"type":"layout-stop"}\n');
+  if(s.hostInput){s.helper=null;s.hostInput=false;if(![...states.values()].some(other=>other!==s&&other.hostInput&&other.control)){hostInputHelper?.stdin.end();hostInputHelper=null;inputControl.host(false);}}
 }
 function syncCursorExclusions(s) {
   if (!s.helper?.stdin.writable) return;
-  const handles = [s.overlay,s.guestCursor,...[...states.values()].map(other=>other.chatWindow),...[...notices.entries.values()].map(record=>record.win)].filter(win=>win && !win.isDestroyed()).map(win=>{const h=win.getNativeWindowHandle();return (h.length===8?h.readBigUInt64LE():BigInt(h.readUInt32LE())).toString(16);});
+  const handles = [...[...states.values()].flatMap(other=>[other.overlay,other.guestCursor,other.chatWindow]),...[...notices.entries.values()].map(record=>record.win)].filter(win=>win && !win.isDestroyed()).map(win=>{const h=win.getNativeWindowHandle();return (h.length===8?h.readBigUInt64LE():BigInt(h.readUInt32LE())).toString(16);});
   s.helper.stdin.write(JSON.stringify({type:'exclude-windows',handles})+'\n');
 }
 function hideGuestCursor(s) {
@@ -115,7 +132,7 @@ function hideGuestCursor(s) {
   if(win && !win.isDestroyed())win.destroy(); syncCursorExclusions(s);
 }
 ipcMain.on('guest-cursor',(e,data)=>{
-  const s=state(e);
+  const s=state(e,false);if(!s)return;
   if(!s.captureAllowed || !s.source || s.showGuestCursor===false || !data || typeof data.visible!=='boolean')return;
   if(!data.visible){s.guestPointerData=null;s.guestCursor?.hide();return;}
   if(!Number.isFinite(data.x)||!Number.isFinite(data.y)||data.x<0||data.x>1||data.y<0||data.y>1)return;
@@ -161,22 +178,24 @@ function showHostOverlay(s) {
   overlay.once('ready-to-show', () => { if (s.captureAllowed && !overlay.isDestroyed()) { overlay.showInactive(); overlay.setAlwaysOnTop(true, 'screen-saver'); } });
   overlay.loadFile(path.join(__dirname, 'ui/host-overlay.html'));
 }
-function helper(s) {
+function helper(s,hosting=false) {
+  if(hosting&&hostInputHelper&&!hostInputHelper.killed){s.hostInput=true;s.helper=hostInputHelper;return s.helper;}
+  if(hosting&&s.helper){s.helper.stdin.end();s.helper=null;}
   if (s.helper && !s.helper.killed) return s.helper;
   const exe = app.isPackaged ? path.join(process.resourcesPath, 'input', 'ShatootConnect.Input.exe') : path.join(__dirname, '../native/publish/ShatootConnect.Input.exe');
   if (!fs.existsSync(exe)) throw new Error('ابتدا npm run build:native را اجرا کنید.');
   s.helper = spawn(exe, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const proc=s.helper;if(hosting){s.hostInput=true;hostInputHelper=proc;}
   let output = '';
-  s.helper.stdout.on('data', chunk => { output += chunk; if (output.length > 16000) output = ''; let end; while ((end = output.indexOf('\n')) >= 0) { const line = output.slice(0, end); output = output.slice(end + 1); try { const data = JSON.parse(line); if (data.type === 'layout-status' && !s.win.isDestroyed()) s.win.webContents.send('keyboard-applied', data); } catch {} } });
-  s.helper.stdin.on('error', () => { s.control = false; });
-  s.helper.on('error', () => { s.control = false; s.helper = null; });
-  s.helper.on('exit', () => { s.control = false; s.helper = null; });
-  s.helper.stderr.on('data', () => { if (!s.win.isDestroyed()) s.win.webContents.send('input-error'); });
+  proc.stdout.on('data', chunk => { output += chunk; if (output.length > 16000) output = ''; let end; while ((end = output.indexOf('\n')) >= 0) { const line = output.slice(0, end); output = output.slice(end + 1); try { const data = JSON.parse(line);if(hosting&&data.type==='host-activity'){if(hostInputHelper===proc)inputControl.host(data.active===true);continue;}const target=hosting?inputControl.owner:s;if (data.type === 'layout-status' && target&&!target.win.isDestroyed()) target.win.webContents.send('keyboard-applied', data); } catch {} } });
+  const failed=()=>{for(const target of states.values())if(target.helper===proc){target.helper=null;inputControl.drop(target);target.control=false;if(!target.win.isDestroyed()){target.win.webContents.send('input-state',{type:'input-state',reason:'unavailable'});target.win.webContents.send('input-error');}}if(hostInputHelper===proc){hostInputHelper=null;inputControl.host(false);}};
+  proc.stdin.on('error',failed);proc.on('error',failed);proc.on('exit',failed);
+  proc.stderr.on('data', () => { const target=hosting?inputControl.owner:s;if(target&&!target.win.isDestroyed())target.win.webContents.send('input-error'); });
   return s.helper;
 }
-function state(event) {
-  const s = states.get(event.sender.id) || [...states.values()].find(s => s.chatWindow?.webContents === event.sender);
-  if (!s || event.senderFrame !== event.sender.mainFrame) throw new Error('Unauthorized IPC');
+function state(event,required=true) {
+  const s = !event.sender.isDestroyed()&&(states.get(event.sender.id) || [...states.values()].find(s => s.chatWindow&&!s.chatWindow.isDestroyed()&&s.chatWindow.webContents === event.sender));
+  if (!s || event.senderFrame !== event.sender.mainFrame) {if(required)throw new Error('Unauthorized IPC');return null;}
   return s;
 }
 const notices=require('./notifications.cjs').createNotifications({BrowserWindow,ipcMain,screen,language:()=>settings().language==='fa'?'fa':'en',windowsChanged:()=>{for(const s of states.values())syncCursorExclusions(s);},activity:()=>!app.isReady()||smoke||powerMonitor.getSystemIdleTime()<30});
@@ -249,7 +268,7 @@ ipcMain.handle('host-session', async (e, message, route, sourceId) => {
   if (['desktop-ready','desktop-signal'].includes(message.type)) s.win.webContents.send('host-signal', message);
 });
 ipcMain.handle('host-init', e => { const s = state(e); if (!s.owner) throw new Error('Invalid desktop worker.'); return { invitation: s.invitation, source: s.sourceId, lan: s.hostRoute === 'lan-host', profiles: PROFILES, profile: settings().qualityProfile || 'speed' }; });
-ipcMain.on('host-send', (e, message) => { const s = state(e); if (!s.owner || !message || !['desktop-accept','desktop-reject','desktop-signal','desktop-end'].includes(message.type) || JSON.stringify(message).length > 110000) return; if (['desktop-accept','desktop-signal'].includes(message.type) && !s.captureAllowed) return; hostReply(s,message); if (['desktop-reject','desktop-end'].includes(message.type)) closeExtraHost(s); });
+ipcMain.on('host-send', (e, message) => { const s = state(e,false); if (!s?.owner || !message || !['desktop-accept','desktop-reject','desktop-signal','desktop-end'].includes(message.type) || JSON.stringify(message).length > 110000) return; if (['desktop-accept','desktop-signal'].includes(message.type) && !s.captureAllowed) return; hostReply(s,message); if (['desktop-reject','desktop-end'].includes(message.type)) closeExtraHost(s); });
 ipcMain.handle('host-sessions-stop', e => { const owner = state(e); for (const s of states.values()) if (s.owner === owner) closeExtraHost(s); });
 const chatPending = new Map();
 ipcMain.handle('app-ready',e=>{
@@ -286,7 +305,7 @@ ipcMain.handle('chat-call', (e, operation, args = []) => {
   return new Promise((resolve,reject) => { const timer = setTimeout(() => { chatPending.delete(id); reject(new Error('Chat operation timed out.')); }, operation === 'sendFiles' ? 1800000 : 75000); chatPending.set(id, { s, resolve, reject, timer }); s.win.webContents.send('chat-command', { id, operation, args }); });
 });
 ipcMain.on('chat-result', (e, data) => { const pending = chatPending.get(data?.id); if (!pending || pending.s.win.webContents !== e.sender || e.senderFrame !== e.sender.mainFrame) return; clearTimeout(pending.timer); chatPending.delete(data.id); data.error ? pending.reject(new Error(data.error)) : pending.resolve(data.value); });
-ipcMain.on('chat-publish', (e, value) => { const s = state(e); if (s.win.webContents !== e.sender) return; if(s.chatStore)value={...value,catalog:{...value.catalog,unread:s.chatStore.unread(),muted:{...s.chatStore.load().muted},pins:{...s.chatStore.load().pins},pinOrder:[...(s.chatStore.load().pinOrder||[])],lastSelected:s.chatStore.load().lastSelected||''}};if (s.chatWindow && !s.chatWindow.isDestroyed()) s.chatWindow.webContents.send('chat-snapshot', value); });
+ipcMain.on('chat-publish', (e, value) => { const s = state(e,false); if (!s||s.win.webContents !== e.sender) return; if(s.chatStore)value={...value,catalog:{...value.catalog,unread:s.chatStore.unread(),muted:{...s.chatStore.load().muted},pins:{...s.chatStore.load().pins},pinOrder:[...(s.chatStore.load().pinOrder||[])],lastSelected:s.chatStore.load().lastSelected||''}};if (s.chatWindow && !s.chatWindow.isDestroyed()) s.chatWindow.webContents.send('chat-snapshot', value); });
 let installingUpdate=false;
 ipcMain.handle('update', async (e, operation) => {
   state(e);
@@ -365,8 +384,8 @@ ipcMain.handle('lan-open', (event, id, endpoint) => {
   ws.on('error', () => emit({ type: 'error', message: 'LAN connection failed. Check the address, firewall and VPN LAN access.' }));
   ws.on('close', () => { s.lanSockets.delete(id); emit({ type: 'close' }); });
 });
-ipcMain.on('lan-send', (event, id, value) => { const ws = state(event).lanSockets?.get(id); if (ws?.readyState === 1 && typeof value === 'string' && Buffer.byteLength(value) <= 110000) ws.send(value); });
-ipcMain.on('lan-close', (event, id) => state(event).lanSockets?.get(id)?.close());
+ipcMain.on('lan-send', (event, id, value) => { const ws = state(event,false)?.lanSockets?.get(id); if (ws?.readyState === 1 && typeof value === 'string' && Buffer.byteLength(value) <= 110000) ws.send(value); });
+ipcMain.on('lan-close', (event, id) => state(event,false)?.lanSockets?.get(id)?.close());
 ipcMain.handle('discovery', event => { const s = state(event); s.discovery?.refresh(); return decorateDiscovery(s.discovery?.snapshot() || { peers: [], interfaces: [], errors: ['LAN listener is not ready.'] }); });
 function createWindow() {
   const work = screen.getPrimaryDisplay().workArea;
@@ -405,7 +424,8 @@ ipcMain.handle('config', e => {
   const endpoint = saved.endpoint || bootstrap.endpoint || (smoke ? 'ws://127.0.0.1:8787' : 'wss://connect.shatootsoft.com');
   let serverKey = bootstrap.endpoint === endpoint ? bootstrap.serverKey || '' : '';
   try { if (saved.serverKeys?.[endpoint]) serverKey = safeStorage.decryptString(Buffer.from(saved.serverKeys[endpoint], 'base64')); } catch {}
-  s.sharedCursor = saved.sharedCursor === true; s.showGuestCursor = saved.showGuestCursor !== false;
+  s.sharedCursor = saved.inputModeVersion===1?saved.sharedCursor!==false:true; s.showGuestCursor = saved.showGuestCursor !== false;
+  if(saved.inputModeVersion!==1)saveSettings({inputModeVersion:1,sharedCursor:true});
   const pendingFavorite = launchFavorite; launchFavorite = null;
   return { theme:saved.theme==='light'?'light':'dark',rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles !== false, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
 });
@@ -413,7 +433,7 @@ ipcMain.handle('internet-enabled', (e,value)=>{state(e);if(typeof value!=='boole
 ipcMain.handle('show-guest-cursor', (e,value)=>{const s=state(e);if(typeof value!=='boolean')throw new Error('Invalid cursor setting.');saveSettings({showGuestCursor:value});s.showGuestCursor=value;if(!value)hideGuestCursor(s);return value;});
 ipcMain.handle('quality-profile', (e, name) => { state(e); if (!PROFILES[name]) throw new Error('Invalid quality profile.'); saveSettings({ qualityProfile: name }); return name; });
 ipcMain.handle('show-host-cursor', (e, value) => { state(e); if (typeof value !== 'boolean') throw new Error('Invalid cursor setting.'); saveSettings({ showHostCursor: value }); return value; });
-ipcMain.handle('keyboard-apply', (e, layout) => { const s = state(e); if ((!s.control && !s.exchangeAllowed) || !/^[0-9a-f]{8}$/i.test(layout)) throw new Error('Keyboard synchronization requires control.'); if (smoke) { s.testAppliedLayout = layout; s.win.webContents.send('keyboard-layout', layout); return; } helper(s).stdin.write(JSON.stringify({ type: 'layout', layout }) + '\n'); });
+ipcMain.handle('keyboard-apply', (e, layout) => { const s = state(e); if ((!s.control && !s.exchangeAllowed) || !/^[0-9a-f]{8}$/i.test(layout)) throw new Error('Keyboard synchronization requires control.'); if (smoke) { s.testAppliedLayout = layout; s.win.webContents.send('keyboard-layout', layout); return; }if(s.hostInput&&!inputControl.accept(s,{type:'layout',layout}))return; helper(s).stdin.write(JSON.stringify({ type: 'layout', layout }) + '\n'); });
 ipcMain.handle('unattended', (e, enabled) => { const s = state(e); if (s.captureAllowed) throw new Error('End the session before changing access settings.'); return preferences.setUnattended(enabled); });
 ipcMain.handle('fixed-password', (e, value) => {
   const s = state(e); if (s.captureAllowed) throw new Error('End the current session before changing the password.');
@@ -467,7 +487,7 @@ ipcMain.handle('keyboard-current', (e) => {
 ipcMain.handle('shared-cursor', (e, enabled) => {
   const s = state(e);
   if (s.captureAllowed) throw new Error('End the current session before changing pointer mode.');
-  s.sharedCursor = enabled === true; saveSettings({ sharedCursor: s.sharedCursor }); return s.sharedCursor;
+  s.sharedCursor = enabled === true; saveSettings({ sharedCursor: s.sharedCursor,inputModeVersion:1 }); return s.sharedCursor;
 });
 ipcMain.handle('overlay-info', e => {
   const s = [...states.values()].find(value => value.overlay?.webContents === e.sender);
@@ -520,7 +540,7 @@ ipcMain.handle('direct-listener', async e => {
   try { return await s.directStarting; } finally { s.directStarting = null; }
 });
 ipcMain.on('direct-send', (e, message) => {
-  const s = state(e);
+  const s = state(e,false);if(!s)return;
   smokeLog(`direct host sending ${message?.type}`);
   if (!message || !['accept', 'reject', 'signal', 'end-session', 'hosting-busy', 'desktop-reject', 'collab-accept', 'collab-reject', 'collab-signal', 'collab-leave'].includes(message.type) || JSON.stringify(message).length > 110000) return;
   if (message.type === 'accept' && !s.captureAllowed) return;
@@ -587,9 +607,9 @@ ipcMain.handle('approve', async (e, name, fixedPassword, peer) => {
     const display = screen.getAllDisplays().find(d => String(d.id) === s.source.display_id);
     if (!display) throw new Error('نمایشگر انتخاب‌شده در دسترس نیست.');
     const bounds = screen.dipToScreenRect(null, display.bounds);
-    const proc = helper(s);
-    proc.stdin.write(JSON.stringify({ type: 'bounds', ...bounds, sharedCursor: s.sharedCursor === true }) + '\n');
+    s.inputBounds=bounds;helper(s,true);
     s.control = true;
+    s.inputReason=null;publishInputControl();
   }
   s.captureAllowed = result.response > 0;
   return { accepted: s.captureAllowed, control: s.control };
@@ -602,15 +622,18 @@ ipcMain.handle('capture-approved', async e => {
 ipcMain.handle('revoke', e => { const s = state(e);notices.cancelFor(s.win,'critical'); release(s); s.source = null; s.captureAllowed = false; hideHostOverlay(s); if (s.win.isFullScreen()) s.win.setFullScreen(false); });
 ipcMain.handle('revoke-control', e => release(state(e)));
 ipcMain.handle('release-keys', e => {
-  const s = state(e); if (s.helper?.stdin.writable) s.helper.stdin.write('{"type":"release"}\n');
+  const s = state(e);if(s.hostInput)inputControl.drop(s);else if (s.helper?.stdin.writable) s.helper.stdin.write('{"type":"release"}\n');
 });
 ipcMain.on('input', (e, data) => {
-  const s = state(e);
+  const s = state(e,false);if(!s)return;
   if (smoke && ['key', 'physical-key'].includes(data?.type)) s.testInputPackets = (s.testInputPackets || 0) + 1;
   if (smoke || !s.control || !s.helper?.stdin.writable || !data || typeof data !== 'object') return;
   if (!['move', 'button', 'wheel', 'key', 'physical-key', 'release', 'layout'].includes(data.type)) return;
   const json = JSON.stringify(data);
-  if (json.length < 2048 && s.helper.stdin.writableLength < 32768) s.helper.stdin.write(json + '\n');
+  if(json.length>=2048)return;
+  if(!inputControl.accept(s,data)){publishInputControl();return;}
+  if(s.helper.stdin.writableLength>=32768){inputControl.drop(s);return;}
+  s.helper.stdin.write(json + '\n');
 });
 ipcMain.handle('exit-fullscreen', e => { const s = state(e); if (s.win.isFullScreen()) s.win.setFullScreen(false); });
 ipcMain.handle('copy-text', (e, text) => {
@@ -925,7 +948,8 @@ async function runSmoke(host) {
   const economy = await viewer.webContents.executeJavaScript('window.shatootconnectDiagnostics()');
   smokeLog(`economy ${JSON.stringify(economy)}`);
   await viewer.webContents.executeJavaScript("document.querySelector('#live-quality').value='balanced'; document.querySelector('#live-quality').dispatchEvent(new Event('change')); true");
-  await wait(viewer, "document.querySelector('#remote-video').videoWidth > 1280");
+  await wait(host,"stream.getVideoTracks()[0].getConstraints().width.max===config.profiles.balanced.width");
+  await wait(viewer, `document.querySelector('#remote-video').videoWidth >= ${Math.min(1281,result.videoWidth)}`);
   await delay(2000);
   fs.mkdirSync(path.join(__dirname, '../artifacts'), { recursive: true });
   fs.writeFileSync(path.join(__dirname, '../artifacts/smoke-result.json'), JSON.stringify({ baseline: result, economy, restored: await viewer.webContents.executeJavaScript('window.shatootconnectDiagnostics()') }, null, 2));
@@ -997,7 +1021,8 @@ async function runSmoke(host) {
     const exit = await new Promise((resolve, reject) => { proc.once('exit', resolve); proc.once('error', reject); });
     smokeLog(`Cursor probe: ${JSON.stringify({ exit, output, errors })}`);
     await wait(target, 'window.clicks === 1', 5000);
-    if (exit !== 0 || errors || JSON.parse(output).cursorMovedByHelper !== false) throw new Error('Independent Chromium click moved the cursor or was blocked');
+    const cursorProbe=output.trim().split(/\r?\n/).map(line=>JSON.parse(line)).find(value=>Object.hasOwn(value,'cursorMovedByHelper'));
+    if (exit !== 0 || errors || cursorProbe?.cursorMovedByHelper !== false) throw new Error('Independent Chromium click moved the cursor or was blocked');
     console.log('SHATOOTCONNECT_POINTER_SMOKE', output.trim());
   } finally { coveringPanel?.destroy(); target.destroy(); }
   await viewer.webContents.executeJavaScript(`window.shatootconnect.favoriteDelete(${JSON.stringify(favorite.id)})`);

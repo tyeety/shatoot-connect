@@ -133,7 +133,12 @@ sealed class IndependentPointer {
         if (dy != 0) Post(target, 0x20A, State() | (unchecked((uint)(-dy)) & 0xffff) << 16, true);
         if (dx != 0) Post(target, 0x20E, State() | (unchecked((uint)dx) & 0xffff) << 16, true);
     }
-    public void Release() { foreach (var button in pressed.Keys.ToArray()) Button(button, false, x, y); }
+    public void Release() {
+        // A disconnect/capture loss cancels an unfinished synthetic click; it
+        // must not invoke the button or menu merely to clear its pressed state.
+        var pending=pressed.ToArray();pressed.Clear();
+        foreach(var pair in pending){var target=pair.Value;if(target.NativeButton)PostMessage(target.Window,0xF3,IntPtr.Zero,IntPtr.Zero);else if(!target.Menu&&target.Hit==1){PostMessage(target.Window,0x1F,IntPtr.Zero,IntPtr.Zero);PostMessage(target.Window,pair.Key==0?0x202u:pair.Key==2?0x205u:0x208u,IntPtr.Zero,Coordinates(-32768,-32768));}}
+    }
 
     public static int KeyboardSelfTest() {
         WindowProc procedure = (window, message, wp, lp) => DefWindowProc(window, message, wp, lp);
@@ -166,6 +171,53 @@ sealed class IndependentPointer {
         using var cancel=new Timer(_=>PostMessage(host,0x1f,IntPtr.Zero,IntPtr.Zero),null,3000,Timeout.Infinite);
         try{uint command=TrackPopupMenuEx(menu,0x100,150,150,host,IntPtr.Zero);bool ok=command==102&&Native.CursorMoveCount==originalMoves&&MenuAutomation.Actions>0;Console.WriteLine(JsonSerializer.Serialize(new{ok,command,automationActions=MenuAutomation.Actions,cursorMovedByHelper=Native.CursorMoveCount!=originalMoves}));return ok?0:1;}
         finally{DestroyMenu(menu);DestroyWindow(host);UnregisterClass(name,wc.Instance);GC.KeepAlive(procedure);}
+    }
+
+    public static int SharedSelfTest(){
+        int down=0,up=0,moves=0;bool dragging=false;POINT final=default;
+        WindowProc procedure=(w,m,wp,lp)=>{
+            if(m==0x201){down++;dragging=true;SetCapture(w);}
+            if(m==0x200&&dragging){moves++;GetCursorPos(out final);}
+            if(m==0x202&&dragging){up++;dragging=false;ReleaseCapture();}
+            return DefWindowProc(w,m,wp,lp);
+        };
+        string name="ShatootSharedTest"+Environment.ProcessId;var wc=new WNDCLASS{ClassName=name,Procedure=procedure,Instance=GetModuleHandle(null)};RegisterClass(ref wc);
+        var host=CreateWindowEx(0,name,"Shared input regression",0x80CF0000,80,80,440,300,IntPtr.Zero,IntPtr.Zero,wc.Instance,IntPtr.Zero);
+        var edit=CreateWindowEx(0,"EDIT","Select this text using a real drag",0x50810080,20,150,330,40,host,(IntPtr)20,wc.Instance,IntPtr.Zero);
+        GetCursorPos(out var original);
+        using var monitor=new HostActivity();
+        using var worker=new System.Diagnostics.Process{StartInfo=new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!){UseShellExecute=false,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,CreateNoWindow=true}};
+        var output=new System.Collections.Concurrent.ConcurrentQueue<string>();var errors=new System.Collections.Concurrent.ConcurrentQueue<string>();worker.OutputDataReceived+=(_,e)=>{if(e.Data!=null)output.Enqueue(e.Data);};worker.ErrorDataReceived+=(_,e)=>{if(e.Data!=null)errors.Enqueue(e.Data);};
+        void Pump(int ms=150){long end=Environment.TickCount64+ms;while(Environment.TickCount64<end){while(PeekMessage(out var msg,IntPtr.Zero,0,0,1)){TranslateMessage(ref msg);DispatchMessage(ref msg);}Thread.Sleep(2);}}
+        void Send(object packet){worker.StandardInput.WriteLine(JsonSerializer.Serialize(packet));worker.StandardInput.Flush();}
+        void Click(POINT point,bool pressed)=>Send(new{type="button",button=0,down=pressed,x=0.0,y=0.0});
+        void Bounds(POINT point)=>Send(new{type="bounds",x=point.X,y=point.Y,width=1,height=1,sharedCursor=true});
+        try{
+            ShowWindow(host,5);SetWindowPos(host,(IntPtr)(-1),0,0,0,0,0x0053);SetForegroundWindow(host);Pump();
+            worker.Start();worker.BeginOutputReadLine();worker.BeginErrorReadLine();
+            long deadline=Environment.TickCount64+5000;while(!output.Any(s=>s.Contains("input-ready"))&&Environment.TickCount64<deadline)Pump(20);
+            if(!output.Any(s=>s.Contains("input-ready")))throw new InvalidOperationException("Native input worker did not become ready.");
+            var start=new POINT{X=30,Y=40};ClientToScreen(host,ref start);var end=new POINT{X=300,Y=110};ClientToScreen(host,ref end);
+            SetForegroundWindow(host);Pump();
+            if(GetAncestor(WindowFromPoint(start),2)!=host)throw new InvalidOperationException("Shared input fixture is obscured; no input was sent.");
+            // Bounds span the drag, with the final point outside the start area.
+            Send(new{type="bounds",x=start.X,y=start.Y,width=end.X-start.X+1,height=end.Y-start.Y+1,sharedCursor=true});
+            Send(new{type="button",button=0,down=true,x=0.0,y=0.0});Pump();Send(new{type="move",x=1.0,y=1.0});Pump();Send(new{type="button",button=0,down=false,x=1.0,y=1.0});Pump();
+            bool drag=down==1&&up==1&&moves>0&&Math.Abs(final.X-end.X)<=2&&Math.Abs(final.Y-end.Y)<=2;
+            var textStart=new POINT{X=5,Y=12};ClientToScreen(edit,ref textStart);
+            Send(new{type="bounds",x=textStart.X,y=textStart.Y,width=180,height=1,sharedCursor=true});Send(new{type="button",button=0,down=true,x=0.0,y=0.0});Pump();Send(new{type="move",x=1.0,y=0.0});Pump();Send(new{type="button",button=0,down=false,x=1.0,y=0.0});Pump();
+            SendMessageTimeout(edit,0xB0,IntPtr.Zero,IntPtr.Zero,2,100,out var selection);bool textSelected=((selection.ToInt64()>>16)&0xffff)>(selection.ToInt64()&0xffff);
+            GetWindowRect(host,out var before);var edge=new POINT{X=before.Right-2,Y=before.Top+100};
+            Send(new{type="bounds",x=edge.X,y=edge.Y,width=42,height=1,sharedCursor=true});Send(new{type="button",button=0,down=true,x=0.0,y=0.0});Send(new{type="move",x=1.0,y=0.0});Send(new{type="button",button=0,down=false,x=1.0,y=0.0});Pump(350);
+            GetWindowRect(host,out var after);bool resized=after.Right>before.Right+20;
+            // EOF during a press must synthesize its release before exit.
+            Bounds(start);Click(start,true);Pump();worker.StandardInput.Close();deadline=Environment.TickCount64+4000;while(!worker.HasExited&&Environment.TickCount64<deadline)Pump(20);Pump();
+            bool released=down==2&&up==2&&!dragging;
+            bool classification=HostActivity.PhysicalMouse(0)&&!HostActivity.PhysicalMouse(1)&&HostActivity.PhysicalKey(0)&&!HostActivity.PhysicalKey(0x10);
+            bool quiet=!monitor.Paused&&!output.Any(s=>s.Contains("host-activity"));
+            bool ok=drag&&textSelected&&resized&&released&&quiet&&classification&&worker.HasExited&&worker.ExitCode==0;
+            Console.WriteLine(JsonSerializer.Serialize(new{ok,drag,textSelected,resized,released,physicalHooks=monitor.Ready,injectedInputIgnored=quiet,classification,down,up,moves,errors=errors.ToArray(),events=output.ToArray()}));return ok?0:1;
+        }finally{if(!worker.HasExited){worker.StandardInput.Close();if(!worker.WaitForExit(1000))worker.Kill();}DestroyWindow(host);UnregisterClass(name,wc.Instance);if(!monitor.Paused)Native.Pointer(original.X,original.Y);GC.KeepAlive(procedure);}
     }
 
     // A real Win32 button proves message delivery and checks that moving/clicking,
@@ -260,6 +312,8 @@ sealed class IndependentPointer {
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] static extern bool DestroyWindow(IntPtr window);
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT point);
+    [DllImport("user32.dll")] static extern IntPtr SetCapture(IntPtr window);
+    [DllImport("user32.dll")] static extern bool ReleaseCapture();
     [DllImport("user32.dll", EntryPoint="SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
     [DllImport("user32.dll")] static extern bool PeekMessage(out MSG msg, IntPtr window, uint min, uint max, uint remove);
     [DllImport("user32.dll")] static extern bool TranslateMessage(ref MSG msg);

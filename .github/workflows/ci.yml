@@ -31,6 +31,7 @@ jobs:
       - run: npm run test:packaged -- --ui
       - run: npm run test:installer
       - run: ./native/publish/ShatootConnect.Input.exe --self-test
+      - run: ./native/publish/ShatootConnect.Input.exe --shared-input-self-test
       - run: ./native/publish/ShatootConnect.Input.exe --menu-self-test
       - run: npm run build:server-manager
       # Screen capture needs an interactive, unlocked desktop. Run test:smoke

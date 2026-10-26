@@ -14,6 +14,9 @@ let directSocket, sessionRoute = 'server', serverIce = [], serverRelay = false;
 let exchange, keyboardGrabActive = false, layoutSync, hostCursor, hostPasswordValue = '', hostPasswordShown = false, lastLocalCursor;
 let supportsFixedPassword = false, guestKeyboardLayout = '', keyboardTimer, keyboardQueue = Promise.resolve(), keyboardEpoch = 0, peerKeyboardSync = false;
 let connectionAttempt, recallRevision=0;
+let hostInputState={type:'input-state',reason:'ready'},remoteInputReason='ready';
+function inputLabel(updateStatus=false){ $('control-label').textContent=tr(!allowedControl?'View only':remoteInputReason==='unavailable'?'Remote input is unavailable. Reconnect.':remoteInputReason==='host'?'Control paused while the host is active':remoteInputReason==='busy'?'Another guest is controlling':'Mouse and keyboard enabled');if(updateStatus&&role==='viewer'&&allowedControl)status(remoteInputReason==='ready'?'Connected. Click the video to send mouse and keyboard input.':$('control-label').textContent,remoteInputReason==='unavailable'); }
+api.onInputState(data=>{hostInputState=data;if(role==='host'&&controlChannel?.readyState==='open')controlChannel.send(JSON.stringify(data));});
 function signalReady() { return sessionRoute === 'lan-host' || (sessionRoute === 'lan-viewer' ? directSocket : socket)?.readyState === WebSocket.OPEN; }
 
 function status(message, error = false) { if(error && role==='viewer' && $('file-transfer-status')){$('file-transfer-status').hidden=false;$('file-transfer-status').textContent=tr(message);} if ($('settings-status')) { $('settings-status').textContent = tr(message); $('settings-status').classList.toggle('error', error); } $('session-status').textContent = tr(message); $('session-status').classList.toggle('error', error); }
@@ -250,6 +253,7 @@ function bindChannel(channel) {
     if (opened || generation !== peerGeneration) return; opened = true;
     if (channel.label === 'pointer' && role === 'host' && lastLocalCursor) channel.send(JSON.stringify({ ...lastLocalCursor, visible: config.showHostCursor && lastLocalCursor.visible }));
     if (channel.label === 'control') api.watchKeyboard(true).catch(e => status(e.message, true));
+    if(channel.label==='control'&&role==='host')channel.send(JSON.stringify(hostInputState));
     if (role === 'viewer' && channel.label === 'control') {
       channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true }));
       channel.send(JSON.stringify({ type: 'profile', name: $('quality').value }));
@@ -262,6 +266,7 @@ function bindChannel(channel) {
     if (typeof event.data !== 'string' || event.data.length > 2048) return;
     let data; try { data = JSON.parse(event.data); } catch { return; }
     if (!data || typeof data !== 'object') return;
+    if(role==='viewer'&&channel.label==='control'&&data.type==='input-state'&&['ready','host','busy','unavailable'].includes(data.reason)){if(data.reason!==remoteInputReason){remoteInputReason=data.reason;if(remoteInputReason!=='ready')releaseGuestKeyboard();inputLabel(true);}return;}
     if (data.type === 'features' && channel.label === 'control') {
       if (role === 'host' && data.keyboardSync === true) channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true }));
       if (role === 'viewer') { peerKeyboardSync = data.keyboardSync === true && data.bidirectionalLayout === true; layoutSync.ready = peerKeyboardSync; if (allowedControl) { layoutSync.observed = ''; const initial = layoutSync.observe(guestKeyboardLayout); if (initial) controlChannel.send(JSON.stringify(initial)); } } else layoutSync.ready = data.bidirectionalLayout === true;
@@ -314,7 +319,7 @@ async function applyProfile(name) {
 function showSession() {
   $('session-panel').hidden = false; $('open-received').hidden = true; $('file-transfer-status').hidden=true;
   $('session-title').textContent = role==='host'?'صفحهٔ شما در حال اشتراک‌گذاری است':remoteComputer.displayName||'میز کار از راه دور';
-  $('control-label').textContent = allowedControl ? 'موس و کیبورد فعال' : 'فقط مشاهده';
+  inputLabel();
   $('live-quality').value = $('quality').value;
   $('live-quality').hidden = role !== 'viewer';
   $('video-stage').hidden = role === 'host';
@@ -332,6 +337,7 @@ function closePeer() {
   guestCursorPosition=null; keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); exchange?.close(); exchange = null;
   keyboardEpoch++; guestKeyboardLayout = ''; layoutSync = null; hostCursor = null; $('host-cursor').hidden = true;
   peerKeyboardSync = false;
+  remoteInputReason='ready';hostInputState={type:'input-state',reason:'ready'};
   exitVideoFullscreen().catch(() => {});
   peerGeneration++; requestSerial++; requestPending = false; allowedControl = false;
   api.revokeControl().catch(() => {});
@@ -400,9 +406,12 @@ function position(event) {
 function input(data, pointer = false) {
   if (data.type === 'release') keyboardEpoch++;
   if (role !== 'viewer' || !allowedControl) return;
-  const channel = pointer ? pointerChannel : controlChannel;
+  if(remoteInputReason!=='ready'&&data.type!=='release')return;
+  // Moves share the ordered stream with down/up. Only visual pointer markers
+  // use the disposable unordered channel, so a late move cannot corrupt a drag.
+  const channel = data.type==='move'?controlChannel:pointer ? pointerChannel : controlChannel;
   if (channel?.readyState === 'open' && channel.bufferedAmount < 32768) channel.send(JSON.stringify(data));
-  else if (!pointer && channel?.readyState === 'open') stopSession(true); // Never silently lose a key-up.
+  else if (data.type!=='move'&&!pointer && channel?.readyState === 'open') stopSession(true); // Never silently lose a key-up.
 }
 const stage = $('video-stage');
 const activeGuestPointers = new Set(); let guestCursorPosition;
