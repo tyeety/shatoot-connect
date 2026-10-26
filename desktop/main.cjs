@@ -7,6 +7,10 @@ const { PROFILES } = require('../shared/protocol.cjs');
 const crypto = require('node:crypto');
 const network = require('../shared/network.cjs');
 
+// Peers on routed LAN/VPN subnets cannot resolve link-local mDNS ICE names.
+// This app loads only its bundled UI; publish usable host candidates to consented peers.
+app.commandLine.appendSwitch('disable-features',[app.commandLine.getSwitchValue('disable-features'),'WebRtcHideLocalIpsWithMdns'].filter(Boolean).join(','));
+
 const smoke = !app.isPackaged && process.argv.includes('--smoke-test');
 if(smoke&&process.argv.includes('--chat-notification-smoke'))app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 if (smoke) { app.setPath('userData', path.join(__dirname, '../artifacts/smoke-profile')); const desktop = path.join(__dirname, '../artifacts/test-desktop'); fs.mkdirSync(desktop, { recursive: true }); app.setPath('desktop', desktop); const downloads = path.join(__dirname, '../artifacts/test-downloads'); fs.mkdirSync(downloads, { recursive: true }); app.setPath('downloads', downloads); }
@@ -752,7 +756,7 @@ app.whenReady().then(async () => {
   if (!smoke) for (const record of preferences.list()) if (record.shortcut && fs.existsSync(path.join(app.getPath('desktop'), preferences.shortcutName(record.id)))) { try { createFavoriteShortcut(record.id); } catch {} }
   if (smoke) {
     setTimeout(() => { smokeLog('Watchdog timeout');try{console.error(fs.readFileSync(path.join(__dirname,'../artifacts/smoke.log'),'utf8').split('\n').slice(-25).join('\n'));}catch{}app.exit(1); }, 240000).unref();
-    const run=process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,dialog,update,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
+    const run=process.argv.includes('--ice-smoke')?host=>require('../tests/ice-smoke.cjs')({host,app,log:smokeLog}):process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,dialog,update,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
     run(win).catch(error => { smokeLog(error.stack); console.error(error); app.exit(1); });
   }
 });

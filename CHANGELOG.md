@@ -13,6 +13,17 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.22.2 — 2026-10-26
+
+### Fixed
+
+- The bundled desktop client advertises numeric WebRTC host candidates instead of link-local mDNS names. This allows authenticated LAN/VPN peers on routed subnets to attempt connectivity without multicast name resolution. The setting is limited to this application's Chromium process and leaves network firewalls and system browsers unchanged.
+- A real Electron ICE smoke test verifies usable IPv4/UDP host candidates and rejects `.local` candidates; Windows checks and release builds run it before UI acceptance.
+
+### Changed
+
+- Removed the Tomorrow at 8 AM preset button from the scheduled-message dialog. Date/time selection and existing schedules remain available.
+
 ## 0.22.1 — 2026-10-26
 
 ### Added

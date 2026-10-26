@@ -1,6 +1,6 @@
 {
   "name": "shatoot-connect",
-  "version": "0.22.1",
+  "version": "0.22.2",
   "description": "Windows remote desktop, LAN discovery, peer-to-peer chat, groups and file transfer",
   "main": "desktop/main.cjs",
   "private": true,
@@ -28,6 +28,7 @@
     "test:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File build/test-installer.ps1",
     "test:packaged": "node build/test-packaged.cjs",
     "build:server-manager": "dotnet publish server-manager/ShatootConnect.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o server-manager/publish",
+    "test:ice-ui": "electron . --smoke-test --ice-smoke",
     "test:connection-ui": "electron . --smoke-test --connection-ui-smoke"
   },
   "dependencies": {
