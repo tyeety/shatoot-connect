@@ -13,6 +13,13 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.22.4 — 2026-10-26
+
+### Fixed
+
+- Remote keyboard input recovers a held Shift from native/DOM modifier snapshots before sending an ordinary key, so a missed initial modifier event no longer turns Shift+Slash into Slash. Shift events use the same key representation across capture handoffs; missing key-up, right Shift release, control pauses and session teardown clear the modifier consistently.
+- Unit and Electron UI tests cover Shift recovery, left/right modifiers, native/DOM handoff, key-up repair and session cleanup. A manual Windows text-field probe exercises the real input helper and stops when physical host input or focus changes interrupt the test.
+
 ## 0.22.3 — 2026-10-26
 
 ### Fixed

@@ -156,6 +156,18 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     await run("animationProbe.disconnect();document.querySelector('#refresh-discovery').click();true");await until(()=>run("document.querySelector('#network-list').classList.contains('data-feedback')"));
     log('Update progress stays visible outside Settings and a failed update reports its error');
     if(!await run("!!document.querySelector('.favorite-actions .mi.shortcut') && !!document.querySelector('.favorite-actions .mi.screen_share')"))throw Error('Saved computer actions omitted shortcut/connect icons');
+    await run("window.shiftPackets=[];role='viewer';allowedControl=true;peerKeyboardSync=true;guestKeyboardLayout='00000409';controlChannel={readyState:'open',bufferedAmount:0,send:value=>shiftPackets.push(JSON.parse(value)),close:()=>{}};showSession();stage.focus();true");
+    host.webContents.send('grabbed-key',{vk:0xBF,scan:0x35,extended:false,down:true,shift:true,ctrl:false});
+    await until(()=>run('shiftPackets.length===2'));
+    for(const data of [{vk:0xBF,scan:0x35,down:false,shift:true},{vk:0xA1,scan:0x36,down:false,shift:true},{vk:0xBF,scan:0x35,down:true,shift:false},{vk:0xBF,scan:0x35,down:false,shift:false}])host.webContents.send('grabbed-key',{extended:false,ctrl:false,...data});
+    await until(()=>run('shiftPackets.length===6'));
+    if(!await run("shiftPackets[0].code==='ShiftLeft'&&shiftPackets[0].down&&shiftPackets[1].type==='physical-key'&&shiftPackets[3].code==='ShiftLeft'&&!shiftPackets[3].down&&shiftPackets.every(p=>p.layout==='00000409')"))throw Error('Native Shift snapshot did not recover and release the remote modifier');
+    await run("stage.dispatchEvent(new KeyboardEvent('keydown',{code:'ShiftRight',shiftKey:true,bubbles:true,cancelable:true}));true");await until(()=>run('shiftPackets.length===7'));
+    host.webContents.send('grabbed-key',{vk:0xA1,scan:0x36,extended:false,down:false,shift:true});await until(()=>run('shiftPackets.length===8'));
+    if(!await run("shiftPackets[6].code==='ShiftRight'&&shiftPackets[6].type==='key'&&shiftPackets[7].code==='ShiftRight'&&!shiftPackets[7].down"))throw Error('DOM/native Shift handoff used mismatched key representations');
+    await run("sendGuestKey({type:'key',code:'Slash',down:true},false,true).then(()=>true)");await run('stopSession(false);true');
+    if(!await run('guestShift.held.size===0'))throw Error('Session teardown retained a Shift modifier');
+    log('Native modifier snapshots recover held Shift, DOM/native handoff releases the same key, and teardown resets modifiers');
     await run("window.sentEnd=[];role='viewer';sessionRoute='lan-viewer';directSocket={readyState:1,send:value=>sentEnd.push(JSON.parse(value)),close:()=>{}};updateControls();api.fitVideo({width:3840,height:2160}).then(()=>true)");
     const initial=host.getContentBounds();host.setContentSize(720,440);await run('api.fitVideo(null).then(()=>true)');await run('api.fitVideo({width:3840,height:2160}).then(()=>true)');
     const remembered=host.getContentBounds();if(remembered.width>722||remembered.height>442||initial.width<remembered.width)throw Error('Remote window did not respect last size/available display');
