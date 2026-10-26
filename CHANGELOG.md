@@ -13,7 +13,7 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
-## 0.23.0 — 2026-10-26
+## 0.23.1 — 2026-10-26
 
 ### Added
 

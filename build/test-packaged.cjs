@@ -78,7 +78,8 @@ async function main() {
             window.i18n.setLanguage('${language}'); document.body.classList.add('viewing'); document.querySelector('#session-panel').hidden=false;
             for(const button of document.querySelectorAll('.session-toolbar button'))button.hidden=false;
             await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-            const errors=[]; if(document.querySelectorAll('.session-toolbar button:not([hidden])').length!==5)errors.push('toolbar buttons missing');
+            const errors=[],expected=['privacy-screen','session-settings','open-received','send-files','fullscreen','disconnect'];
+            if(document.querySelectorAll('.session-toolbar button:not([hidden])').length!==expected.length||expected.some(id=>!document.getElementById(id)||document.getElementById(id).hidden))errors.push('toolbar buttons missing');
             for(const button of document.querySelectorAll('.session-toolbar button:not([hidden])')){
               const icon=button.querySelector('.mi'),b=button.getBoundingClientRect(),i=icon.getBoundingClientRect();
               if(Math.abs(b.x+b.width/2-i.x-i.width/2)>.75 || Math.abs(b.y+b.height/2-i.y-i.height/2)>.75 || i.width<20 || i.height<20)errors.push(button.id+' off-center/small');
