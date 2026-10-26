@@ -4,6 +4,13 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
   const run=code=>host.webContents.executeJavaScript(code),pause=ms=>new Promise(r=>setTimeout(r,ms));
   const until=async fn=>{for(let i=0;i<400;i++){if(await fn())return;await pause(50)}throw Error('Connection UI timed out: '+fn.toString())};
   await until(()=>run('window.shatootconnectReady===true'));
+  if(!await run("(async()=>{for(const value of [{autoQuality:'yes'},{allowPrivacyScreen:1},{unknown:true}])if(await api.videoPreferences(value).then(()=>true,()=>false))return false;return true})()"))throw Error('Invalid video settings were accepted');
+  await run("document.querySelector('#quality').value='auto';document.querySelector('#quality').dispatchEvent(new Event('change'));true");await until(()=>run('config.autoQuality===true'));
+  await run("document.querySelector('#quality').value='balanced';document.querySelector('#quality').dispatchEvent(new Event('change'));true");await until(()=>run("config.autoQuality===false&&config.qualityProfile==='balanced'"));
+  if(!await run("(async()=>(await api.config()).autoQuality===false)()"))throw Error('Manual quality mode was not saved');
+  await run("document.querySelector('#quality').value='auto';document.querySelector('#quality').dispatchEvent(new Event('change'));true");await until(()=>run('config.autoQuality===true'));
+  await run("document.querySelector('#allow-privacy-screen').checked=false;document.querySelector('#allow-privacy-screen').dispatchEvent(new Event('change'));true");await until(()=>run('config.allowPrivacyScreen===false'));
+  if(!await run("api.privacyScreen(true).then(()=>false,()=>true)"))throw Error('Privacy request without hosting/consent was accepted');
   if(!await run("config.sharedCursor===true&&document.querySelector('#shared-cursor').checked"))throw Error('Shared mouse was not the migrated/default input mode');
   await run("api.sharedCursor(false)");const limited=createWindow();
   try{await until(()=>limited.webContents.executeJavaScript('window.shatootconnectReady===true'));if(!await limited.webContents.executeJavaScript("config.sharedCursor===false&&!document.querySelector('#shared-cursor').checked"))throw Error('Explicit independent mode did not survive reopening');}finally{limited.destroy();await run("api.sharedCursor(true)");}
@@ -149,8 +156,8 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     log('Update progress stays visible outside Settings and a failed update reports its error');
     if(!await run("!!document.querySelector('.favorite-actions .mi.shortcut') && !!document.querySelector('.favorite-actions .mi.screen_share')"))throw Error('Saved computer actions omitted shortcut/connect icons');
     await run("window.sentEnd=[];role='viewer';sessionRoute='lan-viewer';directSocket={readyState:1,send:value=>sentEnd.push(JSON.parse(value)),close:()=>{}};updateControls();api.fitVideo({width:3840,height:2160}).then(()=>true)");
-    const initial=host.getContentBounds();host.setContentSize(720,440);await run('api.fitVideo(null).then(()=>true)');await run('api.fitVideo({width:3840,height:2160}).then(()=>true)');
-    const remembered=host.getContentBounds();if(remembered.width>722||remembered.height>442||initial.width<remembered.width)throw Error('Remote window did not respect last size/available display');
+    const initial=host.getContentBounds(),target={width:Math.min(720,initial.width),height:Math.min(440,initial.height)};host.setContentSize(target.width,target.height);await run('api.fitVideo(null).then(()=>true)');await run('api.fitVideo({width:3840,height:2160}).then(()=>true)');
+    const remembered=host.getContentBounds();if(remembered.width>target.width+2||remembered.height>target.height+2||initial.width<remembered.width)throw Error('Remote window did not respect last size/available display');
     host.close();await until(()=>run("role==='idle' && sentEnd.some(m=>m.type==='end-session')"));await until(()=>!host.isVisible());
     if(states.get(host.webContents.id).outgoingDesktop)throw Error('Closed remote window retained viewer state');
     log('Remote close sends end-session and hides only after cleanup; initial display fit and remembered geometry passed');

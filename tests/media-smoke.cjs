@@ -1,0 +1,74 @@
+'use strict';
+const {BrowserWindow,screen}=require('electron'),{spawn}=require('node:child_process'),path=require('node:path'),fs=require('node:fs');
+module.exports=async({host,createWindow,states,privacy,app,log})=>{
+ const run=(win,code)=>win.webContents.executeJavaScript(code),pause=ms=>new Promise(r=>setTimeout(r,ms));
+ const until=async(win,code)=>{for(let n=0;n<300;n++){if(await run(win,code))return;await pause(100);}throw Error('Media acceptance timed out: '+code);};
+ let viewer,extra,target,helper;const savedScreen=privacy.screen,savedEscape=privacy.escapeAvailable;
+ try{
+  await until(host,'window.shatootconnectReady===true&&!!window.shatootconnectDirect');
+  const saved=JSON.parse(fs.readFileSync(path.join(app.getPath('userData'),'connection.json'),'utf8'));
+  if(saved.autoQuality===undefined&&!await run(host,'config.autoQuality===true'))throw Error('Automatic quality migration default was not enabled');
+  if(saved.allowPrivacyScreen===undefined&&!await run(host,'config.allowPrivacyScreen===false'))throw Error('Privacy permission was not opt-in');
+  if(!await run(host,"document.querySelector('#quality').value===(config.autoQuality?'auto':config.qualityProfile)"))throw Error('Saved quality mode did not survive startup');
+  await run(host,"(async()=>{Object.assign(config,await api.videoPreferences({autoQuality:true,allowPrivacyScreen:false}));document.querySelector('#quality').value='auto';return true})()");
+  await run(host,"document.querySelector('#internet-enabled').checked=false;document.querySelector('#internet-enabled').dispatchEvent(new Event('change'));true");
+  await until(host,'config.internetEnabled===false');
+  const direct=await run(host,'window.shatootconnectDirect');viewer=createWindow();await until(viewer,'window.shatootconnectReady===true');
+  const join=async win=>{await run(win,`document.querySelector('#remote-id').value=${JSON.stringify('127.0.0.1:'+direct.port)};document.querySelector('#remote-password').value=${JSON.stringify(direct.password)};document.querySelector('#join').click();true`);await until(win,'document.querySelector("#remote-video").videoWidth>0&&controlChannel?.readyState==="open"');};
+  await join(viewer);await until(host,'videoQuality?.automatic===true');
+  if(!await run(viewer,"document.querySelector('#privacy-screen').disabled"))throw Error('Privacy screen available without prior consent');
+  const refused="api.privacyScreen(true).then(()=>false,()=>true)";
+  if(!await run(host,refused))throw Error('Main process did not enforce consent');
+  await run(host,'(async()=>{Object.assign(config,await api.videoPreferences({allowPrivacyScreen:true}));return true})()');
+  if(!await run(host,refused))throw Error('Enabling consent mid-session granted retroactive permission');
+  await run(viewer,"document.querySelector('#disconnect').click();true");await until(host,"role==='idle'");await join(viewer);
+  await until(viewer,"!document.querySelector('#privacy-screen').disabled");
+  await run(viewer,"document.querySelector('#live-quality').value='economy';document.querySelector('#live-quality').dispatchEvent(new Event('change'));true");
+  await until(host,"videoQuality?.automatic===false&&videoQuality.name==='economy'");
+  if(!await run(viewer,"(async()=>(await api.config()).autoQuality===false)()"))throw Error('Fixed quality preference was not persisted');
+  await run(viewer,"document.querySelector('#live-quality').value='auto';document.querySelector('#live-quality').dispatchEvent(new Event('change'));true");await until(host,'videoQuality?.automatic===true');
+  await run(host,"(async()=>{window.realMediaStats=pc.getStats.bind(pc);pc.getStats=async()=>{const report=await realMediaStats();for(const value of report.values())if(value.type==='candidate-pair'&&value.nominated)value.availableOutgoingBitrate=600000;return report};try{await videoQuality.poll();}finally{pc.getStats=realMediaStats;}return true})()");
+  await until(host,"videoQuality.automatic===true&&videoQuality.name==='economy'");await until(viewer,"document.querySelector('#remote-video').videoWidth<=1280");
+  log('Simulated poor capacity in real RTC stats lowered sender resolution/bitrate while automatic mode stayed enabled');
+  log('Real RTC: automatic default, manual override, persistence, re-enable and prior-session privacy consent passed');
+  const display=screen.getPrimaryDisplay(),bounds={x:display.bounds.x+40,y:display.bounds.y+40,width:400,height:260};
+  privacy.screen={getAllDisplays:()=>[{id:display.id,bounds}]};privacy.escapeAvailable=()=>true;
+  // Keep acceptance covers inside a small test rectangle. Geometry across all
+  // physical monitors and emergency/timeout restoration are unit-tested.
+  target=new BrowserWindow({...bounds,frame:false,focusable:false,alwaysOnTop:true,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});
+  await target.loadURL('data:text/html,'+encodeURIComponent('<!doctype html><style>html,body{margin:0;width:100%;height:100%}button{width:100%;height:100%;border:0;background:rgb(25,190,125)}</style><button onclick="window.clicks=(window.clicks||0)+1">Privacy capture acceptance</button>'));
+  target.setAlwaysOnTop(true,'screen-saver');target.showInactive();
+  const x=(bounds.x+bounds.width*.2-display.bounds.x)/display.bounds.width,y=(bounds.y+bounds.height*.2-display.bounds.y)/display.bounds.height;
+  const pixel=`(()=>{const v=document.querySelector('#remote-video'),c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;const a=c.getContext('2d');a.drawImage(v,0,0);const p=a.getImageData(Math.floor(c.width*${x}),Math.floor(c.height*${y}),1,1).data;return p[1]>120&&p[0]<90&&p[2]>60})()`;
+  await until(viewer,pixel);await run(viewer,"document.querySelector('#privacy-screen').click();true");
+  await until(viewer,'remotePrivacyActive===true');await pause(1000);
+  if(privacy.windows.size!==1||![...privacy.windows.values()].every(w=>w.isVisible()))throw Error('Physical privacy cover did not appear');
+  const mask=[...privacy.windows.values()][0],bitmap=(await mask.webContents.capturePage()).toBitmap(),offset=(20*mask.getContentBounds().width+20)*4;
+  if(bitmap[offset]>20||bitmap[offset+1]>20||bitmap[offset+2]>20)throw Error('Local privacy cover was not black');
+  if(!await run(viewer,pixel))throw Error('Privacy cover leaked into captured remote video');
+  helper=spawn(path.join(__dirname,'../native/publish/ShatootConnect.Input.exe'),[],{windowsHide:true,stdio:['pipe','ignore','pipe']});helper.stdin.on('error',()=>{});
+  await pause(2200);const physical=screen.dipToScreenRect(null,bounds);
+  for(const data of [{type:'bounds',...physical,sharedCursor:true},{type:'button',button:0,down:true,x:.5,y:.5},{type:'button',button:0,down:false,x:.5,y:.5}])helper.stdin.write(JSON.stringify(data)+'\n');
+  await until(target,'window.clicks===1');helper.stdin.end();helper=null;
+  log('Protected black cover stays absent from live remote video; native shared mouse clicks through the cover');
+  extra=createWindow();await until(extra,'window.shatootconnectReady===true');await join(extra);await until(extra,"!document.querySelector('#privacy-screen').disabled");
+  const worker=[...states.values()].find(s=>s.owner===states.get(host.webContents.id));if(!worker)throw Error('Additional viewer did not use its own sender');
+  await run(extra,"document.querySelector('#live-quality').value='economy';document.querySelector('#live-quality').dispatchEvent(new Event('change'));true");
+  await until(worker.win,"window.shatootconnectHostDiagnostics?.().automaticQuality===false&&window.shatootconnectHostDiagnostics().qualityProfile==='economy'");
+  if(!await run(host,'videoQuality.automatic===true'))throw Error('One viewer changed a different viewer’s quality');
+  await run(extra,"document.querySelector('#privacy-screen').click();true");await until(extra,'remotePrivacyActive===true');
+  if(privacy.owners.size!==2)throw Error('Additional viewer privacy request was not tracked');
+  await run(viewer,"document.querySelector('#privacy-screen').click();true");await until(viewer,'remotePrivacyActive===false');if(privacy.owners.size!==1)throw Error('One viewer restored another active request');
+  await run(extra,"document.querySelector('#disconnect').click();true");
+  for(let n=0;n<30&&privacy.owners.size;n++)await pause(100);if(privacy.windows.size)throw Error('Disconnected worker retained privacy covers');
+  await run(viewer,"document.querySelector('#privacy-screen').click();true");await until(viewer,'remotePrivacyActive===true');
+  await run(host,'(async()=>{Object.assign(config,await api.videoPreferences({allowPrivacyScreen:false}));return true})()');await until(viewer,'remotePrivacyActive===false&&remotePrivacyAllowed===false');
+  if(privacy.windows.size)throw Error('Revoking consent did not immediately restore displays');
+  log('Multiple viewers have independent quality and privacy leases; worker disconnect and consent revocation restore displays');
+  console.log('SHATOOTCONNECT_MEDIA_SMOKE passed');
+ }finally{
+  helper?.stdin.end();privacy.clear('closed');privacy.screen=savedScreen;privacy.escapeAvailable=savedEscape;
+  target?.destroy();extra?.destroy();viewer?.destroy();
+ }
+ app.quit();
+};

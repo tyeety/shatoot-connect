@@ -13,6 +13,15 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.23.0 — 2026-10-26
+
+### Added
+
+- Automatic desktop quality, enabled by default, uses estimated outgoing capacity, packet loss, RTT and encoder pressure to adapt bitrate/resolution/frame rate independently for each viewer. Saved manual profiles disable adaptation; Automatic quality restores it. Stable-traffic upgrade hysteresis avoids treating an idle screen as a bandwidth test.
+- Opt-in physical-monitor privacy screens: the controlled computer must grant permission before the session, and the remote controller must have control permission. The live toolbar can then cover every physical monitor while capture exclusion preserves usable remote video and mouse input. Requires Windows build 19041 or later and the existing local emergency shortcut.
+- Privacy heartbeat leases restore displays on connection loss, close, revoked consent or cover failure. Local emergency restoration revokes the affected sessions; simultaneous viewers keep independent requests.
+- Unit coverage for adaptive policy, asynchronous manual overrides and multi-monitor lifecycle; local real-RTC media acceptance verifies automatic/manual modes, simulated congestion, prior consent, additional viewers, capture exclusion and a native click through the cover.
+
 ## 0.22.2 — 2026-10-26
 
 ### Fixed

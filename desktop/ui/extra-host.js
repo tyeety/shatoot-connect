@@ -1,25 +1,30 @@
 'use strict';
 (() => {
   const api = window.shatootconnect;
+  let videoQuality,privacyAllowed=false;
   let config, pc, stream, sender, exchange, control, pointer, allowed = false, profile, candidates = [], stopped = false, queue = Promise.resolve(), sync = new window.LayoutSync(true);
   const send = data => api.hostSend(data);
-  function stop() { if (stopped) return; stopped = true; exchange?.close(); pc?.close(); stream?.getTracks().forEach(t => t.stop()); api.revoke(); api.watchKeyboard(false); send({ type: 'desktop-end' }); }
+  window.shatootconnectHostDiagnostics=()=>({automaticQuality:videoQuality?.automatic,qualityProfile:videoQuality?.name,privacyAllowed});
+  function stop() { if (stopped) return; stopped = true; videoQuality?.stop(); exchange?.close(); pc?.close(); stream?.getTracks().forEach(t => t.stop()); api.revoke(); api.watchKeyboard(false); send({ type: 'desktop-end' }); }
   window.shatootconnectCapture = async () => { const p = config.profiles[profile] || config.profiles.speed; stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never', frameRate: { ideal: p.fps, max: p.fps }, width: { max: p.width }, height: { max: p.height } }, audio: false }); stream.getVideoTracks()[0].contentHint = ['lan','quality'].includes(profile) ? 'detail' : 'motion'; stream.getVideoTracks()[0].onended = stop; };
-  async function quality(name) {
-    const p = config.profiles[name]; if (!p || !stream) return; profile = name;
-    const track = stream.getVideoTracks()[0]; track.contentHint = ['lan','quality'].includes(name) ? 'detail' : 'motion';
-    await track.applyConstraints({ width: { max: p.width }, height: { max: p.height }, frameRate: { ideal: p.fps, max: p.fps } });
-    if (sender) { const params = sender.getParameters(); if (!params.encodings?.length) params.encodings = [{}]; Object.assign(params.encodings[0], { maxBitrate: p.bitrate, maxFramerate: p.fps, priority: 'high', networkPriority: 'high' }); params.degradationPreference = ['lan','quality'].includes(name) ? 'maintain-resolution' : 'maintain-framerate'; await sender.setParameters(params); }
+  async function quality(name,automatic=config.autoQuality!==false) {
+    if(!config.profiles[name]||!stream)return;
+    profile=name;if(!sender)return;
+    if(!videoQuality){videoQuality=new window.StreamQuality({profiles:config.profiles,peer:pc,stream,sender,automatic,profile:name});await videoQuality.start();}
+    else await videoQuality.setMode(automatic,name);
   }
+  api.onPrivacyScreenState(value=>{privacyAllowed=value.allowed===true;if(control?.readyState==='open')control.send(JSON.stringify({type:'privacy-screen-state',...value}));});
+
   function bind(channel) {
-    channel.onopen = () => { if (channel.label === 'control') api.watchKeyboard(true); };
+    channel.onopen = () => { if (channel.label === 'control') {api.watchKeyboard(true);channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,privacyScreen:privacyAllowed}));} };
     channel.onmessage = event => {
       if (typeof event.data !== 'string' || event.data.length > 2048) return;
       let data; try { data = JSON.parse(event.data); } catch { return; }
       if (!data || typeof data !== 'object') return;
-      if (data.type === 'profile' && channel.label === 'control') { quality(data.name).catch(stop); return; }
-      if (data.type === 'features' && channel.label === 'control') { sync.ready = data.bidirectionalLayout === true; channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true })); return; }
+      if (data.type === 'profile' && channel.label === 'control') { quality(data.name,data.auto===true).catch(stop); return; }
+      if (data.type === 'features' && channel.label === 'control') { sync.ready = data.bidirectionalLayout === true; channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true, privacyScreen:privacyAllowed })); return; }
       if (data.type === 'guest-cursor') { api.guestCursor(data); return; }
+      if(channel.label==='control'&&data.type==='privacy-screen'&&typeof data.active==='boolean'){api.privacyScreen(data.active).then(value=>channel.readyState==='open'&&channel.send(JSON.stringify({type:'privacy-screen-state',...value}))).catch(e=>{if(channel.readyState==='open')channel.send(JSON.stringify({type:'privacy-screen-state',active:false,allowed:false,error:e.message}));});return;}
       if (!allowed) return;
       if (data.type === 'layout-sync' && channel.label === 'control') { if (sync.receive(data)) api.applyKeyboard(data.layout).catch(() => {}); return; }
       api.input(data);
@@ -45,5 +50,5 @@
       else if (data.candidate) { if (pc.remoteDescription) await pc.addIceCandidate(data.candidate); else candidates.push(data.candidate); }
     }
   }).catch(stop); });
-  (async () => { config = await api.hostInit(); profile = config.lan ? 'lan' : config.profile; const sources = await api.sources(); await api.selectSource(config.source || sources[0]?.id); const result = await api.approve(config.invitation.name,config.invitation.fixedPassword===true,config.invitation.peer); if (!result.accepted) { send({type:'desktop-reject'}); return; } allowed = result.control; await api.capture(); send({type:'desktop-accept',control:allowed}); })().catch(() => send({type:'desktop-reject'}));
+  (async () => { config = await api.hostInit(); profile = config.autoQuality!==false?'balanced':config.profile; const sources = await api.sources(); await api.selectSource(config.source || sources[0]?.id); const result = await api.approve(config.invitation.name,config.invitation.fixedPassword===true,config.invitation.peer); if (!result.accepted) { send({type:'desktop-reject'}); return; } allowed = result.control;privacyAllowed=result.privacyAllowed===true; await api.capture(); send({type:'desktop-accept',control:allowed}); })().catch(() => send({type:'desktop-reject'}));
 })();
