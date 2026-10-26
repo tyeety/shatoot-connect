@@ -2,6 +2,7 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['خوانده شد','Seen'],['ارسال ناموفق','Send failed'],['در انتظار تحویل','Waiting for delivery'],
     ['نمایش پنجرهٔ چت در اتصال ریموت','Show the chat window in remote sessions'],
     ['کنترل ورودی در دسترس نیست. دوباره وصل شوید.','Remote input is unavailable. Reconnect.'],['استفاده از موس مشترک (پیشنهادی)','Use shared mouse (recommended)'],['کنترل هنگام فعالیت میزبان متوقف است','Control paused while the host is active'],['میهمان دیگری در حال کنترل است','Another guest is controlling'],['موس و کیبورد فعال','Mouse and keyboard enabled'],
     ['باز کردن مقصد اعلان انجام نشد.','Could not open the notification destination.'],

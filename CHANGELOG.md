@@ -13,6 +13,13 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.21.4 — 2026-10-26
+
+### Added
+
+- Outgoing messages show a clock while waiting for delivery, one tick after confirmed delivery, two ticks after reading, and a Material error icon when a send attempt fails. Status labels are available in English and Persian.
+- Durable authenticated delivery/read receipts synchronize over private and group chats, including files and voice messages. Group ticks require all intended recipients. Read receipts wait for the focused chat and rendered messages; offline receipts survive restart and retry on reconnection. Older clients remain compatible and do not fabricate read confirmations.
+
 ## 0.21.3 — 2026-10-26
 
 ### Changed

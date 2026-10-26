@@ -19,7 +19,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   function updateJump(){jump.hidden=!selected||atBottom();jump.title=tr(pendingNew.size?'First unread message':'Scroll to latest');jump.setAttribute('aria-label',jump.title);const badge=jump.querySelector('.unread-badge');badge.hidden=!pendingNew.size;badge.textContent=String(pendingNew.size);}
   function updateDays(){const top=logElement.getBoundingClientRect().top;for(const group of logElement.children){const label=group.querySelector('.chat-day-label');label?.classList.toggle('is-stuck',group.getBoundingClientRect().top<top-1);}}
   function visibleNew(){if(!document.hasFocus()||!pendingNew.size)return;const viewport=logElement.getBoundingClientRect();for(const item of logElement.querySelectorAll('.chat-message'))if(pendingNew.has(item.dataset.messageId)){const r=item.getBoundingClientRect();if(r.top>=viewport.top-1&&r.bottom<=viewport.bottom+1){const row=rows.find(m=>m.id===item.dataset.messageId);readThrough=Math.max(readThrough,row?.receivedAt||0);pendingNew.delete(item.dataset.messageId);}}}
-  function timelineScroll(){following=atBottom();if(following)pendingNew.clear();else visibleNew();updateJump();updateDays();logElement.classList.add('timeline-scrolling');clearTimeout(dayFadeTimer);dayFadeTimer=setTimeout(()=>logElement.classList.remove('timeline-scrolling'),1200);reportView().catch(()=>{});}
+  function timelineScroll(){following=atBottom();if(following){pendingNew.clear();readThrough=Math.max(readThrough,...rows.map(m=>m.receivedAt));}else visibleNew();updateJump();updateDays();logElement.classList.add('timeline-scrolling');clearTimeout(dayFadeTimer);dayFadeTimer=setTimeout(()=>logElement.classList.remove('timeline-scrolling'),1200);reportView().catch(()=>{});}
   logElement.addEventListener('scroll',timelineScroll,{passive:true});
   jump.onclick=async()=>{try{if(pendingNew.size){if(!rows.some(row=>pendingNew.has(row.id)))await load(false);const first=[...logElement.querySelectorAll('.chat-message')].find(item=>pendingNew.has(item.dataset.messageId));if(first){first.scrollIntoView({block:'start',behavior:'smooth'});return;}}logElement.scrollTo({top:logElement.scrollHeight,behavior:'smooth'});}catch(e){error(e);}};
   new ResizeObserver(()=>{if(resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(following)logElement.scrollTop=logElement.scrollHeight;updateJump();updateDays();});}).observe(logElement);
@@ -29,7 +29,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   const fileSetting=document.createElement('label');fileSetting.className='chat-file-setting';fileSetting.hidden=true;
   const fileCaption=document.createElement('span');fileCaption.textContent=tr('Incoming files');const filePolicy=document.createElement('select');filePolicy.id='chat-file-policy';filePolicy.setAttribute('aria-label',tr('Incoming files'));
   for(const[value,text]of [['inherit','Use global setting'],['accept','Receive automatically'],['ask','Ask before receiving files']]){const option=document.createElement('option');option.value=value;option.textContent=tr(text);filePolicy.append(option);}fileSetting.append(fileCaption,filePolicy);
-  function reportView(){return api.chatView({conversation:selected,atBottom:atBottom(),readThrough,active:!!selected&&$('messenger-dialog').open&&document.hasFocus()&&$('messenger-dialog').contains(document.activeElement)});}
+  function reportView(){const viewport=logElement.getBoundingClientRect(),seen=[...logElement.querySelectorAll('.chat-message')].filter(item=>{const r=item.getBoundingClientRect();return r.bottom>viewport.top&&r.top<viewport.bottom;}).map(item=>item.dataset.messageId).slice(0,100);return api.chatView({conversation:selected,seen,atBottom:atBottom(),readThrough,active:!!selected&&$('messenger-dialog').open&&document.hasFocus()&&$('messenger-dialog').contains(document.activeElement)});}
   for(const event of ['focusin','focusout','visibilitychange'])document.addEventListener(event,()=>queueMicrotask(()=>reportView().catch(()=>{})));
   for(const event of ['focus','blur'])window.addEventListener(event,()=>reportView().catch(()=>{}));
   $('messenger-dialog').addEventListener('close',()=>reportView().catch(()=>{}));
@@ -67,7 +67,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       const text = document.createElement('p'); text.dir = 'auto'; text.textContent = row.deleted?tr('Message deleted'):row.text;
       const meta = document.createElement('small');meta.className='message-time';
       item.append(name, text);
-      const footer=document.createElement('footer');footer.className='chat-message-footer';footer.append(meta);
+      const footer=document.createElement('footer');footer.className='chat-message-footer';const timeGroup=document.createElement('span');timeGroup.className='message-meta';timeGroup.append(meta);footer.append(timeGroup);
+      if(own){const receipt=document.createElement('span');receipt.className='message-receipt';receipt.setAttribute('role','img');meta.after(receipt);}
       if(row.deleted)item.classList.add('deleted');
       else {
         voice?.attachment(item,row);
@@ -97,12 +98,16 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       if(!item||item.dataset.attachment!==(row.attachment||'')){const fresh=createMessage(row);fresh.dataset.attachment=row.attachment||'';if(item)item.replaceWith(fresh);item=fresh;}
       item.classList.toggle('pending',row.sender===self.deviceId&&row.pending.length>0);item.classList.toggle('message-target',row.id===targetMessage);item.querySelector('header').textContent=row.sender===self.deviceId?self.name:row.displayName||displayName(contact(row.sender))||row.name;
       if(row.kind==='text')item.querySelector('p').textContent=row.text;
-      const meta=item.querySelector('.message-time');meta.textContent=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{hour:'2-digit',minute:'2-digit'}).format(date);meta.title=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{dateStyle:'full',timeStyle:'short'}).format(date)+(row.sender===self.deviceId?' · '+tr(row.pending.length?'Queued':row.status==='delivered'?'Delivered':'Sent'):'')+(row.editedAt?' · '+tr('Edited'):'');
+      const status=row.status==='seen'?'seen':row.status==='delivered'?'delivered':row.status==='failed'?'failed':'queued',statusText=tr(({seen:'Seen',delivered:'Delivered',failed:'Send failed',queued:'Waiting for delivery'})[status]);
+      const meta=item.querySelector('.message-time');meta.textContent=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{hour:'2-digit',minute:'2-digit'}).format(date);meta.title=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{dateStyle:'full',timeStyle:'short'}).format(date)+(row.sender===self.deviceId?' · '+statusText:'')+(row.editedAt?' · '+tr('Edited'):'');
+      const receipt=item.querySelector('.message-receipt');if(receipt){receipt.dataset.status=status;receipt.title=statusText;receipt.setAttribute('aria-label',statusText);receipt.className='message-receipt mi '+({seen:'done_all',delivered:'done',failed:'error_outline',queued:'schedule'})[status];}
       const index=(positions.get(day)||0)+1;positions.set(day,index);if(group.children[index]!==item)group.insertBefore(item,group.children[index]||null);
     }
     for(const item of nodes.values())item.remove();for(const [day,group]of groups)if(!usedGroups.has(day))group.remove();
     for(const id of pendingNew)if(!rows.some(row=>row.id===id))pendingNew.delete(id);
     if(stick){log.scrollTop=log.scrollHeight;following=true;}else if(anchor?.isConnected){const delta=anchor.getBoundingClientRect().top-anchorTop;if(Math.abs(delta)>.5)log.scrollTop+=delta;}
+    if(atBottom())readThrough=Math.max(readThrough,...rows.map(m=>m.receivedAt));else{const viewport=log.getBoundingClientRect();for(const item of log.querySelectorAll('.chat-message')){const r=item.getBoundingClientRect();if(r.top>=viewport.top-1&&r.bottom<=viewport.bottom+1)readThrough=Math.max(readThrough,rows.find(m=>m.id===item.dataset.messageId)?.receivedAt||0);}}
+    queueMicrotask(()=>reportView().catch(()=>{}));
     updateDays();updateJump();
   }
   function render(refreshHistory = false) {

@@ -14,6 +14,35 @@ function fixture(t) {
     decrypt: bytes => { if (bytes.length < 28) throw new Error('Invalid envelope'); const cipher = crypto.createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12), { authTagLength: 16 }); cipher.setAuthTag(bytes.subarray(12, 28)); return Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]).toString(); } };
   const store = new ChatStore(options); store.contact({ deviceId: peer, name: 'همکار' }, { type: 'lan', address: '192.168.1.10:8788' }); return { store, options, self, peer, other };
 }
+
+test('delivery and seen receipts are authenticated, monotonic and survive offline/restart',t=>{
+  const {store,options,self,peer,other}=fixture(t),conversation=`p:${peer}`,id=crypto.randomUUID();
+  store.append({id,conversation,sender:self,name:'Me',kind:'text',text:'Hello',pending:[peer]},true);
+  assert.equal(store.history({conversation})[0].status,'queued');store.failed(id,peer);assert.equal(store.history({conversation})[0].status,'failed');
+  assert.throws(()=>store.receipt({message:id,conversation,reader:other,stage:'seen'},other),/author/);
+  store.receipt({message:id,conversation,reader:peer,stage:'seen'},peer);store.delivered(id,peer);
+  assert.equal(new ChatStore(options).history({conversation})[0].status,'seen','A late delivery ACK must not regress seen');
+  const incoming=crypto.randomUUID();store.append({id:incoming,conversation,sender:peer,name:'Peer',kind:'text',text:'Reply'});
+  assert.equal(store.pendingReceipts(peer).filter(r=>r.stage==='seen').length,0);
+  store.conversationState(conversation,{read:true});assert.equal(store.pendingReceipts(peer).filter(r=>r.stage==='seen').length,0,'Unread watermark alone does not prove a displayed message');store.seenMessages(conversation,[incoming]);const reopened=new ChatStore(options),receipts=reopened.pendingReceipts(peer);
+  assert.deepEqual(receipts.filter(r=>r.message===incoming).map(r=>r.stage),['delivered','seen']);
+  reopened.ackReceipt(receipts[0].id,other);assert.equal(reopened.pendingReceipts(peer).length,2);
+  for(const receipt of receipts)reopened.ackReceipt(receipt.id,peer);assert.equal(reopened.pendingReceipts(peer).length,0);
+});
+
+test('group receipts require every recipient, authenticate relays and forward back to the original sender',t=>{
+  const {store,self,peer,other}=fixture(t),group={id:crypto.randomUUID(),owner:peer,name:'Team',members:[{deviceId:self,name:'Me'},{deviceId:peer,name:'Owner'},{deviceId:other,name:'Other'}]};
+  store.group(group);const conversation=`g:${group.id}`,id=crypto.randomUUID();store.append({id,conversation,sender:self,name:'Me',kind:'text',text:'All members',pending:[peer]},true);
+  store.delivered(id,peer);assert.equal(store.history({conversation})[0].status,'sent');
+  store.receipt({message:id,conversation,reader:peer,stage:'seen'},peer);assert.notEqual(store.history({conversation})[0].status,'seen');
+  assert.throws(()=>store.receipt({message:id,conversation,reader:other,stage:'seen'},other),/author/);
+  store.receipt({message:id,conversation,reader:other,stage:'delivered'},peer);assert.equal(store.history({conversation})[0].status,'delivered');
+  store.receipt({message:id,conversation,reader:other,stage:'seen'},peer);assert.equal(store.history({conversation})[0].status,'seen');
+  const relay={...group,id:crypto.randomUUID(),owner:self};store.group(relay);const relayId=crypto.randomUUID(),relayConversation=`g:${relay.id}`;
+  store.append({id:relayId,conversation:relayConversation,sender:peer,name:'Peer',kind:'text',text:'Relayed',pending:[other]});
+  store.receipt({message:relayId,conversation:relayConversation,reader:other,stage:'seen'},other);
+  assert.ok(store.pendingReceipts(peer).some(r=>r.message===relayId&&r.reader===other&&r.stage==='seen'));
+});
 test('sender edits/deletes persist, queue offline, reject forged authors and preserve tombstones on replay',t=>{
   const {store,options,self,peer,other}=fixture(t),conversation=`p:${peer}`,id=crypto.randomUUID();store.append({id,conversation,sender:self,name:'Me',kind:'text',text:'original',pending:[peer]},true);
   const edit={id:crypto.randomUUID(),message:id,conversation,sender:self,removed:false,text:'updated',revision:1,pending:[peer]};store.mutate(edit,true);

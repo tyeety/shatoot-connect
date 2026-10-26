@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   noticeHover: hovered => ipcRenderer.send('notice-hover',hovered),
   onNoticeFade: callback => ipcRenderer.on('notice-fade',(_event,value)=>callback(value)),
   onChatUnread: callback=>ipcRenderer.on('chat-unread',(_event,value)=>callback(value)),
+  onChatReceipts: callback=>ipcRenderer.on('chat-receipts',()=>callback()),
   onExchangePaste:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('exchange-paste',listener);return ()=>ipcRenderer.removeListener('exchange-paste',listener);},
   chatView: value => ipcRenderer.invoke('chat-view',value),
   onChatFilesReceived: callback => ipcRenderer.on('chat-files-received',(_event,value)=>callback(value)),

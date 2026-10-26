@@ -57,9 +57,10 @@ class ChatStore {
     const relay = value.conversation.startsWith('g:') && data.groups[key]?.owner === this.self;
     const pending = outgoing || relay ? [...new Set((value.pending || []).filter(id => UUID.test(id) && id !== this.self && (!relay || data.groups[key].members.some(m => m.deviceId === id))))] : [];
     const message = { id: value.id, conversation: value.conversation, sender: value.sender, name: value.name, kind: value.kind, text: value.text, at: Number.isSafeInteger(value.at) && Math.abs(Date.now() - value.at) < 365 * 86400000 ? value.at : Date.now(), receivedAt: Math.max(Date.now(), (data.messages.at(-1)?.receivedAt || 0) + 1), status: outgoing ? (pending.length ? 'queued' : 'sent') : 'received', pending };
-    return this.change(d => { const change=(d.mutations||[]).find(c=>c.message===message.id&&c.conversation===message.conversation&&c.sender===message.sender);if(change&&(change.removed||message.kind==='text'))this.applyMutation(message,change);if(!message.deleted)d.messages.push(message); return { message, duplicate: false }; });
+    message.recipients=outgoing?(value.conversation.startsWith('g:')?data.groups[key].members.map(m=>m.deviceId).filter(id=>id!==this.self):[key]):[];
+    return this.change(d => { const change=(d.mutations||[]).find(c=>c.message===message.id&&c.conversation===message.conversation&&c.sender===message.sender);if(change&&(change.removed||message.kind==='text'))this.applyMutation(message,change);if(!message.deleted){d.messages.push(message);if(!outgoing)this.queueReceipt(d,message,'delivered');} return { message, duplicate: false }; });
   }
-  eraseMessage(data,conversation,id){data.messages=data.messages.filter(m=>m.conversation!==conversation||m.id!==id);for(const [token,attachment]of Object.entries(data.attachments))if(attachment.conversation===conversation&&attachment.message===id)delete data.attachments[token];}
+  eraseMessage(data,conversation,id){data.messages=data.messages.filter(m=>m.conversation!==conversation||m.id!==id);for(const [token,attachment]of Object.entries(data.attachments))if(attachment.conversation===conversation&&attachment.message===id)delete data.attachments[token];for(const [key,receipt]of Object.entries(data.receipts||{}))if(receipt.conversation===conversation&&receipt.message===id)delete data.receipts[key];}
   applyMutation(message,change){message.revision=change.revision;message.editedAt=change.at;message.deleted=change.removed;message.text=change.removed?'':change.text;}
   mutate(value,outgoing=false){
     const data=this.load();if(!value||!UUID.test(value.id)||!UUID.test(value.message)||!UUID.test(value.sender)||!/^([pg]):[a-f0-9-]{36}$/i.test(value.conversation)||typeof value.removed!=='boolean'||!Number.isSafeInteger(value.revision)||value.revision<1||value.revision>1000000000||(!value.removed&&(typeof value.text!=='string'||!value.text.trim()||value.text.length>8000))||(outgoing&&value.sender!==this.self))throw new Error('Invalid message change.');
@@ -76,8 +77,36 @@ class ChatStore {
   pendingChanges(peer){return (this.load().mutations||[]).filter(m=>m.pending.includes(peer));}
   deliveredChange(id,peer){return this.change(d=>{const change=(d.mutations||[]).find(c=>c.id===id);if(change)change.pending=change.pending.filter(p=>p!==peer);});}
   delivered(id, peer) {
-    return this.change(data => { const message = data.messages.find(m => m.id === id && (m.sender === this.self || (m.conversation.startsWith('g:') && data.groups[m.conversation.slice(2)]?.owner === this.self))); if (message) { message.pending = message.pending.filter(value => value !== peer); if (message.sender === this.self) message.status = message.pending.length ? 'queued' : 'delivered'; } return message; });
+    return this.change(data => { const message = data.messages.find(m => m.id === id && (m.sender === this.self || (m.conversation.startsWith('g:') && data.groups[m.conversation.slice(2)]?.owner === this.self))); if (message&&message.pending.includes(peer)) { message.pending = message.pending.filter(value => value !== peer);delete message.failure;const group=message.conversation.startsWith('g:')&&data.groups[message.conversation.slice(2)];if(!group||group.owner===this.self){this.applyReceipt(message,peer,'delivered');if(message.sender!==this.self)this.queueReceipt(data,message,'delivered',peer);}else if(!['seen','delivered'].includes(message.status))message.status='sent'; } return message; });
   }
+  queueReceipt(data,message,stage,reader=this.self){
+    if(message.sender===this.self)return;
+    const group=message.conversation.startsWith('g:')&&data.groups[message.conversation.slice(2)],peer=group&&group.owner!==this.self?group.owner:message.sender;
+    const id=`${message.id}:${reader}:${stage}`;data.receipts||={};data.receipts[id]={id,message:message.id,conversation:message.conversation,reader,stage,peer};
+  }
+  applyReceipt(message,reader,stage){
+    message.deliveredTo=[...new Set([...(message.deliveredTo||[]),reader])];
+    if(stage==='seen')message.seenBy=[...new Set([...(message.seenBy||[]),reader])];
+    const recipients=message.recipients||(message.conversation.startsWith('g:')?this.load().groups[message.conversation.slice(2)]?.members.map(m=>m.deviceId).filter(id=>id!==message.sender)||[]:[message.conversation.slice(2)]);
+    if(recipients.length&&recipients.every(id=>message.seenBy?.includes(id)))message.status='seen';
+    else if(recipients.length&&recipients.every(id=>message.deliveredTo.includes(id)))message.status='delivered';
+    delete message.failure;
+  }
+  receipt(value,peer){
+    if(!value||!UUID.test(value.message)||!UUID.test(value.reader)||!['delivered','seen'].includes(value.stage))throw new Error('Invalid receipt.');
+    const data=this.load(),message=data.messages.find(m=>m.id===value.message&&m.conversation===value.conversation);if(!message)return false;
+    const group=message.conversation.startsWith('g:')&&data.groups[message.conversation.slice(2)];
+    if(group?(!group.members.some(m=>m.deviceId===value.reader)||value.reader===message.sender||(peer!==group.owner&&(peer!==value.reader||group.owner!==this.self))):(peer!==value.reader||peer!==message.conversation.slice(2)||message.sender!==this.self))throw new Error('Invalid receipt author.');
+    return this.change(d=>{this.applyReceipt(message,value.reader,value.stage);if(message.sender!==this.self)this.queueReceipt(d,message,value.stage,value.reader);return true;});
+  }
+  pendingReceipts(peer){return Object.values(this.load().receipts||{}).filter(r=>r.peer===peer).slice(0,100);}
+  seenMessages(conversation,ids){
+    if(!Array.isArray(ids)||ids.length>100||ids.some(id=>!UUID.test(id)))throw new Error('Invalid visible messages.');
+    const messages=this.load().messages.filter(m=>m.conversation===conversation&&m.sender!==this.self&&!m.seenReported&&ids.includes(m.id));
+    if(messages.length)return this.change(d=>{for(const message of messages){message.seenReported=true;this.queueReceipt(d,message,'seen');}});
+  }
+  ackReceipt(id,peer){if(this.load().receipts?.[id]?.peer===peer)return this.change(d=>{delete d.receipts[id];});}
+  failed(id,peer){return this.change(d=>{const m=d.messages.find(m=>m.id===id&&m.sender===this.self&&m.pending.includes(peer));if(m&&m.status!=='seen'&&m.status!=='delivered'){m.status='failed';m.failure=true;}});}
   attachment(conversation, message, files) {
     if (!Array.isArray(files) || !files.length || files.some(file => typeof file !== 'string') || !this.load().messages.some(m => m.id === message && m.conversation === conversation && m.kind === 'file')) throw new Error('Invalid received attachment.');
     return this.change(data => { const token = crypto.randomUUID(); data.attachments[token] = { conversation, message, files }; return token; });

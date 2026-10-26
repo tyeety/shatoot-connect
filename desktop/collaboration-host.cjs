@@ -22,6 +22,10 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if(op==='reorder-pins')return history.reorderPins(value.order);
     if (op === 'file-policy') return history.filePolicy(value.conversation,value.mode);
     if (op === 'pending') return history.pending(value.peer);
+    if(op==='pending-receipts')return history.pendingReceipts(grant(s,value.session).peer.deviceId);
+    if(op==='ack-receipt')return history.ackReceipt(value.id,grant(s,value.session).peer.deviceId);
+    if(op==='receipt')return history.receipt(value.receipt,grant(s,value.session).peer.deviceId);
+    if(op==='failed')return history.failed(value.id,value.peer);
     if(op==='peer-preview'){const g=grant(s,value.session);if(value.previewKind!=='wallpaper')return false;if(typeof value.preview!=='string'||value.preview.length>90000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.preview))throw new Error('Invalid desktop preview.');rememberComputer({deviceId:g.peer.deviceId,preview:value.preview,previewKind:'wallpaper'},undefined,true);return true;}
     if (op === 'contact') {
       const route = value.route;

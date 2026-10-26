@@ -5,6 +5,7 @@
   class CollaborationClient {
     constructor({ api, self, internet, ensureInternet, changed = () => {}, error = () => {}, progress = () => {} }) {
       Object.assign(this, { api, self, internet, ensureInternet, changed, error, progress }); this.sessions = new Map(); this.connectAttempts=new Set(); this.fileQueue = Promise.resolve(); this.catalog = { contacts: [], groups: [], conversations: [] }; this.ready = this.refresh();
+      api.onChatReceipts?.(()=>this.sendReceipts());
     }
     async ensurePeer(id,background=false) {
       const current=this.peer(id);if(current)return current;
@@ -29,7 +30,12 @@
         this.retries.set(key,Date.now()+30000);this.connect({type:'id',address:card.address,endpoint:card.endpoint,deviceId:card.deviceId,name:card.name,background:true}).catch(()=>{});
       }}finally{this.reconnecting=false;}
     }
-    async refresh() { this.catalog = await this.api.collaboration('list'); this.notify(); }
+    async refresh() { this.catalog = await this.api.collaboration('list'); this.notify(); this.sendReceipts(); }
+    sendReceipts(){for(const s of this.sessions.values())if(!s.closed&&s.channel?.readyState==='open'&&s.features?.includes('message-receipts-v1'))this.flushReceipts(s).catch(()=>{});}
+    async flushReceipts(s){
+      if(s.receiptsBusy){s.receiptsAgain=true;return;}s.receiptsBusy=true;
+      try{do{s.receiptsAgain=false;let receipts;do{receipts=await this.api.collaboration('pending-receipts',{session:s.id});for(const receipt of receipts){await this.rpc(s,'message-receipt',receipt);await this.api.collaboration('ack-receipt',{session:s.id,id:receipt.id});}}while(receipts.length===100&&!s.closed);}while(s.receiptsAgain&&!s.closed);}finally{s.receiptsBusy=false;}
+    }
     notify() { this.changed(); }
     peer(id) { return [...this.sessions.values()].find(s => !s.closed && s.peer?.deviceId === id && s.channel?.readyState === 'open'); }
     group(id) { return this.catalog.groups.find(g => g.id === id); }
@@ -170,9 +176,13 @@
       if (op === 'profile') {
         if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
         Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status });
-        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1']};
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1']};
       }
       if(op==='desktop-card-preview'){if(value?.kind==='wallpaper'){await this.api.collaboration('peer-preview',{session:s.id,preview:value.preview,previewKind:'wallpaper'});await this.refresh();}return true;}
+      if(op==='message-receipt'){
+        const receipt={...value,conversation:value?.conversation===`p:${this.self.deviceId}`?`p:${s.peer.deviceId}`:value?.conversation};
+        await this.api.collaboration('receipt',{session:s.id,receipt});await this.refresh();return true;
+      }
       if (op === 'group') {
         if (value?.owner !== s.peer.deviceId) throw new Error('Only the group owner can invite members.');
         if (!this.group(value.id) && !await this.api.collaboration('approve-group', { session: s.id, group: value })) return false;
@@ -209,7 +219,7 @@
       const pending = group ? (group.owner === this.self.deviceId ? group.members.map(m => m.deviceId).filter(id => id !== this.self.deviceId) : [group.owner]) : [conversation.slice(2)];
       const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'text', text: text.trim(), at: Date.now(), pending };
       await this.api.collaboration('append', { message, outgoing: true }); await this.refresh();
-      for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});
+      for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(async error=>{if(!/offline/i.test(error.message)){await this.api.collaboration('failed',{id:message.id,peer:id});await this.refresh();}});
       return message;
     }
     async sendPreview(s){if(s.closed||!s.features?.includes('desktop-card-preview-v1')||s.previewBusy)return;s.previewBusy=true;try{const preview=await this.api.desktopCardPreview();if(preview&&preview!==s.lastPreview){await this.rpc(s,'desktop-card-preview',s.features.includes('wallpaper-card-v1')?{kind:'wallpaper',preview}:preview);s.lastPreview=preview;}}finally{s.previewBusy=false;}}
@@ -238,8 +248,9 @@
         for (const message of messages) {
           if (message.kind !== 'text') continue;
           const group = message.conversation.startsWith('g:') && this.group(message.conversation.slice(2));
-          if (group && !await this.announceGroup(s, group)) continue;
-          await this.rpc(s, 'message', this.wire(message)); await this.api.collaboration('delivered', { id: message.id, peer: s.peer.deviceId });
+          if (group && !await this.announceGroup(s, group)){await this.api.collaboration('failed',{id:message.id,peer:s.peer.deviceId});continue;}
+          try{await this.rpc(s, 'message', this.wire(message)); await this.api.collaboration('delivered', { id: message.id, peer: s.peer.deviceId });}
+          catch(error){await this.api.collaboration('failed',{id:message.id,peer:s.peer.deviceId});await this.refresh();throw error;}
         }
         const changes=await this.api.collaboration('pending-changes',{peer:s.peer.deviceId});
         if(s.features?.includes('message-changes-v1'))for(const change of changes){const group=change.conversation.startsWith('g:')&&this.group(change.conversation.slice(2));if(group&&!await this.announceGroup(s,group))continue;await this.rpc(s,'message-change',{...change,pending:undefined,kind:'text'});await this.api.collaboration('delivered-change',{id:change.id,peer:s.peer.deviceId});}
@@ -275,9 +286,9 @@
       await this.api.collaboration('append', { message, outgoing: true });
       await this.api.collaborationFiles(first.id,'attach-sources',{id:message.id,conversation});await this.refresh();
       for (const s of targets) {
-        if (group && !await this.announceGroup(s, group)) continue;
+        if (group && !await this.announceGroup(s, group)){await this.api.collaboration('failed',{id:message.id,peer:s.peer.deviceId});continue;}
         try { await this.transfer(s, entries, message, first); await this.api.collaboration('delivered', { id: message.id, peer: s.peer.deviceId }); }
-        catch (error) { this.error(`${s.peer.name}: ${error.message}`); }
+        catch (error) { await this.api.collaboration('failed',{id:message.id,peer:s.peer.deviceId});this.error(`${s.peer.name}: ${error.message}`); }
       }
       await this.refresh();
     }
