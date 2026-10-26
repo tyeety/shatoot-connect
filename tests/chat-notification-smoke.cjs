@@ -47,6 +47,14 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await click(`[data-conversation="${conversation}"] .chat-conversation`);await pause(100);owner.chatStore.conversationState=originalConversationState;
   if(selectionCalls.length!==2||!await run(chat,"!document.querySelector('.chat-conversation.action-feedback')&&getComputedStyle(document.querySelector('.chat-conversation[aria-pressed=true]')).transform==='none'"))throw Error('Contact selection repeated or showed a second press animation');
   await run(chat,"document.querySelector('#chat-text').focus();true");
+  for(const language of ['en','fa']){
+    await run(chat,`window.i18n.setLanguage('${language}');true`);
+    for(const [text,direction] of [['Hello','ltr'],['سلام','rtl'],['123 — سلام Hello','rtl'],['123 — Hello سلام','ltr']]){
+      if(!await run(chat,`(()=>{const field=document.querySelector('#chat-text');field.value=${JSON.stringify(text)};field.dispatchEvent(new Event('input',{bubbles:true}));return field.dir==='auto'&&getComputedStyle(field).direction==='${direction}'&&getComputedStyle(field).textAlign==='start'})()`))throw Error('Composer direction did not follow content in '+language);
+    }
+    if(!await run(chat,"(()=>{const field=document.querySelector('#chat-text');field.value='';field.dispatchEvent(new Event('input',{bubbles:true}));const data=new DataTransfer();data.setData('text/plain','۱۲۳ — سلام');field.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));return field.value==='۱۲۳ — سلام'&&getComputedStyle(field).direction==='rtl'})()"))throw Error('Pasted message direction was not detected');
+  }
+  await run(chat,"window.i18n.setLanguage('en');document.querySelector('#chat-text').value='';document.querySelector('#chat-text').dispatchEvent(new Event('input',{bubbles:true}));true");
   await click(`[data-conversation="${conversation}"] .chat-pin`);await until(()=>owner.chatStore.list().pins[conversation]);
   await until(()=>run(chat,"document.querySelector('.chat-pin[aria-pressed=true]')!==null"));
   await pause(200);if(!await run(chat,"getComputedStyle(document.querySelector('.chat-pin[aria-pressed=true] .mi')).transform!=='none'"))throw Error('Pinned chat icon did not tilt');

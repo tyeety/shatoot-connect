@@ -13,6 +13,12 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.21.3 — 2026-10-26
+
+### Changed
+
+- The message composer automatically detects text direction from its content and aligns to the matching side, independently of the interface language. Typing, paste and replacement use native browser bidirectional-text handling; leading numbers/punctuation do not override the first strong text character.
+
 ## 0.21.2 — 2026-10-26
 
 ### Added
