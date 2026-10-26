@@ -2,6 +2,7 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['نمایش پنجرهٔ چت در اتصال ریموت','Show the chat window in remote sessions'],
     ['کنترل ورودی در دسترس نیست. دوباره وصل شوید.','Remote input is unavailable. Reconnect.'],['استفاده از موس مشترک (پیشنهادی)','Use shared mouse (recommended)'],['کنترل هنگام فعالیت میزبان متوقف است','Control paused while the host is active'],['میهمان دیگری در حال کنترل است','Another guest is controlling'],['موس و کیبورد فعال','Mouse and keyboard enabled'],
     ['باز کردن مقصد اعلان انجام نشد.','Could not open the notification destination.'],
     ['تأیید','OK'],['بی‌صدا کردن اعلان‌ها','Mute notifications'],['فعال کردن اعلان‌ها','Unmute notifications'],['اعلان‌ها بی‌صدا شدند','Notifications muted'],['اعلان‌ها فعال شدند','Notifications unmuted'],['تنظیم بی‌صدا نامعتبر است.','Invalid mute setting.'],['فهرست پین‌ها تغییر کرده است. دوباره تلاش کنید.','Pinned list changed. Try again.'],

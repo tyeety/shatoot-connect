@@ -25,6 +25,13 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(host,"api.appearance('dark')");await until(()=>run(chat,"document.documentElement.dataset.theme==='dark'"));
   log('Open chat theme updates live and new notifications inherit the persisted theme');
   if(!chat.isContentProtected())throw Error('Chat is not excluded from remote screen capture');
+  await run(host,"document.querySelector('#show-chat-in-remote').checked=true;document.querySelector('#show-chat-in-remote').dispatchEvent(new Event('change'));true");
+  await until(()=>!chat.isContentProtected());
+  const visibleOwner=createWindow();await ready(visibleOwner);
+  try{if(!await run(visibleOwner,'config.showChatInRemote===true'))throw Error('Chat visibility preference did not survive reopening');await run(visibleOwner,'api.openChat()');await until(()=>states.get(visibleOwner.webContents.id).chatWindow);if(states.get(visibleOwner.webContents.id).chatWindow.isContentProtected())throw Error('New chat ignored remote visibility preference');}finally{visibleOwner.destroy();}
+  await run(host,"document.querySelector('#show-chat-in-remote').checked=false;document.querySelector('#show-chat-in-remote').dispatchEvent(new Event('change'));true");
+  await until(()=>chat.isContentProtected());
+  log('Chat remote visibility toggles live and persists for newly opened windows; default remains protected');
   if(chat.getTitle()!=='Chats · Shatoot Connect'||chat.getTitle()===host.getTitle())throw Error('Native chat/main window titles are not distinct');
   if(!await run(chat,"document.title==='Chats · Shatoot Connect' && document.querySelector('link[rel=icon]')?.href.endsWith('/chat-icon.png')"))throw Error('Chat document title/favicon is not distinct');
   const nativeImage=require('electron').nativeImage,chatIcon=nativeImage.createFromPath(path.join(__dirname,'../desktop/ui/assets/chat-icon.png')),appIcon=nativeImage.createFromPath(path.join(__dirname,'../desktop/ui/assets/app-icon.png'));

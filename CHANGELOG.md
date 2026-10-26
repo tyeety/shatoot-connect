@@ -13,6 +13,12 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.21.2 — 2026-10-26
+
+### Added
+
+- Settings > Chat and files now includes Show the chat window in remote sessions. It is off by default, persists across restarts, and immediately updates every open chat window. Visible chat windows also receive normal remote pointer hit testing; hidden chats remain excluded. On supported Windows versions this controls capture exclusion; older Windows may show a black region when hidden.
+
 ## 0.21.1 — 2026-10-26
 
 ### Changed
