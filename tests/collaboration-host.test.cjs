@@ -13,6 +13,9 @@ test('automatic reception defaults on, global and per-chat policies override bot
   const text={id:crypto.randomUUID(),conversation,sender:peer.deviceId,name:peer.name,kind:'text',text:'A background message'};
   const fakeGroup={id:crypto.randomUUID(),owner:crypto.randomUUID(),name:'Forged owner',members:[peer,{deviceId:s.identity.deviceId,name:'Me'}]};await assert.rejects(call('group',{...fakeGroup,session}),/Only the group owner/);
   await call('append',{message:text});await call('append',{message:text});assert.equal(messages.length,1,'Notify only a new incoming text');
+  const reaction={id:crypto.randomUUID(),message:text.id,conversation,sender:peer.deviceId,emoji:'👍',revision:1};await call('react',{session,reaction});assert.equal(s.chatStore.history({conversation})[0].reactions[peer.deviceId].emoji,'👍');
+  await assert.rejects(call('react',{session:crypto.randomUUID(),reaction:{...reaction,revision:2}}),/permission/);
+  await assert.rejects(call('react',{session,reaction:{...reaction,sender:crypto.randomUUID(),revision:2}}),/Invalid reaction author/);
   const change={id:crypto.randomUUID(),message:text.id,conversation,sender:peer.deviceId,removed:false,text:'Edited by sender',revision:1};await call('mutate',{session,mutation:change});assert.equal(s.chatStore.history({conversation})[0].text,'Edited by sender');
   await assert.rejects(call('mutate',{session,mutation:{...change,sender:crypto.randomUUID(),revision:2}}),/Invalid message author/);
   await call('append',{message:{...text,id:crypto.randomUUID(),sender:s.identity.deviceId},outgoing:true});assert.equal(messages.length,1);

@@ -13,6 +13,14 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.22.0 — 2026-10-26
+
+### Added
+
+- Schedule text messages in private and group chats using local date/time or the Tomorrow at 8 AM shortcut. The encrypted schedule list supports editing and cancellation. The background tray engine dispatches due messages; after a full exit or power-off, overdue messages enter the durable outbox on the next launch. Promotion from schedule to outbox is atomic and retains one stable message ID.
+- Add, change or remove your emoji reaction on text, file and voice messages. Reactions show counts and participant names, synchronize through group owners, and persist/replay while offline. Sender-bound revisions prevent stale changes from restoring a removed reaction. Older clients remain compatible and receive no unsupported reaction requests.
+- A categorized native emoji picker inserts emoji at the message caret or replaces selected text. Emoji and scheduling dialogs follow the dark/light theme and English/Persian interface.
+
 ## 0.21.4 — 2026-10-26
 
 ### Added

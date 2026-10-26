@@ -176,7 +176,7 @@
       if (op === 'profile') {
         if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
         Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status });
-        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1']};
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1','message-reactions-v1']};
       }
       if(op==='desktop-card-preview'){if(value?.kind==='wallpaper'){await this.api.collaboration('peer-preview',{session:s.id,preview:value.preview,previewKind:'wallpaper'});await this.refresh();}return true;}
       if(op==='message-receipt'){
@@ -192,6 +192,10 @@
         const normalized=this.normalize(s,value),change={...value,conversation:normalized.conversation,sender:normalized.sender,pending:normalized.pending||[]};
         await this.api.collaboration('mutate',{session:s.id,mutation:change});await this.refresh();
         for(const id of change.pending){const next=this.peer(id);if(next)this.flush(next).catch(e=>this.error(e.message));}return true;
+      }
+      if(op==='message-reaction'){
+        const normalized=this.normalize(s,{...value,id:value?.message,kind:'text'}),reaction={...value,conversation:normalized.conversation,pending:normalized.pending||[]};
+        await this.api.collaboration('react',{session:s.id,reaction});await this.refresh();for(const id of reaction.pending){const next=this.peer(id);if(next)this.flush(next).catch(()=>{});}return true;
       }
       if (op === 'message') {
         const now = Date.now(); if (!s.textRate || now - s.textRate.at > 10000) s.textRate = { at: now, count: 0 }; if (++s.textRate.count > 100) throw new Error('Too many chat messages.');
@@ -221,6 +225,18 @@
       await this.api.collaboration('append', { message, outgoing: true }); await this.refresh();
       for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(async error=>{if(!/offline/i.test(error.message)){await this.api.collaboration('failed',{id:message.id,peer:id});await this.refresh();}});
       return message;
+    }
+    async dispatchDue(){
+      if(this.scheduling)return;this.scheduling=true;
+      try{await this.ready;const messages=await this.api.collaboration('dispatch-due',{name:this.self.name});if(messages.length){await this.refresh();for(const id of new Set(messages.flatMap(m=>m.pending)))this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});}}finally{this.scheduling=false;}
+    }
+    async schedule(conversation,text,sendAt,id){const item=await this.api.collaboration('schedule',{conversation,text,sendAt,id});await this.refresh();return item;}
+    async cancelScheduled(id){await this.api.collaboration('cancel-scheduled',{id});await this.refresh();}
+    async react(conversation,message,emoji){
+      await this.ready;const row=await this.api.collaboration('message',{conversation,id:message});if(!row)throw new Error('This message is unavailable.');
+      const group=conversation.startsWith('g:')&&this.group(conversation.slice(2)),pending=group?(group.owner===this.self.deviceId?group.members.map(m=>m.deviceId).filter(id=>id!==this.self.deviceId):[group.owner]):[conversation.slice(2)];
+      const reaction={id:crypto.randomUUID(),message,conversation,sender:this.self.deviceId,emoji,revision:(row.reactions?.[this.self.deviceId]?.revision||0)+1,pending};
+      await this.api.collaboration('react',{reaction,outgoing:true});await this.refresh();for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});return reaction;
     }
     async sendPreview(s){if(s.closed||!s.features?.includes('desktop-card-preview-v1')||s.previewBusy)return;s.previewBusy=true;try{const preview=await this.api.desktopCardPreview();if(preview&&preview!==s.lastPreview){await this.rpc(s,'desktop-card-preview',s.features.includes('wallpaper-card-v1')?{kind:'wallpaper',preview}:preview);s.lastPreview=preview;}}finally{s.previewBusy=false;}}
     async changeMessage(conversation,id,text,removed=false){
@@ -255,6 +271,10 @@
         const changes=await this.api.collaboration('pending-changes',{peer:s.peer.deviceId});
         if(s.features?.includes('message-changes-v1'))for(const change of changes){const group=change.conversation.startsWith('g:')&&this.group(change.conversation.slice(2));if(group&&!await this.announceGroup(s,group))continue;await this.rpc(s,'message-change',{...change,pending:undefined,kind:'text'});await this.api.collaboration('delivered-change',{id:change.id,peer:s.peer.deviceId});}
         else if(changes.length&&s.features&&!s.changeCompatibilityNotice){s.changeCompatibilityNotice=true;this.error('Update the other computer to synchronize message changes.');}
+        if(s.features?.includes('message-reactions-v1'))for(const reaction of await this.api.collaboration('pending-reactions',{peer:s.peer.deviceId})){
+          const group=reaction.conversation.startsWith('g:')&&this.group(reaction.conversation.slice(2));if(group&&!await this.announceGroup(s,group))continue;
+          await this.rpc(s,'message-reaction',{...reaction,pending:undefined});await this.api.collaboration('delivered-reaction',{id:reaction.id,peer:s.peer.deviceId});
+        }
         await this.refresh();
         } while (s.flushAgain && !s.closed);
       } finally { s.flushing = false; }

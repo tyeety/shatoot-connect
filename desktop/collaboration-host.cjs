@@ -22,6 +22,17 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     if(op==='reorder-pins')return history.reorderPins(value.order);
     if (op === 'file-policy') return history.filePolicy(value.conversation,value.mode);
     if (op === 'pending') return history.pending(value.peer);
+    if(op==='schedule')return history.schedule(value);
+    if(op==='scheduled')return history.scheduled(value.conversation);
+    if(op==='cancel-scheduled')return history.cancelScheduled(value.id);
+    if(op==='dispatch-due')return history.dispatchDue(value.name);
+    if(op==='pending-reactions')return history.pendingReactions(value.peer);
+    if(op==='delivered-reaction')return history.deliveredReaction(value.id,value.peer);
+    if(op==='react'){
+      const reaction=value.reaction;
+      if(!value.outgoing){const g=grant(s,value.session),group=history.load().groups[reaction?.conversation?.slice(2)];if(reaction?.conversation===`p:${g.peer.deviceId}`){if(reaction.sender!==g.peer.deviceId)throw new Error('Invalid reaction author.');}else if(!group||(group.owner!==g.peer.deviceId&&(group.owner!==s.identity.deviceId||reaction.sender!==g.peer.deviceId)))throw new Error('Invalid reaction author.');}
+      return history.react(reaction,value.outgoing===true);
+    }
     if(op==='pending-receipts')return history.pendingReceipts(grant(s,value.session).peer.deviceId);
     if(op==='ack-receipt')return history.ackReceipt(value.id,grant(s,value.session).peer.deviceId);
     if(op==='receipt')return history.receipt(value.receipt,grant(s,value.session).peer.deviceId);

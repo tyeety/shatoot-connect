@@ -58,7 +58,7 @@ class ChatStore {
     const pending = outgoing || relay ? [...new Set((value.pending || []).filter(id => UUID.test(id) && id !== this.self && (!relay || data.groups[key].members.some(m => m.deviceId === id))))] : [];
     const message = { id: value.id, conversation: value.conversation, sender: value.sender, name: value.name, kind: value.kind, text: value.text, at: Number.isSafeInteger(value.at) && Math.abs(Date.now() - value.at) < 365 * 86400000 ? value.at : Date.now(), receivedAt: Math.max(Date.now(), (data.messages.at(-1)?.receivedAt || 0) + 1), status: outgoing ? (pending.length ? 'queued' : 'sent') : 'received', pending };
     message.recipients=outgoing?(value.conversation.startsWith('g:')?data.groups[key].members.map(m=>m.deviceId).filter(id=>id!==this.self):[key]):[];
-    return this.change(d => { const change=(d.mutations||[]).find(c=>c.message===message.id&&c.conversation===message.conversation&&c.sender===message.sender);if(change&&(change.removed||message.kind==='text'))this.applyMutation(message,change);if(!message.deleted){d.messages.push(message);if(!outgoing)this.queueReceipt(d,message,'delivered');} return { message, duplicate: false }; });
+    return this.change(d => { const change=(d.mutations||[]).find(c=>c.message===message.id&&c.conversation===message.conversation&&c.sender===message.sender);if(change&&(change.removed||message.kind==='text'))this.applyMutation(message,change);if(!message.deleted){for(const reaction of d.reactionChanges||[])if(reaction.message===message.id&&reaction.conversation===message.conversation){message.reactions||={};message.reactions[reaction.sender]={emoji:reaction.emoji,revision:reaction.revision};}d.messages.push(message);if(!outgoing)this.queueReceipt(d,message,'delivered');} return { message, duplicate: false }; });
   }
   eraseMessage(data,conversation,id){data.messages=data.messages.filter(m=>m.conversation!==conversation||m.id!==id);for(const [token,attachment]of Object.entries(data.attachments))if(attachment.conversation===conversation&&attachment.message===id)delete data.attachments[token];for(const [key,receipt]of Object.entries(data.receipts||{}))if(receipt.conversation===conversation&&receipt.message===id)delete data.receipts[key];}
   applyMutation(message,change){message.revision=change.revision;message.editedAt=change.at;message.deleted=change.removed;message.text=change.removed?'':change.text;}
@@ -112,7 +112,7 @@ class ChatStore {
     return this.change(data => { const token = crypto.randomUUID(); data.attachments[token] = { conversation, message, files }; return token; });
   }
   list() {
-    const data = this.load(); return { filePolicies: {...data.filePolicies}, muted:{...data.muted}, pins:{...data.pins},pinOrder:[...(data.pinOrder||[])],lastSelected:data.lastSelected||'', unread:this.unread(), contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => !m.deleted && m.conversation === id).at(-1) })) };
+    const data = this.load(); return { scheduled:[...(data.scheduled||[])],filePolicies: {...data.filePolicies}, muted:{...data.muted}, pins:{...data.pins},pinOrder:[...(data.pinOrder||[])],lastSelected:data.lastSelected||'', unread:this.unread(), contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => !m.deleted && m.conversation === id).at(-1) })) };
   }
   reorderPins(order) {
     const pins=Object.keys(this.load().pins||{});
@@ -141,6 +141,35 @@ class ChatStore {
     return this.load().messages.filter(m => !m.deleted && m.conversation === conversation && m.receivedAt < before && (!search || m.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).slice(-Math.max(1, Math.min(100, Number(limit) || 100))).map(m => ({ ...m,pending:[...new Set([...m.pending,...(this.data.mutations||[]).filter(c=>c.message===m.id&&c.conversation===conversation).flatMap(c=>c.pending)])],attachment:m.deleted?undefined:Object.entries(this.data.attachments).find(([, a]) => a.message === m.id && a.conversation === conversation)?.[0] }));
   }
   pending(peer) { return this.load().messages.filter(m => !m.deleted && m.pending.includes(peer)); }
+  schedule(value){
+    const data=this.load(),conversation=value?.conversation,key=conversation?.slice(2);
+    if(!/^[pg]:[a-f0-9-]{36}$/i.test(conversation||'')||!(conversation.startsWith('p:')?data.contacts[key]:data.groups[key])||typeof value.text!=='string'||!value.text.trim()||value.text.length>8000||!Number.isSafeInteger(value.sendAt)||value.sendAt<=Date.now()||value.sendAt>Date.now()+366*86400000)throw new Error('Choose a future time and enter a message.');
+    if(value.id&&!data.scheduled?.some(m=>m.id===value.id&&m.conversation===conversation))throw new Error('Scheduled message was already sent or removed.');
+    if(!value.id&&(data.scheduled||[]).length>=500)throw new Error('Scheduled message limit reached.');
+    const item={id:value.id||crypto.randomUUID(),conversation,text:value.text.trim(),sendAt:value.sendAt};
+    return this.change(d=>{d.scheduled=(d.scheduled||[]).filter(m=>m.id!==item.id);d.scheduled.push(item);return item;});
+  }
+  scheduled(conversation){return (this.load().scheduled||[]).filter(m=>m.conversation===conversation).sort((a,b)=>a.sendAt-b.sendAt);}
+  cancelScheduled(id){return this.change(d=>{d.scheduled=(d.scheduled||[]).filter(m=>m.id!==id);});}
+  dispatchDue(name,now=Date.now()){
+    const due=(this.load().scheduled||[]).filter(m=>m.sendAt<=now);if(!due.length)return [];
+    return this.change(d=>{const messages=[];for(const item of due){const group=item.conversation.startsWith('g:')&&d.groups[item.conversation.slice(2)],recipients=group?group.members.map(m=>m.deviceId).filter(id=>id!==this.self):[item.conversation.slice(2)],pending=group&&group.owner!==this.self?[group.owner]:recipients;
+      if(!d.messages.some(m=>m.id===item.id&&m.conversation===item.conversation)){const message={id:item.id,conversation:item.conversation,sender:this.self,name:String(name||'').slice(0,60),kind:'text',text:item.text,at:now,scheduledAt:item.sendAt,receivedAt:Math.max(now,(d.messages.at(-1)?.receivedAt||0)+1),status:pending.length?'queued':'sent',pending,recipients};d.messages.push(message);messages.push(message);}
+    }d.scheduled=(d.scheduled||[]).filter(m=>m.sendAt>now);return messages;});
+  }
+  react(value,outgoing=false){
+    const data=this.load();if(!value||!UUID.test(value.id)||!UUID.test(value.message)||!UUID.test(value.sender)||!/^([pg]):[a-f0-9-]{36}$/i.test(value.conversation)||typeof value.emoji!=='string'||value.emoji.length>24||value.emoji&&(!/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(value.emoji)||[...new Intl.Segmenter('en',{granularity:'grapheme'}).segment(value.emoji)].length!==1)||!Number.isSafeInteger(value.revision)||value.revision<1||value.revision>1000000000||outgoing&&value.sender!==this.self)throw new Error('Invalid reaction.');
+    const group=value.conversation.startsWith('g:')&&data.groups[value.conversation.slice(2)],message=data.messages.find(m=>m.id===value.message&&m.conversation===value.conversation);
+    if(group?!group.members.some(m=>m.deviceId===value.sender):!data.contacts[value.conversation.slice(2)]||!outgoing&&value.sender!==value.conversation.slice(2))throw new Error('Invalid reaction author.');
+    if(outgoing&&!message)throw new Error('This message is unavailable.');
+    if((data.mutations||[]).some(m=>m.message===value.message&&m.conversation===value.conversation&&m.removed))return {duplicate:true};
+    const previous=(data.reactionChanges||[]).find(r=>r.message===value.message&&r.conversation===value.conversation&&r.sender===value.sender);if(previous&&previous.revision>=value.revision)return {duplicate:true};
+    const pending=outgoing||group?.owner===this.self?[...new Set((value.pending||[]).filter(id=>UUID.test(id)&&id!==this.self&&(!group||group.members.some(m=>m.deviceId===id))))]:[];
+    const reaction={id:value.id,message:value.message,conversation:value.conversation,sender:value.sender,emoji:value.emoji,revision:value.revision,pending};
+    return this.change(d=>{d.reactionChanges=(d.reactionChanges||[]).filter(r=>!(r.message===reaction.message&&r.conversation===reaction.conversation&&r.sender===reaction.sender));d.reactionChanges.push(reaction);if(message){message.reactions||={};message.reactions[reaction.sender]={emoji:reaction.emoji,revision:reaction.revision};}return {duplicate:false,reaction};});
+  }
+  pendingReactions(peer){return (this.load().reactionChanges||[]).filter(r=>r.pending.includes(peer));}
+  deliveredReaction(id,peer){if(this.load().reactionChanges?.some(r=>r.id===id&&r.pending.includes(peer)))return this.change(d=>{const reaction=d.reactionChanges.find(r=>r.id===id);reaction.pending=reaction.pending.filter(p=>p!==peer);});}
   files(token) { const attachment = this.load().attachments[token]; if (!attachment || !this.load().messages.some(m=>m.id===attachment.message&&m.conversation===attachment.conversation&&!m.deleted)) throw new Error('This attachment is unavailable.'); return attachment.files; }
 }
 module.exports = { ChatStore };

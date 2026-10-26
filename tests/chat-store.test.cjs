@@ -15,6 +15,32 @@ function fixture(t) {
   const store = new ChatStore(options); store.contact({ deviceId: peer, name: 'همکار' }, { type: 'lan', address: '192.168.1.10:8788' }); return { store, options, self, peer, other };
 }
 
+test('scheduled messages persist, edit/cancel and atomically become a single durable outgoing message when due',t=>{
+  const {store,options,self,peer}=fixture(t),conversation=`p:${peer}`,sendAt=Date.now()+60000;
+  const scheduled=store.schedule({conversation,text:'Tomorrow at 8',sendAt});assert.equal(store.history({conversation}).length,0);
+  const reopened=new ChatStore(options);assert.equal(reopened.scheduled(conversation)[0].id,scheduled.id);
+  reopened.schedule({...scheduled,text:'Edited schedule',sendAt:sendAt+1000});assert.equal(reopened.dispatchDue('Me',sendAt).length,0);
+  const save=reopened.save;reopened.save=()=>{throw Error('Disk full')};assert.throws(()=>reopened.dispatchDue('Me',sendAt+2000),/Disk full/);reopened.save=save;
+  assert.equal(reopened.scheduled(conversation).length,1);assert.equal(reopened.history({conversation}).length,0);
+  const sent=reopened.dispatchDue('Me',sendAt+2000);assert.equal(sent.length,1);assert.equal(sent[0].id,scheduled.id);assert.equal(sent[0].text,'Edited schedule');assert.equal(sent[0].sender,self);assert.deepEqual(sent[0].pending,[peer]);
+  assert.equal(new ChatStore(options).dispatchDue('Me',sendAt+3000).length,0);assert.equal(reopened.scheduled(conversation).length,0);
+  assert.throws(()=>reopened.schedule({...scheduled,sendAt:sendAt+5000}),/already sent/);
+  const cancelled=reopened.schedule({conversation,text:'Cancel me',sendAt});reopened.cancelScheduled(cancelled.id);assert.equal(reopened.dispatchDue('Me',sendAt+10000).length,0);
+  assert.throws(()=>store.schedule({conversation,text:'Past',sendAt:Date.now()-1000}),/future time/);
+});
+
+test('reactions authenticate actors, persist offline changes, handle removal and out-of-order replay',t=>{
+  const {store,options,self,peer,other}=fixture(t),conversation=`p:${peer}`,message=crypto.randomUUID();
+  store.append({id:message,conversation,sender:peer,name:'Peer',kind:'text',text:'React here'});
+  const reaction={id:crypto.randomUUID(),message,conversation,sender:self,emoji:'👍',revision:1,pending:[peer]};store.react(reaction,true);
+  const reopened=new ChatStore(options);assert.equal(reopened.history({conversation})[0].reactions[self].emoji,'👍');assert.equal(reopened.pendingReactions(peer).length,1);
+  store.react({...reaction,id:crypto.randomUUID(),emoji:'',revision:2},true);store.react(reaction,true);assert.equal(store.history({conversation})[0].reactions[self].emoji,'');
+  const theirs={...reaction,id:crypto.randomUUID(),sender:peer,emoji:'❤️'};store.react(theirs);assert.equal(store.history({conversation})[0].reactions[peer].emoji,'❤️');
+  assert.throws(()=>store.react({...theirs,sender:other}),/author/);assert.throws(()=>store.react({...theirs,emoji:'<script>'}),/Invalid reaction/);
+  const future=crypto.randomUUID();store.react({...theirs,id:crypto.randomUUID(),message:future});store.append({id:future,conversation,sender:peer,name:'Peer',kind:'text',text:'Delayed original'});assert.equal(store.history({conversation}).find(m=>m.id===future).reactions[peer].emoji,'❤️');
+  for(const row of store.pendingReactions(peer))store.deliveredReaction(row.id,peer);assert.equal(store.pendingReactions(peer).length,0);
+});
+
 test('delivery and seen receipts are authenticated, monotonic and survive offline/restart',t=>{
   const {store,options,self,peer,other}=fixture(t),conversation=`p:${peer}`,id=crypto.randomUUID();
   store.append({id,conversation,sender:self,name:'Me',kind:'text',text:'Hello',pending:[peer]},true);
