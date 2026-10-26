@@ -13,6 +13,14 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.23.2 — 2026-10-26
+
+### Fixed
+
+- Automatic desktop quality no longer compares an idle/startup bandwidth estimate to the nominal profile bitrate or repeatedly caps transmission below the transport's own estimate. Stable ceilings preserve WebRTC congestion control and recovery; genuine loss, packet queue delay, added latency and encoder CPU pressure still trigger backoff.
+- Ordinary backoff moves one tier at a time; automatic high-resolution tiers prioritize frame rate, while manual Quality/LAN modes preserve their existing resolution preference. Constant VPN RTT alone no longer causes repeated downgrades.
+- Added regression coverage and a reproducible local animated-desktop performance probe. On the same development machine/fixture, hardware H.264 improved from 720p/28.1 FPS to 1080p/40.8 FPS at approximately 2.5 Mbps; receive jitter-buffer delay fell from 22 to 16 ms. This is local evidence, not a two-PC/VPN acceptance claim.
+
 ## 0.23.1 — 2026-10-26
 
 ### Added

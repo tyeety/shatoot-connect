@@ -3,7 +3,7 @@
 (function(root){
   class QualityPolicy {
     constructor(profiles){this.profiles=profiles;this.order=['economy','speed','balanced','quality','lan'].filter(n=>profiles[n]);this.reset('balanced');}
-    reset(name){this.name=this.profiles[name]?name:'balanced';this.bad=0;this.good=0;this.lastChange=-Infinity;this.previous=null;}
+    reset(name){this.name=this.profiles[name]?name:'balanced';this.bad=0;this.good=0;this.lastChange=-Infinity;this.previous=null;this.baseRtt=null;}
     sample(report,at){
       let video,pair,remote;
       for(const s of report.values()){
@@ -17,16 +17,25 @@
       const rtt=pair?.currentRoundTripTime??remote?.roundTripTime;
       const sent=this.previous&&this.previous.id===video.id?Math.max(0,video.packetsSent-this.previous.sent):0;
       const lost=this.previous&&this.previous.remote===remote?.id?Math.max(0,(remote?.packetsLost||0)-this.previous.lost):0;
-      this.previous={id:video.id,remote:remote?.id,sent:video.packetsSent||0,lost:remote?.packetsLost||0};
+      const queueMs=sent>0&&video.totalPacketSendDelay!==undefined&&this.previous?.queue!==undefined?Math.max(0,video.totalPacketSendDelay-this.previous.queue)*1000/sent:0;
+      this.previous={id:video.id,remote:remote?.id,sent:video.packetsSent||0,lost:remote?.packetsLost||0,queue:video.totalPacketSendDelay};
+      if(Number.isFinite(rtt)&&rtt>0)this.baseRtt=this.baseRtt===null?rtt:Math.min(this.baseRtt,rtt);
       const loss=sent>0?lost/sent:0,index=this.order.indexOf(this.name),current=this.profiles[this.name];
-      const congested=loss>.035||rtt>.3||video.qualityLimitationReason==='bandwidth'||video.qualityLimitationReason==='cpu'||capacity!==null&&capacity<current.bitrate*.7;
-      const severe=loss>.12||rtt>.7||capacity!==null&&capacity<1000000;
+      // BWE is an estimate, not a throughput test. In particular, a static
+      // desktop/startup probe can be far below the nominal profile ceiling.
+      // Lower capture quality only for actual pressure; WebRTC owns pacing.
+      const latencyPressure=this.baseRtt!==null&&Number.isFinite(rtt)&&rtt-this.baseRtt>Math.max(.08,this.baseRtt*.5);
+      // Hardware encoders pipeline frames: average encode duration alone does
+      // not prove throughput pressure. Use the encoder's actual CPU signal.
+      const cpu=video.qualityLimitationReason==='cpu';
+      const congested=loss>.035||queueMs>40||latencyPressure||cpu||video.qualityLimitationReason==='bandwidth';
+      const severe=loss>.12||queueMs>150||capacity!==null&&capacity<1000000;
       this.bad=congested?this.bad+1:0;
-      this.good=!congested&&sent>=20&&capacity!==null?this.good+1:0;
+      this.good=!congested&&!severe&&sent>=20&&capacity!==null?this.good+1:0;
       let next=index;
       if(index>0&&(severe||this.bad>=2)&&(severe||at-this.lastChange>=6000)){
         next=index-1;
-        while(next>0&&capacity!==null&&this.profiles[this.order[next]].bitrate>capacity*.85)next--;
+        if(severe)while(next>0&&capacity!==null&&this.profiles[this.order[next]].bitrate>capacity*.85)next--;
       }else if(index<this.order.length-1&&this.good>=5&&at-this.lastChange>=10000){
         // Probe up one tier after sustained active traffic. Idle screens are not
         // throughput tests; absence of sent packets never proves spare capacity.
@@ -36,7 +45,10 @@
       }
       if(next!==index){this.name=this.order[next];this.lastChange=at;this.bad=this.good=0;}
       const ceiling=this.profiles[this.name].bitrate;
-      return {name:this.name,bitrate:Math.round(Math.max(350000,Math.min(ceiling,capacity===null?ceiling:capacity*.85)))};
+      // Repeatedly imposing 85% of BWE creates an application-side ratchet:
+      // the transport measures our own limit and the next poll cuts it again.
+      // Keep a stable ceiling so congestion control can probe and recover.
+      return {name:this.name,bitrate:ceiling};
     }
   }
   class StreamQuality {
@@ -54,17 +66,17 @@
       const task=this.queue.catch(()=>{}).then(async()=>{
         if(this.stopped||revision!==this.revision)return;
         const p=this.profiles[name],track=this.stream.getVideoTracks()[0];if(!p||!track||track.readyState==='ended')return;
-        if(this.appliedName!==name){
-          track.contentHint=['quality','lan'].includes(name)?'detail':'motion';
+        if(this.appliedName!==name||this.appliedAutomatic!==this.automatic){
+          track.contentHint=!this.automatic&&['quality','lan'].includes(name)?'detail':'motion';
           await track.applyConstraints({width:{max:p.width},height:{max:p.height},frameRate:{ideal:p.fps,max:p.fps}});
         }
         if(this.stopped||revision!==this.revision)return;
         const params=this.sender.getParameters();if(!params.encodings?.length)params.encodings=[{}];
         Object.assign(params.encodings[0],{maxBitrate:bitrate,maxFramerate:p.fps,priority:'high',networkPriority:'high'});
-        params.degradationPreference=['quality','lan'].includes(name)?'maintain-resolution':'maintain-framerate';
+        params.degradationPreference=!this.automatic&&['quality','lan'].includes(name)?'maintain-resolution':'maintain-framerate';
         await this.sender.setParameters(params);
         if(this.stopped||revision!==this.revision)return;
-        this.name=this.appliedName=name;this.bitrate=bitrate;this.onChange({automatic:this.automatic,name,bitrate});
+        this.name=this.appliedName=name;this.appliedAutomatic=this.automatic;this.bitrate=bitrate;this.onChange({automatic:this.automatic,name,bitrate});
       });this.queue=task;return task;
     }
     async poll(){
