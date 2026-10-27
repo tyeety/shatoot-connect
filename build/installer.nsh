@@ -72,8 +72,8 @@ Var SCLogHandle
   LangString appClosing ${LANG_PERSIAN} "در حال بستن برنامه…"
   LangString SCWelcome ${LANG_ENGLISH} "Install Shatoot Connect"
   LangString SCWelcome ${LANG_PERSIAN} "نصب Shatoot Connect"
-  LangString SCWelcomeBody ${LANG_ENGLISH} "Fast remote desktop for Windows.$\r$\n$\r$\nSetup works offline. Your saved computers, encrypted passwords and connection settings are kept during upgrades.$\r$\n$\r$\nOpen application/chat windows must be closed. Background instances close automatically."
-  LangString SCWelcomeBody ${LANG_PERSIAN} "ارتباط و کنترل از راه دور ویندوز.$\r$\n$\r$\nنصب بدون اینترنت انجام می‌شود. هنگام ارتقا، سیستم‌های ذخیره‌شده، رمزهای رمزنگاری‌شده و تنظیمات اتصال حفظ می‌شوند.$\r$\n$\r$\nپنجره‌های باز برنامه و چت را ببندید. برنامهٔ پس‌زمینه خودکار بسته می‌شود."
+  LangString SCWelcomeBody ${LANG_ENGLISH} "Fast remote desktop for Windows.$\r$\n$\r$\nSetup works offline. Your saved computers, encrypted passwords and connection settings are kept during upgrades.$\r$\n$\r$\nSetup automatically closes the previous Shatoot Connect version, including its chat and remote windows."
+  LangString SCWelcomeBody ${LANG_PERSIAN} "ارتباط و کنترل از راه دور ویندوز.$\r$\n$\r$\nنصب بدون اینترنت انجام می‌شود. هنگام ارتقا، سیستم‌های ذخیره‌شده، رمزهای رمزنگاری‌شده و تنظیمات اتصال حفظ می‌شوند.$\r$\n$\r$\nنصب‌کننده نسخهٔ قبلی برنامه، پنجره‌های چت و اتصال‌های آن را خودکار می‌بندد."
   LangString SCReviewTitle ${LANG_ENGLISH} "Ready to install"
   LangString SCReviewTitle ${LANG_PERSIAN} "آمادهٔ نصب"
   LangString SCReviewBody ${LANG_ENGLISH} "Review the destination. Use Back to change it."
@@ -125,11 +125,15 @@ Var SCLogHandle
   !endif
 !macroend
 
-; Close verified background instances; visible application/chat windows remain open.
+; Upgrade closes verified instances in this account/session; uninstall retains its active-window guard.
 !macro customCheckAppRunning
   InitPluginsDir
   File /oname=$PLUGINSDIR\ShatootConnect-CloseBackground.ps1 "${PROJECT_DIR}\build\installer-close.ps1"
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ShatootConnect-CloseBackground.ps1"'
+  !ifdef BUILD_UNINSTALLER
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ShatootConnect-CloseBackground.ps1"'
+  !else
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ShatootConnect-CloseBackground.ps1" -CloseVisible -MaximumVersion "${VERSION}"'
+  !endif
   Pop $R1
   Pop $R2
   ${Do}

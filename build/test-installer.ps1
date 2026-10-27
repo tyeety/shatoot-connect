@@ -105,7 +105,7 @@ try {
         $fixture.Refresh()
         if ($fixture.HasExited) { throw 'Installer terminated the running process.' }
     } finally { Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue; $fixture = $null }
-    Write-Output 'Running application returns 1618 without terminating the session.'
+    Write-Output 'An unrelated same-name process returns 1618 and is preserved.'
 
     $verifiedDir=Join-Path $testRoot 'verified-background';New-Item -ItemType Directory -Path $verifiedDir|Out-Null
     $verifiedExe=Join-Path $verifiedDir 'Shatoot Connect.exe'
@@ -134,7 +134,13 @@ public class VerifiedSetupFixture {
         & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $closer -OnlyExecutable $verifiedExe
         if(!$fixture.WaitForExit(5000)){throw 'Verified background app was not closed.'}
     }finally{Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue;$fixture=$null}
-    Write-Output 'Installer background closer preserves a visible product window and closes a verified hidden legacy process.'
+    $fixture=Start-Process -FilePath $verifiedExe -ArgumentList 'visible' -WindowStyle Hidden -PassThru
+    try{
+        for($i=0;$i -lt 50;$i++){$fixture.Refresh();if($fixture.MainWindowHandle -ne 0){break};Start-Sleep -Milliseconds 100}
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $closer -OnlyExecutable $verifiedExe -CloseVisible -MaximumVersion $package.version
+        if(!$fixture.WaitForExit(8000)){throw 'Upgrade closer left the verified visible legacy app running.'}
+    }finally{Stop-Process -Id $fixture.Id -Force -ErrorAction SilentlyContinue;$fixture=$null}
+    Write-Output 'Upgrade closes verified visible/hidden legacy apps; background-only mode and unrelated-process guards are preserved.'
     $profile = Join-Path ([Environment]::GetFolderPath('ApplicationData')) $package.name
     New-Item -ItemType Directory -Path $profile -Force | Out-Null
     $profileProbe = Join-Path $profile ('installer-preservation-' + [Guid]::NewGuid().ToString('N'))

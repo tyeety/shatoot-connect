@@ -97,8 +97,16 @@ async function main() {
           if (errors.length) throw new Error(`${language} toolbar: ${errors.join(', ')}`);
         }
         console.log('Final portable UI opened with the correct version/profile; toolbar icon alignment and SVG loading passed in English and Persian.');
-        await evaluate("window.shatootconnect.lifecycle('quit')");
-        await until(() => child.exitCode !== null, 20000);
+        await evaluate("window.shatootconnect.openRemote({address:'127.0.0.1:40101',password:''})");
+        let viewerTarget;await until(async()=>{const pages=await fetch(`http://127.0.0.1:${port}/json/list`).then(r=>r.json());viewerTarget=pages.find(p=>p.url.includes('/ui/index.html?viewer=1'));return !!viewerTarget;});
+        const viewerSocket=new WebSocket(viewerTarget.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{viewerSocket.once('open',resolve);viewerSocket.once('error',reject);});
+        try{let viewerSequence=0;await until(()=>new Promise((resolve,reject)=>{viewerSocket.once('message',raw=>{const reply=JSON.parse(raw);if(reply.error||reply.result?.exceptionDetails)reject(Error('Packaged viewer failed'));else resolve(reply.result?.result?.value===true);});viewerSocket.send(JSON.stringify({id:++viewerSequence,method:'Runtime.evaluate',params:{expression:"window.shatootconnectReady===true&&!document.querySelector('#remote-loading').hidden",returnByValue:true}}));}));}finally{viewerSocket.close();}
+        const closeEnvironment={...process.env};delete closeEnvironment.ELECTRON_RUN_AS_NODE;
+        const closer=spawn(executable,[`--user-data-dir=${profile}`,'--quit-for-update'],{windowsHide:true,stdio:'ignore',env:closeEnvironment});closer.on('error',error=>{closer.launchError=error;});
+        await until(()=>{if(closer.launchError)throw closer.launchError;return child.exitCode!==null;},30000);
+        await until(()=>closer.exitCode!==null,30000);
+        if(closer.exitCode!==0)throw Error('Packaged upgrade-close command failed');
+        console.log('Visible main, chat and connecting remote windows shut down through the installer upgrade command.');
         if (child.exitCode !== 0) throw new Error('Packaged app did not exit cleanly.');
       } finally { socket.close(); }
     }

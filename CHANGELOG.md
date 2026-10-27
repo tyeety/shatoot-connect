@@ -13,6 +13,28 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.27.0 — 2026-10-27
+
+### Added
+
+- Recover established remote sessions after unexpected network/transport loss with capped backoff, a retry-now action and cancellation. Fresh connections still require normal host authentication/approval. Explicit host stops, approval denial, local cancellation and window closing stop recovery.
+- Open remote windows directly into a loading screen with the last received desktop frame, a saved-wallpaper fallback and a password form when needed. Keep up to 64 route/identity-bound previews encrypted locally; session frames are never published through discovery or chat profiles.
+
+### Changed
+
+- Restore computer cards to an avatar on the left with name/IP in two rows. Keep Chat, Connect and More visible; put pin, rename, shortcut, saved-connection removal, system details and reported version in the More menu, with keyboard navigation.
+- Setup automatically closes verified previous app instances in the installing account/session, including visible chat/remote windows. New versions support a graceful upgrade-exit command; legacy versions have a verified-process fallback. Unrelated processes, newer versions and other accounts retain their guards; uninstall retains its visible-window guard.
+
+### Fixed
+
+- Negotiate disposable high-priority mouse motion separately from reliable buttons/keys. Sequence/epoch barriers reject reordered movement across click, drag and release boundaries; absolute button coordinates and host priority remain authoritative. Legacy peers retain ordered input.
+- Prefer H.264 in Quality mode as well as other desktop modes. On the same local animated 1920×1200 fixture, Quality mode improved from 32.9 to 36.3 received FPS and median frame-callback age fell from 115 to 69.8 ms (p95 163.7 to 111.2 ms). These are local measurements, not VPN or AnyDesk acceptance results; alternative capture flags that performed worse or failed were not enabled.
+- Validate loading/preview lifecycle, automatic versus intentional disconnect, actual RTC recovery and fresh consent, motion ordering/compatibility, card layout/menus, legacy app closure and the packaged upgrade-close command.
+
+### Compatibility
+
+- Update both desktop clients for disposable motion and loading previews. The coordinator adds optional disconnect-cause fields; update the Internet coordinator for recovery after remote-host loss. Ambiguous legacy end messages terminate safely. Direct LAN/VPN listeners are included with the desktop update.
+
 ## 0.26.0 — 2026-10-27
 
 ### Added

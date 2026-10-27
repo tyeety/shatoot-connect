@@ -45,6 +45,7 @@ setInterval(()=>{inputControl.tick();publishInputControl();},150).unref();
 let localServer, tray, quitting = false;
 let settingsCache;
 const profile = () => ({ ...require('../shared/profile.cjs').profile(settings().profile),appVersion:app.getVersion(), name: settings().profile?.name || require('node:os').hostname() });
+const sessionPreviews=new (require('./session-preview.cjs').SessionPreviews)({file:path.join(app.getPath('userData'),'session-previews.json'),encrypt:text=>safeStorage.encryptString(text),decrypt:bytes=>safeStorage.decryptString(bytes)});
 const update = new (require('./updater.cjs').Updater)({ version: app.getVersion(), directory: path.join(app.getPath('userData'), 'updates'), portable: !!process.env.PORTABLE_EXECUTABLE_FILE, request: require('./updater.cjs').electronResponse,
   changed: value => { for (const s of states.values()) { if (!s.win.isDestroyed()) s.win.webContents.send('update-status', value); } } });
 function settings() {
@@ -117,7 +118,7 @@ function identity() {
   saveSettings({ deviceId: result.deviceId, deviceSecret: safeStorage.encryptString(result.deviceSecret).toString('base64') });
   return result;
 }
-if(!smoke){const locked=app.requestSingleInstanceLock();if(!locked||process.argv.includes('--quit-if-background'))app.quit();}
+if(!smoke){const locked=app.requestSingleInstanceLock();if(!locked||process.argv.includes('--quit-if-background')||process.argv.includes('--quit-for-update'))app.quit();}
 
 function release(s) {
   displayPrivacy.release(s);s.privacyPermitted=false;
@@ -283,7 +284,7 @@ ipcMain.on('host-send', (e, message) => { const s = state(e,false); if (!s?.owne
 ipcMain.handle('host-sessions-stop', e => { const owner = state(e); for (const s of states.values()) if (s.owner === owner) closeExtraHost(s); });
 const chatPending = new Map();
 ipcMain.handle('app-ready',e=>{
-  const s=state(e);if(s.viewerOwner)return;if(!smoke&&!s.owner&&!s.chatLaunchHandled&&process.argv.includes('--open-chat')){s.chatLaunchHandled=true;openChat(s);}if(smoke||!app.isPackaged||s.owner||s.readyAnnounced)return;s.readyAnnounced=true;
+  const s=state(e);if(s.viewerOwner){s.win.show();s.win.focus();return;}if(!smoke&&!s.owner&&!s.chatLaunchHandled&&process.argv.includes('--open-chat')){s.chatLaunchHandled=true;openChat(s);}if(smoke||!app.isPackaged||s.owner||s.readyAnnounced)return;s.readyAnnounced=true;
   const launcher=getLauncher();launcher.repair(app.getPath('desktop'),shell);
   try{const resultFile=path.join(update.directory,'last-update.json'),result=JSON.parse(fs.readFileSync(resultFile,'utf8'));if(result.state==='error'&&!result.reported){update.emit({state:'error',version:result.version,error:result.error});notices.toast(s.win,result.error,{onActivate:()=>openUpdateSettings(s)});fs.writeFileSync(resultFile,JSON.stringify({...result,reported:true}));}}catch{}
   for(const record of preferences.list())if(record.shortcut&&fs.existsSync(path.join(app.getPath('desktop'),preferences.shortcutName(record.id))))createFavoriteShortcut(record.id);
@@ -307,14 +308,15 @@ function openChat(s,target) {
 }
 ipcMain.handle('chat-target',e=>{const s=state(e);if(s.chatWindow?.webContents!==e.sender)throw new Error('Invalid chat target request.');const target=s.chatTarget;s.chatTarget=null;return target;});
 function openUpdateSettings(s){showMain(s);s.win.webContents.send('settings-open','updates');}
-ipcMain.handle('chat-open', e => {const s=state(e);return openChat(s.viewerOwner||s);});
+ipcMain.handle('chat-open', (e,deviceId) => {const s=state(e),owner=s.viewerOwner||s;if(deviceId!==undefined){if(!require('./discovery.cjs').UUID.test(deviceId)||!owner.chatStore?.load().contacts[deviceId])throw Error('Invalid computer.');return openChat(owner,{conversation:'p:'+deviceId});}return openChat(owner);});
 ipcMain.handle('remote-open',(e,value)=>{
   const caller=state(e),owner=caller.viewerOwner||caller;
   if(!value||typeof value!=='object'||typeof value.address!=='string'||value.address.length>300||typeof value.password!=='string'||value.password.length>128||value.serverKey!==undefined&&(typeof value.serverKey!=='string'||value.serverKey.length>500))throw Error('Invalid remote destination.');
-  const target={...preferences.destination(value),password:value.password,serverKey:value.serverKey||''};delete target.key;
+  const known=preferences.decorate(value),target={...preferences.destination(value),password:value.password,serverKey:value.serverKey||'',deviceId:known.deviceId||'',preview:known.preview||''};delete target.key;
   if([...states.values()].filter(s=>s.viewerOwner===owner).length>=8)throw Error('Close a remote window before opening another.');
   createWindow({viewerOwner:owner,target});return true;
 });
+ipcMain.handle('remote-preview',(e,value)=>{const s=state(e);if(!s.viewerOwner||!s.outgoingDesktop||!s.remoteTarget||!value||typeof value.image!=='string')throw Error('No active remote session.');if(value.image.length>200000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.image))throw Error('Invalid session preview.');const image=require('electron').nativeImage.createFromDataURL(value.image),size=image.getSize();if(image.isEmpty()||size.width>640||size.height>400)throw Error('Invalid session preview.');return sessionPreviews.put(preferences.destination(s.remoteTarget),{image:value.image,deviceId:require('./discovery.cjs').UUID.test(value.deviceId||'')?value.deviceId:s.remoteTarget.deviceId||''});});
 ipcMain.handle('profile-edit',e=>{const s=state(e);showMain(s);s.win.webContents.send('profile-edit');});
 ipcMain.handle('show-main', e => {const s=state(e);showMain(s.viewerOwner||s);});
 ipcMain.handle('chat-connect-computer',(e,deviceId)=>{
@@ -420,7 +422,7 @@ ipcMain.handle('discovery', event => { const s = state(event); s.discovery?.refr
 function createWindow({viewerOwner,target}={}) {
   const work = screen.getPrimaryDisplay().workArea;
   const win = new BrowserWindow({ width: Math.min(1100, work.width - 16), height: Math.min(720, work.height - 16), minWidth: Math.min(1000, work.width - 16), minHeight: Math.min(720, work.height - 16),
-    backgroundColor: settings().theme==='light'?'#faf6ff':'#160d20', title: 'Shatoot Connect', icon:path.join(__dirname,'ui/assets/app-icon.png'), show:!!viewerOwner || smoke || !process.argv.includes('--start-in-tray'), autoHideMenuBar: true,
+    backgroundColor: settings().theme==='light'?'#faf6ff':'#160d20', title: 'Shatoot Connect', icon:path.join(__dirname,'ui/assets/app-icon.png'), show:!viewerOwner&&(smoke || !process.argv.includes('--start-in-tray')), autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
   const s = { win,viewerOwner,remoteTarget:target,identity:viewerOwner?.identity, source: null, control: false, helper: null, captureAllowed: false, language: 'en' };
   if(viewerOwner){win.setTitle('Shatoot Connect · '+target.address);win.on('page-title-updated',event=>event.preventDefault());}
@@ -442,7 +444,7 @@ function createWindow({viewerOwner,target}={}) {
   win.on('hide',()=>diagnostic('window-hidden',{type:s.outgoingDesktop?'viewer':'main'}));
   win.on('unresponsive',()=>diagnostic('window-unresponsive',{type:s.outgoingDesktop?'viewer':'main'}));
   win.on('closed', () => { for (const child of states.values()) {if (child.owner === s) closeExtraHost(child);else if(child.viewerOwner===s)child.win.destroy();} s.chatWindow?.destroy(); collaborationHost.close(s); s.discovery?.close(); for (const ws of s.lanSockets?.values() || []) ws.terminate(); hideHostOverlay(s); release(s); s.keyboardMonitor?.stdin.end(); s.helper?.stdin.end(); s.directSocket?.close(); s.directService?.close(); states.delete(contentsId); });
-  win.loadFile(path.join(__dirname, 'ui/index.html'));
+  win.loadFile(path.join(__dirname, 'ui/index.html'),viewerOwner?{query:{viewer:'1'}}:{});
   return win;
 }
 ipcMain.handle('config', e => {
@@ -458,7 +460,7 @@ ipcMain.handle('config', e => {
   s.sharedCursor = saved.inputModeVersion===1?saved.sharedCursor!==false:true; s.showGuestCursor = saved.showGuestCursor !== false;
   if(saved.inputModeVersion!==1)saveSettings({inputModeVersion:1,sharedCursor:true});
   const pendingFavorite = s.viewerOwner?null:launchFavorite;if(!s.viewerOwner)launchFavorite=null;
-  return { viewerWindow:!!s.viewerOwner,remoteTarget:s.remoteTarget,autoQuality:saved.autoQuality!==false,allowPrivacyScreen:saved.allowPrivacyScreen===true,privacyScreenSupported:privacySupported(),showChatInRemote:saved.showChatInRemote===true,theme:saved.theme==='light'?'light':'dark',rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles !== false, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
+  return { viewerWindow:!!s.viewerOwner,remoteTarget:s.remoteTarget,remotePreview:s.remoteTarget?(sessionPreviews.get(preferences.destination(s.remoteTarget),s.remoteTarget.deviceId)||{image:s.remoteTarget.preview||'',kind:'wallpaper'}):null,autoQuality:saved.autoQuality!==false,allowPrivacyScreen:saved.allowPrivacyScreen===true,privacyScreenSupported:privacySupported(),showChatInRemote:saved.showChatInRemote===true,theme:saved.theme==='light'?'light':'dark',rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles !== false, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
 });
 ipcMain.handle('internet-enabled', (e,value)=>{state(e);if(typeof value!=='boolean')throw new Error('Invalid connection mode.');saveSettings({internetEnabled:value});return value;});
 ipcMain.handle('show-guest-cursor', (e,value)=>{const s=state(e);if(typeof value!=='boolean')throw new Error('Invalid cursor setting.');saveSettings({showGuestCursor:value});s.showGuestCursor=value;if(!value)hideGuestCursor(s);return value;});
@@ -811,6 +813,7 @@ app.on('will-quit', () => {
   const clipboardCache=path.join(app.getPath('temp'),'ShatootConnect-Clipboard',String(process.pid));try{fs.rmSync(clipboardCache,{recursive:true,force:true});}catch{}
 });
 app.on('second-instance', (_event,args)=>{
+  if(args.includes('--quit-for-update')){quitting=true;app.quit();return;}
   if(args.includes('--quit-if-background')){if(!BrowserWindow.getAllWindows().some(win=>win.isVisible())){quitting=true;app.quit();}return;}
   const s = [...states.values()][0];
   const id = args.find(value => /^--connect-saved=[a-f0-9-]{36}$/.test(value))?.split('=')[1];

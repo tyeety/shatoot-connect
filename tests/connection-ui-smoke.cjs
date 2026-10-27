@@ -38,6 +38,7 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     fs.writeFileSync(path.join(artifacts,`theme-settings-${language}.png`),(await host.webContents.capturePage()).toPNG());}
   await run("document.querySelector('#settings-dialog').close();api.language('en').then(value=>window.i18n.setLanguage(value))");fs.writeFileSync(path.join(artifacts,'theme-main-light.png'),(await host.webContents.capturePage()).toPNG());
   await run("api.appearance('dark')");await until(()=>run("document.documentElement.dataset.theme==='dark'&&document.querySelector('#appearance-theme').value==='dark'"));
+  await run("window.cardMenuAction=(selector,icon)=>{document.querySelector(selector+' .computer-more').click();document.querySelector('.computer-menu .mi.'+icon).closest('button').click();return true;};true");
   const mainState=states.get(host.webContents.id);
   await run("config.smoke=false;document.querySelector('#remote-id').value='127.0.0.1:40101';document.querySelector('#remote-password').value='';document.querySelector('#join').click();true");
   await until(()=>[...states.values()].some(s=>s.viewerOwner===mainState));
@@ -48,7 +49,15 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
   if(!await run("role==='idle'&&!document.body.classList.contains('viewing')"))throw Error('Opening a viewer occupied the main window');
   await windows[0].win.webContents.executeJavaScript("window.testPackets=[];role='viewer';allowedControl=true;controlChannel={readyState:'open',bufferedAmount:0,send:value=>testPackets.push(JSON.parse(value)),close(){}};input({type:'move',x:.2,y:.3});true");
   if(!await windows[0].win.webContents.executeJavaScript('testPackets.length===1')||!await windows[1].win.webContents.executeJavaScript("role==='idle'&&!controlChannel"))throw Error('Independent viewer input crossed windows');
+  await windows[0].win.webContents.executeJavaScript("(async()=>{api.desktopViewing(true);const c=document.createElement('canvas');c.width=160;c.height=90;const x=c.getContext('2d');x.fillStyle='#345678';x.fillRect(0,0,160,90);await api.saveRemotePreview({image:c.toDataURL('image/jpeg',.5)});window.retryCalls=[];remoteRetry.arm({address:config.remoteTarget.address,password:'fixture'});remoteRetry.connected();remoteRetry.connect=async target=>{retryCalls.push(target);role='joining';};await dispatch({type:'ended',reason:'Network lost',retryable:true});return true})()");
+  if(!await windows[0].win.webContents.executeJavaScript("remoteRetry.state==='waiting'&&!document.querySelector('#remote-loading').hidden&&document.querySelector('#remote-loading-status')"))throw Error('Unexpected disconnect did not show a retry/loading state');
+  await windows[0].win.webContents.executeJavaScript("remoteRetry.retryNow();true");await until(()=>windows[0].win.webContents.executeJavaScript('retryCalls.length===1'));
+  await windows[0].win.webContents.executeJavaScript("dispatch({type:'ended',reason:'The host ended the session.',retryable:false}).then(()=>true)");
+  if(!await windows[0].win.webContents.executeJavaScript("!remoteRetry.wanted&&remoteRetry.state==='idle'"))throw Error('Intentional host disconnect kept reconnecting');
   windows[0].win.close();await until(()=>windows[0].win.isDestroyed());if(windows[1].win.isDestroyed()||host.isDestroyed())throw Error('Closing one viewer closed another window');
+  await run("api.openRemote({address:'127.0.0.1:40101',password:''})");await until(()=>[...states.values()].some(s=>s.viewerOwner===mainState&&s!==windows[0]&&s!==windows[1]));const previewWindow=[...states.values()].find(s=>s.viewerOwner===mainState&&s!==windows[1]);await until(()=>previewWindow.win.webContents.executeJavaScript('window.shatootconnectReady===true'));
+  if(!await previewWindow.win.webContents.executeJavaScript("config.remotePreview.kind==='session'&&!!document.querySelector('#remote-loading .remote-loading-image').src&&!document.querySelector('#remote-loading').hidden&&getComputedStyle(document.querySelector('body>aside')).display==='none'"))throw Error('New remote window flashed the main app or lost its last desktop preview');
+  fs.writeFileSync(path.join(artifacts,'remote-last-frame-loading.png'),(await previewWindow.win.webContents.capturePage()).toPNG());previewWindow.win.close();await until(()=>previewWindow.win.isDestroyed());
   windows[1].win.close();await until(()=>windows[1].win.isDestroyed());
   log('Two independent viewer windows keep main available, do not register duplicate hosts, isolate input and close separately');
   log('Settings theme selector applies light/dark immediately, persists, translates and rejects invalid themes');
@@ -96,7 +105,7 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     await run("document.querySelector('#saved-computer-name').value='دفتر مرکزی';document.querySelector('#save-computer-form').requestSubmit();true");
     await until(()=>run("config.favorites.some(f=>f.name==='دفتر مرکزی')"));
     const favorite=await run('api.favoriteGet(config.favorites[0].id)');
-    await run("document.querySelector('.rename-computer').click();true");await until(()=>run("document.querySelector('#save-computer-dialog').open"));
+    await run("cardMenuAction('.favorite-row','edit');true");await until(()=>run("document.querySelector('#save-computer-dialog').open"));
     await run("document.querySelector('#saved-computer-name').value='حسابداری';document.querySelector('#save-computer-form').requestSubmit();true");
     await until(()=>run("config.favorites.some(f=>f.name==='حسابداری')"));
     const renamed=await run('api.favoriteGet(config.favorites[0].id)');
@@ -105,22 +114,22 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='false'"));
     await run(`api.connections('connected',{address:'${address}',name:'Saved computer'}).then(renderHistory)`);
     await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='true'"));
-    if(!await run("document.querySelectorAll('#favorites-list>div').length===2 && !document.querySelector('#connection-history') && !!document.querySelector('.favorite-row .computer-kind.star_outline') && !!document.querySelector('.history-row .computer-kind.schedule') && document.querySelector('.rename-computer').textContent==='' && document.querySelectorAll('.connection-grid .muted').length===0"))throw Error('Combined computer list, markers, icon-only rename or removed helper text regressed');
-    await run("document.querySelector('.history-row .computer-pin').click();true");
-    await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='false'&&document.querySelector('#favorites-list>div .computer-pin')?.getAttribute('aria-pressed')==='true'"));await pause(200);
-    if(!await run("getComputedStyle(document.querySelector('.computer-pin[aria-pressed=true] .mi')).transform!=='none'"))throw Error('Pinned connection icon did not tilt');
+    if(!await run("document.querySelectorAll('#favorites-list>div').length===2&&!document.querySelector('#connection-history')&&[...document.querySelectorAll('.favorite-actions')].every(a=>a.querySelectorAll('button').length===3)&&document.querySelectorAll('.connection-grid .muted').length===0"))throw Error('Combined computer list, markers, icon-only rename or removed helper text regressed');
+    await run("cardMenuAction('.history-row','pin');true");
+    await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='false'&&document.querySelector('#favorites-list>div')?.classList.contains('pinned-draggable')"));await pause(200);
+    if(!await run("document.querySelector('.history-row').draggable===true"))throw Error('Pinned connection icon did not tilt');
     await run(`api.connections('connected',{address:'${address}',name:'Saved computer'}).then(renderHistory)`);
     if(!await run("document.querySelector('#favorites-list>div')?.dataset.saved==='false'"))throw Error('A new connection displaced the pinned computer');
-    await run("document.querySelector('.history-row .computer-pin').click();true");await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='true'"));
-    await run("document.querySelector('.favorite-row .computer-pin').click();true");await until(()=>run("document.querySelector('.favorite-row .computer-pin')?.getAttribute('aria-pressed')==='true'"));
+    await run("cardMenuAction('.history-row','pin');true");await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='true'"));
+    await run("cardMenuAction('.favorite-row','pin');true");await until(()=>run("document.querySelector('.favorite-row')?.classList.contains('pinned-draggable')"));
     if(!await run("(async()=>{const rows=await api.connections('computers');return rows[0].saved&&rows[0].pinned&&[...document.querySelectorAll('.favorite-actions button')].every(b=>b.getBoundingClientRect().right<=b.closest('.favorite-row,.history-row').getBoundingClientRect().right)})()"))throw Error('Saved pin persistence or card button layout regressed');
-    await run("document.querySelector('.favorite-row .computer-pin').click();true");await until(()=>run("document.querySelector('.favorite-row .computer-pin')?.getAttribute('aria-pressed')==='false'"));
-    await run("document.querySelector('.history-row .computer-pin').click();document.querySelector('.favorite-row .computer-pin').click();true");await until(()=>run("document.querySelectorAll('.pinned-draggable').length===2"));
+    await run("cardMenuAction('.favorite-row','pin');true");await until(()=>run("!document.querySelector('.favorite-row')?.classList.contains('pinned-draggable')"));
+    await run("cardMenuAction('.history-row','pin');cardMenuAction('.favorite-row','pin');true");await until(()=>run("document.querySelectorAll('.pinned-draggable').length===2"));
     if(!await run("(()=>{const list=document.querySelector('#favorites-list'),source=list.querySelector('.favorite-row'),target=list.querySelector('.history-row'),data=new DataTransfer(),y=target.getBoundingClientRect().top+1;const started=source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:data}));target.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:data,clientY:y}));target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data,clientY:y}));source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:data}));return started})()"))throw Error('Text drag blocker swallowed pinned connection drag');
     await until(()=>run("document.querySelector('#favorites-list>div')?.dataset.saved==='true'&&!document.querySelector('#favorites-list').dataset.reordering"));
     await run("api.connections('connected',{address:'192.168.99.254',name:'Recent computer'}).then(renderHistory)");
     if(!await run("document.querySelector('#favorites-list>div')?.dataset.saved==='true'"))throw Error('Reconnect reset manual pinned order');
-    await run("document.querySelector('.favorite-row .computer-pin').click();document.querySelector('.history-row .computer-pin').click();true");await until(()=>run("!document.querySelector('.pinned-draggable')"));
+    await run("cardMenuAction('.favorite-row','pin');cardMenuAction('.history-row','pin');true");await until(()=>run("!document.querySelector('.pinned-draggable')"));
     log('Saved/recent connection pin buttons persist, tilt and stay above newer unpinned connections without clipping');
     for(let i=0;i<3;i++){
       greet=i===2;joined=false;
@@ -176,7 +185,9 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     await pause(500);if(await run('automaticListAnimations!==0'))throw Error('Background list rendering triggered a loading animation');
     await run("animationProbe.disconnect();document.querySelector('#refresh-discovery').click();true");await until(()=>run("document.querySelector('#network-list').classList.contains('data-feedback')"));
     log('Update progress stays visible outside Settings and a failed update reports its error');
-    if(!await run("!!document.querySelector('.favorite-actions .mi.shortcut') && !!document.querySelector('.favorite-actions .mi.screen_share')"))throw Error('Saved computer actions omitted shortcut/connect icons');
+    await run("document.querySelector('.favorite-row .computer-more').click();true");if(!await run("!!document.querySelector('.computer-menu .mi.shortcut')&&!!document.querySelector('.computer-menu .mi.info')&&!!document.querySelector('.favorite-actions .mi.screen_share')&&!!document.querySelector('.favorite-actions .mi.chat')"))throw Error('Computer overflow actions or primary chat/connect are missing');await run("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));true");
+    for(const language of ['en','fa']){await run(`window.i18n.setLanguage('${language}');true`);if(!await run("(()=>{const row=document.querySelector('.favorite-row'),avatar=row.querySelector('.avatar-wrap').getBoundingClientRect(),name=row.querySelector('b').getBoundingClientRect(),ip=row.querySelector('small').getBoundingClientRect();return avatar.left<name.left&&Math.abs(avatar.top-name.top)<10&&ip.top>=name.bottom-1&&row.querySelectorAll('.favorite-actions>button').length===3})()"))throw Error('Computer avatar/name/IP alignment regressed in '+language);fs.writeFileSync(path.join(artifacts,'computer-card-'+language+'.png'),(await host.webContents.capturePage()).toPNG());}
+    await run("window.i18n.setLanguage('en');true");
     await run("window.pointerPackets=[];role='viewer';allowedControl=true;config.showHostCursor=true;controlChannel={readyState:'open',label:'control',bufferedAmount:0,send:value=>pointerPackets.push(JSON.parse(value)),close:()=>{}};showSession();Object.defineProperty($('remote-video'),'videoWidth',{configurable:true,value:1920});Object.defineProperty($('remote-video'),'videoHeight',{configurable:true,value:1080});true");
     await run("(()=>{const r=stage.getBoundingClientRect();stage.dispatchEvent(new PointerEvent('pointermove',{clientX:r.x+r.width/2,clientY:r.y+r.height/2,bubbles:true}));setRemoteInputState({reason:'host'});return true})()");
     if(!await run("!$('pointer-pause').hidden&&$('pointer-pause').textContent.includes('2 s')&&$('host-cursor').hidden"))throw Error('Host pause indicator is missing or an echoed cursor is visible');
@@ -203,6 +214,9 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     if(!await run("!$('file-transfer-status').hidden"))throw Error('Recovery warning never appeared');
     await run("status('متصل شد؛ برای ارسال موس و کیبورد، روی تصویر کلیک کنید.');true");
     if(!await run("$('file-transfer-status').hidden&&!$('session-status').classList.contains('error')"))throw Error('Recovery notice survived a healthy connection');
+    await run("peerMotionV2=true;role='viewer';allowedControl=true;remoteInputReason='ready';pointerPackets=[];controlChannel={readyState:'open',bufferedAmount:0,send:value=>pointerPackets.push(JSON.parse(value)),close(){}};window.motionWire=[];pointerChannel={readyState:'open',bufferedAmount:0,send:value=>motionWire.push(JSON.parse(value)),close(){}};input({type:'move',x:.1,y:.2});input({type:'button',button:0,down:true,x:.3,y:.4});input({type:'move',x:.6,y:.7});input({type:'button',button:0,down:false,x:.6,y:.7});true");
+    if(!await run("motionWire.length===2&&motionWire.every(p=>p.type==='move')&&pointerPackets.filter(p=>p.type==='button').length===2&&!pointerPackets.some(p=>p.type==='move')&&motionWire[0].motionEpoch<pointerPackets[0].motionEpoch&&motionWire[1].motionEpoch===pointerPackets[0].motionEpoch"))throw Error('Motion datagrams were queued behind reliable clicks or lost their drag epoch');
+    await run("peerMotionV2=false;pointerChannel=null;true");
     log('Host activity badge follows the guest pointer in both languages, paused input is blocked, ready resumes immediately, and queued moves cannot delay button-up');
     await run("window.shiftPackets=[];role='viewer';allowedControl=true;peerKeyboardSync=true;guestKeyboardLayout='00000409';controlChannel={readyState:'open',bufferedAmount:0,send:value=>shiftPackets.push(JSON.parse(value)),close:()=>{}};showSession();stage.focus();true");
     host.webContents.send('grabbed-key',{vk:0xBF,scan:0x35,extended:false,down:true,shift:true,ctrl:false});

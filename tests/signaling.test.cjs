@@ -185,3 +185,5 @@ test('connection key is checked before retrieving or disclosing managed TURN cre
   assert.equal(JSON.stringify(received).includes('temporary-only'), false);
   assert.match(received.find(m => m.type === 'error').message, /connection key/);
 });
+
+test('disconnect causes distinguish host intent, approval denial and unexpected transport loss',async t=>{const{client}=await fixture(t,{iceServers:[]});for(const mode of ['manual','denied','network','failure']){const{host,credentials}=await hosted(client),guest=await client();guest.send({type:'join',id:credentials.id,password:credentials.password});await host.next('join-request');if(mode==='denied')host.send({type:'reject'});else{host.send({type:'accept',control:true});await guest.next('accepted');if(mode==='network')host.ws.terminate();else host.send({type:'end-session',...(mode==='failure'?{reason:'transport-failed'}:{})});}const ended=await guest.next('ended');assert.equal(ended.retryable,['network','failure'].includes(mode));assert.equal(ended.reasonCode,mode==='manual'?'host-ended':mode==='denied'?'approval-denied':mode==='failure'?'transport-failed':'host-disconnected');host.ws.close();guest.ws.close();}});

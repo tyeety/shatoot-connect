@@ -22,14 +22,14 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
   const send = (ws, data) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data)); };
   const collaboration = require('./collaboration.cjs').collaborationBroker({ rooms, send, ice, direct: !!directHostToken });
   const desktops = require('./desktop-sessions.cjs').desktopSessions({ rooms, send, ice, direct: !!directHostToken });
-  function detach(ws, keepRegistration = false) {
+  function detach(ws, keepRegistration = false,reasonCode='host-disconnected') {
     const room = rooms.get(ws.roomId);
     if (!room) {
       if (!keepRegistration && ws.registrationId) { rooms.delete(ws.registrationId); ws.registrationId = null; }
       return;
     }
     if (room.host === ws) {
-      send(room.guest, { type: 'ended', reason: 'میزبان اشتراک‌گذاری را متوقف کرد.' });
+      send(room.guest, { type: 'ended', reason: 'میزبان اشتراک‌گذاری را متوقف کرد.',reasonCode,retryable:reasonCode==='host-disconnected'||reasonCode==='transport-failed' });
       if (room.guest) room.guest.roomId = null;
       if (keepRegistration && ws.registrationId === room.id) { room.guest = null; room.approved = false; }
       else { rooms.delete(room.id); ws.registrationId = null; }
@@ -63,7 +63,7 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
       let m;
       try { m = JSON.parse(raw); } catch { send(ws, { type: 'error', message: 'پیام نامعتبر است.' }); return; }
       if (!m || typeof m !== 'object') return;
-      const fail = message => send(ws, { type: 'error', message });
+      const fail = (message,extra={}) => send(ws, { type: 'error', message,...extra });
       if (!ready) {
         if (enrollmentKey && m.type === 'authenticate') {
           const received = crypto.createHash('sha256').update(typeof m.serverKey === 'string' ? m.serverKey.slice(0, 256) : '').digest();
@@ -111,12 +111,12 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         const attemptKey = localProxy ? ws : ip;
         let a = attempts.get(attemptKey);
         if (!a || now - a.start > 60000) { a = { start: now, count: 0 }; attempts.set(attemptKey, a); }
-        if (++a.count > 5) return fail('تلاش زیاد؛ یک دقیقه صبر کنید.');
+        if (++a.count > 5) return fail('تلاش زیاد؛ یک دقیقه صبر کنید.',{retryable:true,retryAfter:60000});
         const room = directHostToken && m.id === 'direct' ? [...rooms.values()][0] : rooms.get(String(m.id));
         const hash = crypto.createHash('sha256').update(typeof m.password === 'string' ? m.password.slice(0, 128) : '').digest();
-        if (!room || !crypto.timingSafeEqual(room.hash, hash)) return fail('شناسه یا رمز اتصال درست نیست.');
-        if (room.host === ws) return fail('این میزبان در حال اتصال است.');
-        if (room.guest || room.host.desktopBusy || (room.host.registrationId && room.host.roomId)) { if (!room.host.multiDesktop) return fail('این میزبان در حال اتصال است.'); await desktops.join(ws,m,room); return; }
+        if (!room || !crypto.timingSafeEqual(room.hash, hash)) return fail('شناسه یا رمز اتصال درست نیست.',{retryable:true,reasonCode:'credentials-or-offline'});
+        if (room.host === ws) return fail('این میزبان در حال اتصال است.',{retryable:true,reasonCode:'host-busy'});
+        if (room.guest || room.host.desktopBusy || (room.host.registrationId && room.host.roomId)) { if (!room.host.multiDesktop) return fail('این میزبان در حال اتصال است.',{retryable:true,reasonCode:'host-busy'}); await desktops.join(ws,m,room); return; }
         room.guest = ws; ws.roomId = room.id;
         if (room.host.registrationId) room.host.roomId = room.id;
         send(ws, { type: 'waiting' });
@@ -125,7 +125,7 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         const room = rooms.get(ws.registrationId || ws.roomId);
         if (room?.host !== ws || !room.guest || room.approved) return;
         if (m.type === 'reject') {
-          send(room.guest, { type: 'ended', reason: 'میزبان درخواست را نپذیرفت.' });
+          send(room.guest, { type: 'ended', reason: 'میزبان درخواست را نپذیرفت.',reasonCode:'approval-denied',retryable:false });
           room.guest.roomId = null; room.guest = null;
           if (ws.registrationId) ws.roomId = null;
         } else {
@@ -145,8 +145,8 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         const room = rooms.get(ws.roomId);
         if (!room?.approved || !validSignal(m.data)) return;
         send(room.host === ws ? room.guest : room.host, { type: 'signal', data: m.data });
-      } else if (m.type === 'end-session') detach(ws, true);
-      else if (m.type === 'leave' || m.type === 'unregister') { desktops.detach(ws); detach(ws); }
+      } else if (m.type === 'end-session') detach(ws,true,m.reason==='transport-failed'?'transport-failed':'host-ended');
+      else if (m.type === 'leave' || m.type === 'unregister') { desktops.detach(ws,true); detach(ws,false,'host-ended'); }
     });
     ws.on('error', () => {});
     ws.on('close', () => { desktops.detach(ws); collaboration.detach(ws); clearTimeout(handshakeTimeout); attempts.delete(ws); connections.set(ip, Math.max(0, (connections.get(ip) || 1) - 1)); detach(ws); });

@@ -2,6 +2,8 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['گزینه‌های بیشتر','More actions'],['در حال اتصال به کامپیوتر مقابل…','Connecting to the remote computer…'],['پیش‌نمایش آخرین اتصال','Last session preview'],['پس‌زمینهٔ ذخیره‌شدهٔ دسکتاپ','Saved desktop background'],['تلاش دوباره اکنون','Retry now'],['تلاش مجدد تا: ','Reconnecting in: '],['ثانیه','seconds'],['اتصال قطع شد؛ در حال بازیابی…','Connection interrupted. Trying to recover…'],['میزبان اتصال را پایان داد.','The host ended the session.'],
+
     ['مشخصات سیستم','System details'],['نسخهٔ برنامه','App version'],['نسخه نامشخص','Version unknown'],['در حال دریافت مشخصات سیستم…','Requesting system details…'],['نام کامپیوتر','Computer name'],['سیستم‌عامل','Operating system'],['معماری','Architecture'],['پردازنده','Processor'],['پردازنده‌های منطقی','Logical processors'],['حافظهٔ رم','Memory'],['آزاد','Free'],['گرافیک','Graphics'],['درایور','Driver'],['نمایشگرها','Displays'],['دیسک‌ها','Disks'],['زمان روشن‌بودن','Uptime'],['ساعت','hours'],['گزارش نشده','Not reported'],['به‌روز شد','Updated'],['مشخصات سیستم معتبر نیست.','Invalid system details.'],['مشخصات سیستم در دسترس نیست.','System details unavailable.'],['برای دیدن مشخصات، برنامهٔ این کامپیوتر را به‌روز کنید.','Update Shatoot Connect on this computer to view system details.'],['پیش از دریافت دوبارهٔ مشخصات کمی صبر کنید.','Please wait before refreshing system details.'],
 
     ['مقصد اتصال معتبر نیست.','Invalid remote destination.'],['پیش از اتصال جدید، یکی از پنجره‌های ریموت را ببندید.','Close a remote window before opening another.'],['پاسخ بخش دانلود معتبر نیست.','Invalid update range response.'],['ارجاع پیام معتبر نیست.','Invalid message reference.'],['دانلود زودتر از کامل‌شدن پایان یافت.','Update download ended early.'],

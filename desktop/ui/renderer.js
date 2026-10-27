@@ -13,8 +13,9 @@ const iceErrors = [];
 let directSocket, sessionRoute = 'server', serverIce = [], serverRelay = false;
 let exchange, keyboardGrabActive = false, layoutSync, hostCursor, hostPasswordValue = '', hostPasswordShown = false, lastLocalCursor;
 const guestShift = new window.GuestShiftState();
+const motionSend=new window.MotionSequence(),motionReceive=new window.MotionSequence();let peerMotionV2=false;
 let supportsFixedPassword = false, guestKeyboardLayout = '', keyboardTimer, keyboardQueue = Promise.resolve(), keyboardEpoch = 0, peerKeyboardSync = false;
-let connectionAttempt, recallRevision=0;
+let connectionAttempt, recallRevision=0,remoteRetry,loadingScreen,framePreviewTimer,disconnectTimer,reconnectTextTimer;
 let videoQuality,hostPrivacyAllowed=false,remotePrivacyAllowed=false,remotePrivacyActive=false,privacyHeartbeat;
 let hostInputState={type:'input-state',reason:'ready'},remoteInputReason='ready';
 let cursorSequence=0,lastHostCursorSequence=-1,hostCursorTimer,guestPointerPoint;
@@ -27,7 +28,7 @@ function inputLabel(updateStatus=false){ $('control-label').textContent=tr(!allo
 api.onInputState(data=>{hostInputState=data;if(role==='host'&&controlChannel?.readyState==='open')controlChannel.send(JSON.stringify(data));});
 function signalReady() { return sessionRoute === 'lan-host' || (sessionRoute === 'lan-viewer' ? directSocket : socket)?.readyState === WebSocket.OPEN; }
 
-function status(message, error = false) { const notice=$('file-transfer-status');if(!error&&notice?.dataset.statusError==='true'){notice.hidden=true;notice.textContent='';delete notice.dataset.statusError;}if(error&&notice)notice.dataset.statusError='true'; if(error && role==='viewer' && $('file-transfer-status')){$('file-transfer-status').hidden=false;$('file-transfer-status').textContent=tr(message);} if ($('settings-status')) { $('settings-status').textContent = tr(message); $('settings-status').classList.toggle('error', error); } $('session-status').textContent = tr(message); $('session-status').classList.toggle('error', error); }
+function status(message, error = false) {if(loadingScreen&&!loadingScreen.box.hidden){loadingScreen.message.textContent=tr(message);loadingScreen.message.classList.toggle('error',error);} const notice=$('file-transfer-status');if(!error&&notice?.dataset.statusError==='true'){notice.hidden=true;notice.textContent='';delete notice.dataset.statusError;}if(error&&notice)notice.dataset.statusError='true'; if(error && role==='viewer' && $('file-transfer-status')){$('file-transfer-status').hidden=false;$('file-transfer-status').textContent=tr(message);} if ($('settings-status')) { $('settings-status').textContent = tr(message); $('settings-status').classList.toggle('error', error); } $('session-status').textContent = tr(message); $('session-status').classList.toggle('error', error); }
 function toast(message) { window.actionNotice?.(tr(message)); }
 function serverState(online, text) { $('server-status').dataset.state = online ? 'online' : 'offline'; $('server-status').querySelector('span').textContent = tr(text); }
 function send(message) {
@@ -125,7 +126,7 @@ async function connectServer(attempt) {
       }
       messageQueue = messageQueue.then(() => dispatch(message)).catch(e => {
         status(e.message, true); toast(e.message);
-        if (pc) stopSession(true);
+        if(pc){if(role==='viewer')interruptSession(e.message);else stopSession(true,'transport-failed');}
       });
     };
     ws.onerror = () => { clearTimeout(timeout); reject(new Error('اتصال به سرور ناموفق بود. IP، پورت و گواهی TLS را بررسی کنید.')); };
@@ -134,7 +135,7 @@ async function connectServer(attempt) {
       if (socket !== ws) return;
       serverState(false, 'ارتباط سرور قطع شد'); socket = null;
       registered = false; internetId = ''; renderHostCredentials();
-      if (sessionRoute === 'server' && (role !== 'idle' || requestPending)) { stopSession(false); status(connectionError || 'اتصال سرور بسته شد.', true); }
+      if(sessionRoute==='server'&&(role!=='idle'||requestPending)){if(role==='viewer'||role==='joining')interruptSession(connectionError||'Connection interrupted. Trying to recover…');else stopSession(false);}
       updateControls();
       scheduleReconnect();
     };
@@ -188,7 +189,7 @@ async function onMessage(m) {
     sender = pc.addTrack(stream.getVideoTracks()[0], stream);
     preferCodec();
     controlChannel = pc.createDataChannel('control', { ordered: true }); bindChannel(controlChannel);
-    pointerChannel = pc.createDataChannel('pointer', { ordered: false, maxRetransmits: 0 }); bindChannel(pointerChannel);
+    pointerChannel = pc.createDataChannel('pointer', { ordered: false, maxRetransmits: 0,priority:'high' }); bindChannel(pointerChannel);
     if (allowedControl) bindExchange(pc.createDataChannel('exchange', { ordered: true, priority: 'very-low' }));
     await pc.setLocalDescription(await pc.createOffer()); send({ type: 'signal', data: { description: pc.localDescription } });
     await applyProfile(profileName);
@@ -208,21 +209,21 @@ async function onMessage(m) {
   } else if (m.type === 'peer-left') {
     stopSession(false); status('مهمان قطع شد؛ آمادهٔ پذیرش اتصال بعدی.');
   } else if (m.type === 'ended') {
-    stopSession(false); status(m.reason || 'اتصال پایان یافت.');
+    if(m.retryable===true&&(role==='viewer'||role==='joining'))interruptSession(m.reason||'Connection interrupted. Trying to recover…');else{remoteRetry?.cancel();stopSession(false);showRemoteLoading(m.reason||'The host ended the session.',true);status(m.reason||'اتصال پایان یافت.');}
   } else if (m.type === 'error') {
-    if (role === 'joining') stopSession(false);
+    if(role==='joining'){if(remoteRetry?.established&&(m.retryable===true||/شناسه یا رمز اتصال درست نیست|این میزبان در حال اتصال است|تلاش زیاد|busy|offline|unavailable/i.test(m.message||''))){interruptSession(m.message,m.retryAfter||(/تلاش زیاد/.test(m.message||'')?60000:0));return;}remoteRetry?.cancel();stopSession(false);showRemoteLoading(m.message,true);}
     status(m.message, true); toast(m.message);
   }
 }
 function preferCodec() {
   const capabilities = RTCRtpReceiver.getCapabilities('video');
   if (!capabilities) return;
-  const preferred = profileName === 'quality' ? 'video/VP9' : 'video/H264';
+  const preferred = 'video/H264';
   const codecs = [...capabilities.codecs].sort((a, b) => Number(b.mimeType === preferred) - Number(a.mimeType === preferred));
   for (const transceiver of pc.getTransceivers()) if (transceiver.receiver.track.kind === 'video') transceiver.setCodecPreferences(codecs);
 }
 function createPeer() {
-  layoutSync = new window.LayoutSync(role === 'host');
+  layoutSync = new window.LayoutSync(role === 'host');motionSend.reset();motionReceive.reset();peerMotionV2=false;
   const active = new RTCPeerConnection({ iceServers, iceTransportPolicy: forceRelay ? 'relay' : 'all', bundlePolicy: 'max-bundle' }); pc = active;
   const generation = peerGeneration;
   active.onicecandidate = event => { if (event.candidate && signalReady() && pc === active) send({ type: 'signal', data: { candidate: event.candidate.toJSON() } }); };
@@ -242,14 +243,14 @@ function createPeer() {
   active.onconnectionstatechange = () => {
     if (pc !== active || generation !== peerGeneration) return;
     if (active.connectionState === 'connected') {
-      clearTimeout(joinTimer);
+      clearTimeout(joinTimer);clearTimeout(disconnectTimer);remoteRetry?.connected();
       outgoingAttempt=null;updateControls();
       status(role === 'host' ? 'مهمان متصل است. برای قطع فوری Ctrl + Shift + F12 را بزنید.' : 'متصل شد؛ برای ارسال موس و کیبورد، روی تصویر کلیک کنید.');
       startStats();
     } else if (active.connectionState === 'failed') {
-      stopSession(true); status('مسیر تصویر برقرار نشد. در شبکه‌های محدود، سرور TURN را تنظیم کنید.', true);
+      if(role==='viewer')interruptSession('Connection interrupted. Trying to recover…');else stopSession(true,'transport-failed');
     } else if (active.connectionState === 'disconnected') {
-      api.releaseKeys(); status('مسیر ارتباط مختل شده؛ در حال تلاش برای بازیابی…', true);
+      api.releaseKeys();status('مسیر ارتباط مختل شده؛ در حال تلاش برای بازیابی…',true);clearTimeout(disconnectTimer);disconnectTimer=setTimeout(()=>{if(pc===active&&active.connectionState==='disconnected'){if(role==='viewer')interruptSession('Connection interrupted. Trying to recover…');else stopSession(true,'transport-failed');}},3000);
     }
   };
 }
@@ -261,26 +262,29 @@ function bindChannel(channel) {
     if (opened || generation !== peerGeneration) return; opened = true;
     if (channel.label === 'pointer' && role === 'host' && lastLocalCursor) channel.send(JSON.stringify({ ...lastLocalCursor, sequence:++cursorSequence, visible: config.showHostCursor && lastLocalCursor.visible }));
     if (channel.label === 'control') api.watchKeyboard(true).catch(e => status(e.message, true));
-    if(role==='host'&&channel.label==='control')channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,privacyScreen:hostPrivacyAllowed}));
+    if(role==='host'&&channel.label==='control')channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,motionV2:true,privacyScreen:hostPrivacyAllowed}));
     if(channel.label==='control'&&role==='host')channel.send(JSON.stringify(hostInputState));
     if (role === 'viewer' && channel.label === 'control') {
-      channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true, privacyScreen:hostPrivacyAllowed }));
+      channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, privacyScreen:hostPrivacyAllowed }));
       channel.send(JSON.stringify({ type: 'profile', name: config.qualityProfile, auto:config.autoQuality!==false }));
       if (allowedControl) { api.exchange('viewer-start').catch(e => status(e.message, true)); api.watchKeyboard(true).catch(e => status(e.message, true));  }
     }
   };
   if (channel.readyState === 'open') queueMicrotask(() => channel.onopen());
+  channel.onclose=()=>{if(generation===peerGeneration&&role==='viewer'&&channel.label==='control'){clearTimeout(disconnectTimer);disconnectTimer=setTimeout(()=>{if(generation===peerGeneration)interruptSession('Connection interrupted. Trying to recover…');},500);}};
   channel.onmessage = event => {
     if (generation !== peerGeneration) return;
     if (typeof event.data !== 'string' || event.data.length > 2048) return;
     let data; try { data = JSON.parse(event.data); } catch { return; }
     if (!data || typeof data !== 'object') return;
+    if(channel.label==='control'&&data.type==='session-ending'&&role==='viewer'){remoteRetry?.cancel();stopSession(false);showRemoteLoading('The host ended the session.',true);return;}
     if(channel.label==='control'&&data.type==='privacy-screen-state'&&role==='viewer'){setRemotePrivacy(data);return;}
     if(channel.label==='control'&&data.type==='privacy-screen'&&role==='host'&&typeof data.active==='boolean'){api.privacyScreen(data.active).then(value=>channel.readyState==='open'&&channel.send(JSON.stringify({type:'privacy-screen-state',...value}))).catch(e=>{if(channel.readyState==='open')channel.send(JSON.stringify({type:'privacy-screen-state',active:false,allowed:false,error:e.message}));});return;}
     if(role==='viewer'&&channel.label==='control'&&data.type==='input-state'){setRemoteInputState(data);return;}
     if (data.type === 'features' && channel.label === 'control') {
-      if (role === 'host' && data.keyboardSync === true) channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true, privacyScreen:hostPrivacyAllowed }));
+      if (role === 'host' && data.keyboardSync === true) channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, privacyScreen:hostPrivacyAllowed }));
       if(role==='viewer'){remotePrivacyAllowed=data.privacyScreen===true&&allowedControl;privacyButton();}
+      if(role==='viewer')peerMotionV2=data.motionV2===true;
       if (role === 'viewer') { peerKeyboardSync = data.keyboardSync === true && data.bidirectionalLayout === true; layoutSync.ready = peerKeyboardSync; if (allowedControl) { layoutSync.observed = ''; const initial = layoutSync.observe(guestKeyboardLayout); if (initial) controlChannel.send(JSON.stringify(initial)); } } else layoutSync.ready = data.bidirectionalLayout === true;
       return;
     }
@@ -299,7 +303,7 @@ function bindChannel(channel) {
     if (role !== 'host') return;
     if (data.type === 'profile' && channel.label === 'control' && config.profiles[data.name]) {
       applyProfile(data.name,data.auto===true).catch(e => status(tr('Quality change failed: ') + tr(e.message), true));
-    } else if (allowedControl) api.input(data);
+    } else if (allowedControl&&motionReceive.accept(data,channel.label==='pointer')) api.input(data);
   };
 }
 function sendKeyboardLayout() {
@@ -362,15 +366,16 @@ async function exitVideoFullscreen() {
   finally { await api.exitFullscreen().catch(() => {}); }
 }
 function closePeer() {
+  captureRemotePreview();clearInterval(framePreviewTimer);clearTimeout(disconnectTimer);
   videoQuality?.stop();videoQuality=null;clearInterval(privacyHeartbeat);hostPrivacyAllowed=remotePrivacyAllowed=remotePrivacyActive=false;api.privacyScreen(false).catch(()=>{});
   remoteComputer={};
   const attempt=outgoingAttempt;outgoingAttempt=null;attempt?.cancel();
-  api.fitVideo(null).catch(()=>{});
+  if(!config?.viewerWindow)api.fitVideo(null).catch(()=>{});
   guestCursorPosition=null; keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); exchange?.close(); exchange = null;
   keyboardEpoch++; guestShift.reset(); guestKeyboardLayout = ''; layoutSync = null; hostCursor = null; $('host-cursor').hidden = true;
   clearTimeout(hostCursorTimer);lastHostCursorSequence=-1;guestPointerPoint=null;$('pointer-pause').hidden=true;
   clearTimeout(pointerFrame);pointerFrame=0;latestPointer=null;
-  peerKeyboardSync = false;
+  peerKeyboardSync = false;peerMotionV2=false;motionSend.reset();motionReceive.reset();
   remoteInputReason='ready';hostInputState={type:'input-state',reason:'ready'};
   exitVideoFullscreen().catch(() => {});
   peerGeneration++; requestSerial++; requestPending = false; allowedControl = false;
@@ -384,8 +389,10 @@ function closePeer() {
   for (const id of ['stat-rtt','stat-fps','stat-size','stat-bitrate','stat-codec','stat-route']) $(id).textContent = '—';
 }
 api.onRemoteWindowClose(async()=>{try{stopSession(true);await api.fitVideo(null);}finally{await api.remoteWindowClosed();}});
-function stopSession(notify = true) {
-  if (notify && signalReady() && (role !== 'idle' || requestPending))try{send({ type: 'end-session' });}catch{}
+function stopSession(notify = true,reason='local') {
+  if(notify&&reason==='local'){remoteRetry?.cancel();clearInterval(reconnectTextTimer);if(role==='host'&&controlChannel?.readyState==='open')try{controlChannel.send(JSON.stringify({type:'session-ending'}));}catch{}}
+
+  if (notify && signalReady() && (role !== 'idle' || requestPending))try{send({ type: 'end-session',reason:reason==='transport-failed'?'transport-failed':'local' });}catch{}
   closePeer();
   if (stream) { for (const track of stream.getTracks()) { track.onended = null; track.stop(); } stream = null; }
   api.revoke().catch(() => {}); role = 'idle';
@@ -393,6 +400,16 @@ function stopSession(notify = true) {
   sessionRoute = 'server'; iceServers = serverIce; forceRelay = serverRelay;
   updateControls();
 }
+function installRemoteLoading(){
+ const box=document.createElement('section');box.id='remote-loading';box.className='remote-loading';const image=document.createElement('img');image.className='remote-loading-image';image.alt='';const saved=config.remotePreview;if(saved?.image)image.src=saved.image;else image.hidden=true;
+ const shade=document.createElement('div');shade.className='remote-loading-shade';const content=document.createElement('div');content.className='remote-loading-content';const spinner=document.createElement('span');spinner.className='loading-spinner';spinner.setAttribute('aria-hidden','true');const title=document.createElement('h2');title.textContent=config.remoteTarget.address;const message=document.createElement('p');message.id='remote-loading-status';message.setAttribute('role','status');message.textContent=tr('Connecting to the remote computer…');const caption=document.createElement('small');caption.textContent=saved?.kind==='session'?tr('Last session preview'):saved?.image?tr('Saved desktop background'):'';
+ const actions=document.createElement('div');actions.className='remote-loading-actions';const main=document.createElement('button');main.className='small-button';main.textContent=tr('Main window');main.onclick=()=>api.showMain();const retry=document.createElement('button');retry.className='small-button';retry.id='remote-retry-now';retry.textContent=tr('Retry now');retry.onclick=guarded(()=>remoteRetry?.state==='waiting'?remoteRetry.retryNow():joinTarget({address:$('remote-id').value,password:$('remote-password').value,endpoint:$('server-url').value,serverKey:$('server-key').value}));const cancel=document.createElement('button');cancel.className='small-button stop';cancel.id='remote-retry-cancel';cancel.textContent=tr('Cancel');cancel.onclick=()=>{remoteRetry?.cancel();stopSession(true);showRemoteLoading('Connection cancelled.',true);};actions.append(main,retry,cancel);
+ const card=document.querySelector('.join-card');card.hidden=true;content.append(spinner,title,message,caption,actions,card);box.append(image,shade,content);document.body.append(box);loadingScreen={box,image,message,caption,card,spinner,cancel,retry};
+}
+function showRemoteLoading(message,manual=false){if(!config?.viewerWindow||!loadingScreen)return;loadingScreen.box.hidden=false;document.body.classList.add('remote-connecting');loadingScreen.message.textContent=tr(message);loadingScreen.card.hidden=!manual;loadingScreen.spinner.hidden=manual;loadingScreen.cancel.hidden=manual;loadingScreen.retry.hidden=!manual&&remoteRetry?.state!=='waiting';}
+function captureRemotePreview(){if(!config?.viewerWindow||role!=='viewer'||!loadingScreen)return;const video=$('remote-video');if(!video.videoWidth||video.readyState<2)return;try{const canvas=document.createElement('canvas'),scale=Math.min(640/video.videoWidth,360/video.videoHeight,1);canvas.width=Math.max(1,Math.round(video.videoWidth*scale));canvas.height=Math.max(1,Math.round(video.videoHeight*scale));canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);const image=canvas.toDataURL('image/jpeg',.45);loadingScreen.image.src=image;loadingScreen.image.hidden=false;loadingScreen.caption.textContent=tr('Last session preview');api.saveRemotePreview({image,deviceId:remoteComputer.deviceId}).catch(()=>{});}catch{}}
+function remoteFrameReady(){if(!config?.viewerWindow||!loadingScreen)return;loadingScreen.box.hidden=true;document.body.classList.remove('remote-connecting');remoteRetry?.connected();captureRemotePreview();clearInterval(framePreviewTimer);framePreviewTimer=setInterval(captureRemotePreview,15000);}
+function interruptSession(message,minimum=0){const recover=!!remoteRetry?.wanted&&remoteRetry.established;stopSession(true,'transport-failed');if(recover){remoteRetry.interrupted(minimum);showRemoteLoading(message);}else showRemoteLoading(message,true);status(message,true);}
 function startStats() {
   clearInterval(statsTimer);
   let polling = false;
@@ -441,9 +458,12 @@ function input(data, pointer = false) {
   if (data.type === 'release') { keyboardEpoch++; guestShift.reset(); }
   if (role !== 'viewer' || !allowedControl) return;
   if(remoteInputReason!=='ready'&&data.type!=='release')return;
-  // Moves share the ordered stream with down/up. Only visual pointer markers
-  // use the disposable unordered channel, so a late move cannot corrupt a drag.
-  const channel = data.type==='move'?controlChannel:pointer ? pointerChannel : controlChannel;
+  if(['button','wheel','release'].includes(data.type)){clearTimeout(pointerFrame);pointerFrame=0;latestPointer=null;}
+  if(peerMotionV2&&['move','button','wheel','release'].includes(data.type))data=motionSend.packet(data);
+  // Absolute button coordinates form reliable barriers; disposable motion uses
+  // an epoch/sequence guard so older datagrams cannot cross a click/drag edge.
+  // Legacy peers retain the existing ordered path.
+  const channel=data.type==='move'?(peerMotionV2&&pointerChannel?.readyState==='open'?pointerChannel:controlChannel):pointer?pointerChannel:controlChannel;
   if (channel?.readyState === 'open' && channel.bufferedAmount < (data.type==='move'?1024:32768)) channel.send(JSON.stringify(data));
   else if (data.type!=='move'&&!pointer && channel?.readyState === 'open') stopSession(true); // Never silently lose a key-up.
 }
@@ -539,8 +559,8 @@ stage.addEventListener('drop', event => {
     for (const [code, down] of [['ControlLeft', true], ['KeyV', true], ['KeyV', false], ['ControlLeft', false]]) input({ type: 'key', code, down, layout });
   })();
 });
-window.addEventListener('beforeunload', () => { for (const track of stream?.getTracks() || []) { track.onended = null; track.stop(); } pc?.close(); socket?.close(); });
-$('remote-video').addEventListener('loadeddata', () => { $('video-placeholder').hidden = true; });
+window.addEventListener('beforeunload', () => {remoteRetry?.cancel();if(role==='host'){try{if(controlChannel?.readyState==='open')controlChannel.send(JSON.stringify({type:'session-ending'}));if(signalReady())send({type:'end-session',reason:'local'});}catch{}} for (const track of stream?.getTracks() || []) { track.onended = null; track.stop(); } pc?.close(); socket?.close(); });
+$('remote-video').addEventListener('loadeddata', () => { $('video-placeholder').hidden = true;remoteFrameReady(); });
 
 
 $('connect-server').onclick = guarded(async () => {
@@ -574,11 +594,13 @@ $('host-stop').onclick = () => {
   if (socket?.readyState === WebSocket.OPEN) send({ type: 'unregister' });
   registered = false; internetId = ''; renderHostCredentials(); updateControls(); status('اتصال ورودی متوقف شد.');
 };
-async function joinTarget(record) {
+async function joinTarget(record,retrying=false) {
   if(!config.viewerWindow&&!config.smoke)return api.openRemote(record?.address?record:{address:$('remote-id').value,password:$('remote-password').value,endpoint:$('server-url').value,serverKey:$('server-key').value});
   if(role!=='idle'||outgoingAttempt)return;
+  if(record?.address){$('remote-id').value=record.address;$('remote-password').value=record.password||'';}
+  showRemoteLoading('Connecting to the remote computer…');
   const attempt=new window.ConnectionAttempt();outgoingAttempt=attempt;role='joining';updateControls();
-  joinTimer=setTimeout(()=>{if(outgoingAttempt!==attempt)return;stopSession(true);status('Connection timed out. Check host approval and network settings.',true);},60000);
+  joinTimer=setTimeout(()=>{if(outgoingAttempt!==attempt)return;if(remoteRetry?.established)interruptSession('Connection timed out. Check host approval and network settings.');else{stopSession(true);showRemoteLoading('Connection timed out. Check host approval and network settings.',true);status('Connection timed out. Check host approval and network settings.',true);}},60000);
   try{
     if(record?.endpoint){
       if(config.internetEnabled===false){config.internetEnabled=await attempt.wait(api.internetEnabled(true));$('internet-enabled').checked=true;}
@@ -590,7 +612,7 @@ async function joinTarget(record) {
     }
     const id=$('remote-id').value.replace(/\s/g,'');let password=$('remote-password').value;
     if(!password&&config.rememberPasswords){password=await attempt.wait(api.connections('recall',{address:id,endpoint:$('server-url').value}));$('remote-password').value=password;}
-    connectionAttempt={address:id,password,endpoint:$('server-url').value,serverKey:$('server-key').value};
+    connectionAttempt={address:id,password,endpoint:$('server-url').value,serverKey:$('server-key').value};if(remoteRetry&&!retrying)remoteRetry.arm(connectionAttempt);
     await attempt.wait(api.connections('attempt',connectionAttempt));
     if(id.includes('.')||id.includes(':')){
       if(!password)throw new Error(tr('Enter the host LAN password.'));
@@ -598,21 +620,21 @@ async function joinTarget(record) {
       await attempt.wait(new Promise((resolve,reject)=>{
         const ws=new window.LANSocket(endpoint);directSocket=ws;
         ws.onerror=()=>reject(new Error(tr('Cannot reach the LAN host. Check its IP and allow TCP 8788 in Windows firewall.')));
-        ws.onclose=()=>{if(directSocket===ws&&!attempt.cancelled){reject(new Error(tr('LAN connection closed.')));stopSession(false);}};
+        ws.onclose=()=>{if(directSocket===ws&&!attempt.cancelled){reject(new Error(tr('LAN connection closed.')));interruptSession('Connection interrupted. Trying to recover…');}};
         ws.onmessage=event=>{
           if(directSocket!==ws||attempt.cancelled)return;let message;try{message=JSON.parse(event.data)}catch{return}
           if(message.type==='ready'){
             if(!message.direct||message.service!=='ShatootConnect'||message.protocol!==2){reject(new Error(tr('This address is not a direct LAN listener.')));ws.close();return;}
             ws.send(JSON.stringify({type:'join',id:'direct',password,name:config.name,deviceId:config.deviceId}));resolve();return;
           }
-          messageQueue=messageQueue.then(()=>{if(!attempt.cancelled)return dispatch(message,'lan-viewer')}).catch(e=>{if(!attempt.cancelled){stopSession(true);status(e.message,true)}});
+          messageQueue=messageQueue.then(()=>{if(!attempt.cancelled)return dispatch(message,'lan-viewer')}).catch(e=>{if(!attempt.cancelled){interruptSession(e.message)}});
         };
       }));status('درخواست ارسال شد؛ منتظر تأیید میزبان هستیم.');return;
     }
     if(!/^\d{9}$/.test(id)||!password)throw new Error('شناسهٔ ۹ رقمی و رمز میزبان را وارد کنید.');
     await attempt.wait(connect());attempt.check();send({type:'join',id,password,name:config.name,deviceId:config.deviceId});
     $('session-panel').hidden=false;$('video-stage').hidden=true;$('session-title').textContent='در انتظار تأیید میزبان';$('control-label').textContent='';
-  }catch(error){if(attempt.cancelled||outgoingAttempt!==attempt)return;stopSession(false);throw error;}
+  }catch(error){if(attempt.cancelled||outgoingAttempt!==attempt)return;stopSession(false);showRemoteLoading(error.message,!retrying);throw error;}
 }
 $('cancel-connection').onclick=()=>{if(!outgoingAttempt)return;stopSession(true);status('Connection cancelled.');};
 $('join').onclick = guarded(joinTarget);
@@ -625,21 +647,33 @@ async function renderComputers(){
   const revision=++computersRevision,records=await api.connections('computers');if(revision!==computersRevision)return;
   if($('favorites-list').dataset.reordering==='true')return;
   const list=$('favorites-list');list.replaceChildren();$('favorites-empty').hidden=records.length>0;
+  window.closeComputerMenu?.();
   for(const record of records){
     const row=document.createElement('div');row.className=record.saved?'favorite-row':'history-row';row.dataset.address=record.address;row.dataset.saved=String(record.saved);row.dataset.connectedAt=String(record.at||0);applyComputerPreview(row,record);
-    row.draggable=record.pinned;row.classList.toggle('pinned-draggable',record.pinned);row.dataset.pinKey=record.pinKey;
-    const marker=document.createElement('span');marker.className='computer-kind mi '+(record.saved?'star_outline':'schedule');marker.title=tr(record.saved?'Saved computer':'Recent connection');marker.setAttribute('role','img');marker.setAttribute('aria-label',marker.title);
-    const connectButton=document.createElement('button');connectButton.className=record.saved?'favorite-connect':'history-connect';connectButton.disabled=role!=='idle';
-    const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/person.svg';avatar.alt='';
-    const name=document.createElement('b');name.textContent=record.displayName||record.name;const dot=document.createElement('span');const live=window.collaboration?.peer(record.deviceId)||window.collaboration?.nearby?.find(p=>p.deviceId===record.deviceId);dot.className='presence-dot presence-'+(live?record.status||'available':'offline');const wrap=document.createElement('span');wrap.className='avatar-wrap';wrap.append(avatar,dot);const address=document.createElement('small');address.textContent=record.address;address.dir='ltr';const version=document.createElement('small');version.className='computer-version';version.textContent=record.appVersion?'v'+record.appVersion:tr('Version unknown');connectButton.append(wrap,name,address,version);
+    row.draggable=record.pinned;row.classList.toggle('pinned-draggable',record.pinned);row.dataset.pinKey=record.pinKey;row.title=tr('App version')+': '+(record.appVersion||tr('Version unknown'));
+    const connectButton=document.createElement('button');connectButton.className=record.saved?'favorite-connect':'history-connect';connectButton.title=tr('Connect to a computer');
+    const wrap=document.createElement('span');wrap.className='avatar-wrap';const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/person.svg';avatar.alt='';const dot=document.createElement('span');const live=window.collaboration?.peer(record.deviceId)||window.collaboration?.nearby?.find(p=>p.deviceId===record.deviceId);dot.className='presence-dot presence-'+(live?record.status||'available':'offline');wrap.append(avatar,dot);
+    const name=document.createElement('b');name.textContent=record.displayName||record.name;name.dir='auto';const address=document.createElement('small');address.textContent=record.address;address.dir='ltr';connectButton.append(wrap,name,address);
     const resolve=()=>record.saved?api.favoriteGet(record.id):api.connections('get',record.id);
     connectButton.onclick=guarded(async()=>connectRecord(await resolve()));
     const actions=document.createElement('div');actions.className='favorite-actions';
-    const pin=document.createElement('button');pin.className='icon-button computer-pin';pin.title=tr(record.pinned?'Unpin connection':'Pin connection');pin.setAttribute('aria-label',pin.title);pin.setAttribute('aria-pressed',String(record.pinned));pin.innerHTML='<span class="mi pin" aria-hidden="true"></span>';pin.onclick=guarded(async()=>{await api.computerCard('pin',{peer:record,pinned:!record.pinned});await renderComputers();});actions.append(pin);
-    const entries=record.saved?[['screen_share','Connect to a computer',async()=>connectRecord(await resolve())],['edit','Rename saved computer',async()=>saveComputer(await resolve())],['shortcut','Create desktop shortcut',async()=>{await api.favoriteShortcut(record.id);toast('Desktop shortcut created.');}],['close','Delete saved connection',async()=>renderFavorites(await api.favoriteDelete(record.id))]]:[['person','Save computer',async()=>saveComputer(await resolve())]];
-    for(const[icon,title,action]of entries){const b=document.createElement('button');b.className='icon-button';if(title==='Rename saved computer')b.classList.add('rename-computer');b.title=tr(title);b.setAttribute('aria-label',b.title);const i=document.createElement('span');i.className='mi '+icon;i.setAttribute('aria-hidden','true');b.append(i);b.onclick=guarded(action);actions.append(b);}
-    const details=document.createElement('button');details.className='icon-button computer-info-button';details.title=tr('System details');details.setAttribute('aria-label',details.title);details.innerHTML='<span class="mi info" aria-hidden="true"></span>';details.onclick=guarded(()=>window.showComputerInfo(record));actions.append(details);row.append(marker,connectButton,actions);list.append(row);
+    const button=(icon,title,action,cls)=>{const control=document.createElement('button');control.className='icon-button '+cls;control.title=tr(title);control.setAttribute('aria-label',control.title);control.innerHTML='<span class="mi '+icon+'" aria-hidden="true"></span>';control.onclick=guarded(action);actions.append(control);return control;};
+    button('chat','Start chat',async()=>{const session=await window.messenger.start({type:record.endpoint?'id':'lan',address:record.address,endpoint:record.endpoint,deviceId:record.deviceId,name:record.displayName||record.name});if(session?.peer)await api.openChat(session.peer.deviceId);},'computer-chat');
+    button('screen_share','Connect to a computer',async()=>connectRecord(await resolve()),'computer-connect');
+    const more=button('more_horiz','More actions',()=>openComputerMenu(more,record,resolve),'computer-more');
+    more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');more.onclick=()=>openComputerMenu(more,record,resolve);
+    row.append(connectButton,actions);list.append(row);
   }
+}
+function openComputerMenu(anchor,record,resolve){
+  window.closeComputerMenu?.();const menu=document.createElement('div');menu.className='computer-menu';menu.setAttribute('role','menu');const label=document.createElement('small');label.textContent=tr('App version')+': '+(record.appVersion||tr('Version unknown'));menu.append(label);
+  const entries=[['info','System details',()=>window.showComputerInfo(record)],['pin',record.pinned?'Unpin connection':'Pin connection',async()=>{await api.computerCard('pin',{peer:record,pinned:!record.pinned});await renderComputers();}]];
+  if(record.saved)entries.push(['edit','Rename saved computer',async()=>saveComputer(await resolve())],['shortcut','Create desktop shortcut',async()=>{await api.favoriteShortcut(record.id);toast('Desktop shortcut created.');}],['close','Delete saved connection',async()=>renderFavorites(await api.favoriteDelete(record.id))]);else entries.push(['person','Save computer',async()=>saveComputer(await resolve())]);
+  for(const [icon,title,action]of entries){const item=document.createElement('button');item.type='button';item.setAttribute('role','menuitem');item.className='computer-menu-item';item.innerHTML='<span class="mi '+icon+'" aria-hidden="true"></span>';const text=document.createElement('span');text.textContent=tr(title);item.append(text);item.onclick=guarded(async()=>{close();await action();});menu.append(item);}
+  document.body.append(menu);const point=anchor.getBoundingClientRect(),bounds=menu.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(point.right-bounds.width,innerWidth-bounds.width-8))+'px';menu.style.top=Math.max(8,Math.min(point.bottom+4,innerHeight-bounds.height-8))+'px';anchor.setAttribute('aria-expanded','true');
+  const outside=event=>{if(!menu.contains(event.target)&&!anchor.contains(event.target))close();};const key=event=>{const items=[...menu.querySelectorAll('button')],i=items.indexOf(document.activeElement);if(event.key==='Escape'){event.preventDefault();close();anchor.focus();}else if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?items.length-1:(i+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;items[next]?.focus();}};
+  function close(){menu.remove();anchor.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',key);if(window.closeComputerMenu===close)window.closeComputerMenu=null;}
+  window.closeComputerMenu=close;document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',key);menu.querySelector('button')?.focus();
 }
 async function connectFavorite(id) {
   if (role !== 'idle' || requestPending) throw new Error(tr('End the current session first.'));
@@ -659,7 +693,7 @@ async function connectRecord(record) {
       $('server-url').value=record.endpoint;$('server-key').value=record.serverKey||'';registrationWanted=!config.viewerWindow;updateControls();
     }
   }
-  $('remote-password').focus();toast('Enter the password to connect.');
+  showRemoteLoading('Enter the password to connect.',true);$('remote-password').focus();toast('Enter the password to connect.');
 }
 async function saveComputer(value){
   let modal=$('save-computer-dialog');
@@ -784,7 +818,8 @@ $('language').onchange = guarded(async () => { window.i18n.setLanguage(await api
   if(config.viewerWindow){
     registrationWanted=false;incomingEnabled=false;document.body.classList.add('remote-window');
     $('server-url').value=config.remoteTarget.endpoint||config.endpoint;$('server-key').value=config.remoteTarget.serverKey||'';$('app-version').textContent='Shatoot Connect '+config.version;
-    const back=document.createElement('button');back.className='small-button';back.textContent=tr('Main window');back.onclick=()=>api.showMain();document.querySelector('main>header').prepend(back);
+    installRemoteLoading();
+    remoteRetry=new window.SessionReconnect({connect:target=>joinTarget(target,true),changed:()=>{clearInterval(reconnectTextTimer);const render=()=>{if(remoteRetry.state==='waiting')showRemoteLoading(tr('Reconnecting in: ')+Math.max(0,Math.ceil((remoteRetry.nextAt-Date.now())/1000))+' '+tr('seconds'));};render();if(remoteRetry.state==='waiting')reconnectTextTimer=setInterval(render,1000);}});
     updateControls();await api.appReady();window.shatootconnectReady=true;await connectRecord(config.remoteTarget);return;
   }
   renderHistory(await api.connections('history'));

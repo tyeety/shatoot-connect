@@ -5,7 +5,7 @@ test('additional host forwards cached/live input state and physical cursor packe
  const events={},channels=[],sent=[];
  const track={stop(){}};
  const stream={getVideoTracks:()=>[track],getTracks:()=>[track]};
- const win={LayoutSync:class{},StreamQuality:class{async start(){}},SessionExchange:class{},};
+ const win={MotionSequence:require('../desktop/ui/motion-sequence.js').MotionSequence,LayoutSync:class{},StreamQuality:class{async start(){}},SessionExchange:class{},};
  const api=new Proxy({
   hostInit:async()=>({lan:true,profiles:{speed:{fps:60,width:1920,height:1080}},profile:'speed',autoQuality:false,showHostCursor:false,invitation:{name:'Fixture'}}),
   sources:async()=>[{id:'fixture'}],selectSource:async()=>{},approve:async()=>({accepted:true,control:true}),capture:()=>win.shatootconnectCapture(),hostSend:data=>sent.push(data),watchKeyboard:()=>{},
