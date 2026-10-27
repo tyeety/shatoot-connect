@@ -16,6 +16,7 @@ class ClientPreferences {
     const record={...old,...(validId?{deviceId:value.deviceId}:{}),routes:[...new Map([...(old.routes||[]),...routes].map(r=>[r.key,r])).values()].slice(-20)};
     delete record._key;
     if(typeof value.name==='string')record.name=value.name.slice(0,60);
+    if(value.appVersion!==undefined)record.appVersion=require('../shared/profile.cjs').profile(value).appVersion;
     if(value.avatar!==undefined)record.avatar=require('../shared/profile.cjs').profile(value).avatar;
     if(value.preview!==undefined){if(typeof value.preview!=='string'||value.preview.length>90000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(value.preview))throw new Error('Invalid desktop preview.');if(value.previewKind==='wallpaper'){let unchanged=false;try{unchanged=old.previewKind==='wallpaper'&&!!old.preview&&this.decrypt(old.preview)===value.preview;}catch{}if(!unchanged){record.preview=this.encrypt(value.preview);record.previewAt=Date.now();}record.previewKind='wallpaper';}}
     if(JSON.stringify(record)===JSON.stringify(cards[key]))return;
@@ -28,7 +29,7 @@ class ClientPreferences {
     const favorite=(this.read().favorites||[]).find(f=>{try{return f.name!==f.address&&keys.has(this.destination(f).key);}catch{return false;}});
     let preview='';try{if(card.preview&&card.previewKind==='wallpaper'){this.previewCache||=new Map();if(!this.previewCache.has(card.preview)){this.previewCache.set(card.preview,this.decrypt(card.preview));if(this.previewCache.size>200)this.previewCache.delete(this.previewCache.keys().next().value);}preview=this.previewCache.get(card.preview);}}catch{}
     const knownRoute=card.routes?.at(-1);
-    return {...value,pinned:card.pinned===true,pinKey:card._key||'',pinRank:card.pinRank||0,deviceId:value.deviceId||card.deviceId,route:value.route||(knownRoute?{type:knownRoute.endpoint?'id':'lan',address:knownRoute.address,endpoint:knownRoute.endpoint}:null),displayName:card.alias||favorite?.name||card.name||value.name||value.address||'',avatar:card.avatar!==undefined?card.avatar:value.avatar||'',preview,previewAt:card.previewAt};
+    return {...value,appVersion:typeof value.appVersion==='string'?require('../shared/profile.cjs').profile(value).appVersion:card.appVersion||'',pinned:card.pinned===true,pinKey:card._key||'',pinRank:card.pinRank||0,deviceId:value.deviceId||card.deviceId,route:value.route||(knownRoute?{type:knownRoute.endpoint?'id':'lan',address:knownRoute.address,endpoint:knownRoute.endpoint}:null),displayName:card.alias||favorite?.name||card.name||value.name||value.address||'',avatar:card.avatar!==undefined?card.avatar:value.avatar||'',preview,previewAt:card.previewAt};
   }
   pinComputer(value,pinned) {
     if(typeof pinned!=='boolean')throw new Error('Invalid pin setting.');

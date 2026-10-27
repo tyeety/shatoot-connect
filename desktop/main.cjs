@@ -44,7 +44,7 @@ function publishInputControl(){
 setInterval(()=>{inputControl.tick();publishInputControl();},150).unref();
 let localServer, tray, quitting = false;
 let settingsCache;
-const profile = () => ({ ...require('../shared/profile.cjs').profile(settings().profile), name: settings().profile?.name || require('node:os').hostname() });
+const profile = () => ({ ...require('../shared/profile.cjs').profile(settings().profile),appVersion:app.getVersion(), name: settings().profile?.name || require('node:os').hostname() });
 const update = new (require('./updater.cjs').Updater)({ version: app.getVersion(), directory: path.join(app.getPath('userData'), 'updates'), portable: !!process.env.PORTABLE_EXECUTABLE_FILE, request: require('./updater.cjs').electronResponse,
   changed: value => { for (const s of states.values()) { if (!s.win.isDestroyed()) s.win.webContents.send('update-status', value); } } });
 function settings() {
@@ -219,7 +219,8 @@ function chatFilesReceived(s,record,files){
   publishUnread(s);
   if(!reading&&!s.chatStore?.isMuted(record.conversation)){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{kind:'message',detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
 }
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, previewImage:file=>readProfilePhoto(file,true),catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
+const systemInfo=require('./system-info.cjs').createSystemInfo({app,screen});
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({systemInfo, ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, previewImage:file=>readProfilePhoto(file,true),catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
 ipcMain.handle('voice-recording',(event,enabled)=>{
   const s=state(event);if(s.owner||typeof enabled!=='boolean')throw new Error('Invalid microphone request.');
   s.voicePermissions||=new Map();if(enabled)s.voicePermissions.set(event.sender.id,Date.now()+15000);else s.voicePermissions.delete(event.sender.id);
@@ -326,7 +327,7 @@ ipcMain.handle('chat-connect-computer',(e,deviceId)=>{
 ipcMain.handle('chat-close', e => state(e).chatWindow?.close());
 ipcMain.handle('chat-call', (e, operation, args = []) => {
   const s = state(e);
-  if (s.chatWindow?.webContents !== e.sender || !['snapshot','refresh','connect','cancelPending','send','forwardMessage','sendFiles','close','createGroup','changeMessage','schedule','cancelScheduled','react'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
+  if (s.chatWindow?.webContents !== e.sender || !['snapshot','refresh','connect','computerInfo','cancelPending','send','forwardMessage','sendFiles','close','createGroup','changeMessage','schedule','cancelScheduled','react'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
   const id = crypto.randomUUID();
   return new Promise((resolve,reject) => { const timer = setTimeout(() => { chatPending.delete(id); reject(new Error('Chat operation timed out.')); }, ['sendFiles','forwardMessage'].includes(operation) ? 1800000 : 75000); chatPending.set(id, { s, resolve, reject, timer }); s.win.webContents.send('chat-command', { id, operation, args }); });
 });
@@ -552,7 +553,7 @@ ipcMain.handle('direct-listener', async e => {
   s.directStarting = (async () => {
     const hostToken = crypto.randomBytes(32).toString('hex');
     s.directHostToken = hostToken;
-    const presence = () => ({ service: 'ShatootConnect', version: 1, kind: 'presence', deviceId: s.identity.deviceId, name: profile().name, status: profile().status, port: service.server.address()?.port, capabilities: ['desktop', 'chat', 'files', 'groups'] });
+    const presence = () => ({ service: 'ShatootConnect', version: 1,appVersion:app.getVersion(),kind: 'presence', deviceId: s.identity.deviceId, name: profile().name, status: profile().status, port: service.server.address()?.port, capabilities: ['desktop', 'chat', 'files', 'groups'] });
     const service = createSignalingServer({ port: smoke ? 0 : 8788, directHostToken: hostToken, presence, deviceProfile: async () => ({ ...profile(), deviceId: s.identity.deviceId,preview:await wallpaperPreview().catch(()=>''),previewKind:'wallpaper' }) });
     try {
       await service.listen(); s.directService = service;
@@ -572,7 +573,7 @@ ipcMain.handle('direct-listener', async e => {
         ws.on('close', () => { clearTimeout(timer); reject(new Error('LAN listener closed.')); if (!s.win.isDestroyed()) s.win.webContents.send('direct-message', { type: 'ended', reason: 'LAN listener closed.' }); });
       });
       const addresses = Object.values(require('node:os').networkInterfaces()).flat().filter(n => n.family === 'IPv4' && !n.internal).map(n => `${n.address}:${port}`);
-      s.discovery = new (require('./discovery.cjs').Discovery)({ identity: s.identity, name: profile().name, port,knownEndpoints:()=>preferences.computers().filter(r=>!r.endpoint).map(r=>r.address), ...(smoke ? { discoveryPort: 0, networkInterfaces: () => ({}), neighbors: false } : {}) }); s.discovery.status = profile().status;
+      s.discovery = new (require('./discovery.cjs').Discovery)({ identity: s.identity,appVersion:app.getVersion(),name: profile().name, port,knownEndpoints:()=>preferences.computers().filter(r=>!r.endpoint).map(r=>r.address), ...(smoke ? { discoveryPort: 0, networkInterfaces: () => ({}), neighbors: false } : {}) }); s.discovery.status = profile().status;
       s.discovery.on('change',value=>{let changed=false;for(const peer of value.peers)changed=rememberComputer(peer,{address:peer.endpoints[0]},peer.previewKind==='wallpaper')||changed;if(changed)computerChanged();if(!s.win.isDestroyed())s.win.webContents.send('discovery',decorateDiscovery(value));});
       s.discovery.start().catch(() => {});
       return s.directInfo = { addresses, port, password: credentials.password, fixedPassword: credentials.fixedPassword };

@@ -2,6 +2,8 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['مشخصات سیستم','System details'],['نسخهٔ برنامه','App version'],['نسخه نامشخص','Version unknown'],['در حال دریافت مشخصات سیستم…','Requesting system details…'],['نام کامپیوتر','Computer name'],['سیستم‌عامل','Operating system'],['معماری','Architecture'],['پردازنده','Processor'],['پردازنده‌های منطقی','Logical processors'],['حافظهٔ رم','Memory'],['آزاد','Free'],['گرافیک','Graphics'],['درایور','Driver'],['نمایشگرها','Displays'],['دیسک‌ها','Disks'],['زمان روشن‌بودن','Uptime'],['ساعت','hours'],['گزارش نشده','Not reported'],['به‌روز شد','Updated'],['مشخصات سیستم معتبر نیست.','Invalid system details.'],['مشخصات سیستم در دسترس نیست.','System details unavailable.'],['برای دیدن مشخصات، برنامهٔ این کامپیوتر را به‌روز کنید.','Update Shatoot Connect on this computer to view system details.'],['پیش از دریافت دوبارهٔ مشخصات کمی صبر کنید.','Please wait before refreshing system details.'],
+
     ['مقصد اتصال معتبر نیست.','Invalid remote destination.'],['پیش از اتصال جدید، یکی از پنجره‌های ریموت را ببندید.','Close a remote window before opening another.'],['پاسخ بخش دانلود معتبر نیست.','Invalid update range response.'],['ارجاع پیام معتبر نیست.','Invalid message reference.'],['دانلود زودتر از کامل‌شدن پایان یافت.','Update download ended early.'],
     ['در حال برقراری دوبارهٔ دانلود…','Reconnecting download…'],
     ['وضعیت شما','Your status'],['شما','You'],['پاسخ','Reply'],['فوروارد','Forward'],['فورواردشده','Forwarded'],['فوروارد به','Forward to'],['لغو پاسخ','Cancel reply'],['پنجرهٔ اصلی','Main window'],['این پیام در دسترس نیست.','This message is unavailable.'],

@@ -13,6 +13,19 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.26.0 — 2026-10-27
+
+### Added
+
+- Show each computer's reported application version in nearby/saved computer cards, the chat contact list and the private chat header. Version metadata is validated, follows profile updates and remains available with saved computers; the LAN discovery protocol version remains unchanged.
+- Add System details buttons to computer cards, chat contacts and private chat headers. Fetch computer name, Windows version/build, architecture, CPU, logical cores, memory, graphics/driver, displays, system-drive capacity/free space and uptime on demand over an approved encrypted chat connection, without granting desktop control.
+- Cache hardware collection for 30 seconds, limit repeated requests and validate responses against the connected device identity. Hardware details are not broadcast with discovery; old clients show Version unknown and an update-required message instead of invented details.
+- Tests cover version propagation/cache/validation, bounded hardware responses, chat permission and identity checks, and real UI/RPC retrieval with older-peer fallback.
+
+### Fixed
+
+- Keep selected message text in view while peer/profile metadata refreshes and chat layout changes; automatic following pauses while a message selection is active.
+
 ## 0.25.0 — 2026-10-27
 
 ### Added

@@ -27,11 +27,11 @@ function discoveryTargets(endpoints, networks, offset = 0) {
 }
 
 class Discovery extends EventEmitter {
-  constructor({ identity, name, port, discoveryPort = PORT, networkInterfaces, neighbors = process.platform === 'win32', ttl = 20000,knownEndpoints=()=>[] } = {}) {
-    super(); Object.assign(this, { identity, name, port, discoveryPort, networkInterfaces, neighbors, ttl,knownEndpoints });
+  constructor({ identity, name, port, discoveryPort = PORT, networkInterfaces, neighbors = process.platform === 'win32', ttl = 20000,knownEndpoints=()=>[],appVersion='' } = {}) {
+    super(); Object.assign(this, { identity, name, port, discoveryPort, networkInterfaces, neighbors, ttl,knownEndpoints,appVersion });
     this.peers = new Map(); this.senders = new Map(); this.errors = new Set(); this.closed = false; this.lastReply = new Map(); this.requests = new Set();
   }
-  presence() { return { service: 'ShatootConnect', version: 1, kind: 'presence', deviceId: this.identity.deviceId, name: String(this.name).slice(0, 60), status: this.status || 'available', port: this.port, capabilities: ['desktop', 'chat', 'files', 'groups'] }; }
+  presence() { return { service: 'ShatootConnect', version: 1,appVersion:this.appVersion,kind: 'presence', deviceId: this.identity.deviceId, name: String(this.name).slice(0, 60), status: this.status || 'available', port: this.port, capabilities: ['desktop', 'chat', 'files', 'groups'] }; }
   snapshot() { return { peers: [...this.peers.values()].map(p => ({ ...p, endpoints: [...p.endpoints.keys()] })), interfaces: interfaces(this.networkInterfaces?.()), errors: [...this.errors] }; }
   publish() { if (!this.closed) this.emit('change', this.snapshot()); }
   ingest(data, remote) {
@@ -40,7 +40,7 @@ class Discovery extends EventEmitter {
     if (value?.service !== 'ShatootConnect' || value.version !== 1 || !UUID.test(value.deviceId) || value.deviceId === this.identity.deviceId || !Number.isInteger(value.port) || value.port < 1 || value.port > 65535 || typeof value.name !== 'string' || value.name.length > 60) return;
     if (this.peers.size >= 256 && !this.peers.has(value.deviceId)) return;
     const peer = this.peers.get(value.deviceId) || { deviceId: value.deviceId, endpoints: new Map() };
-    peer.name = value.name; peer.status = require('../shared/profile.cjs').profile(value).status; peer.lastSeen = Date.now(); peer.endpoints.set(`${remote}:${value.port}`, peer.lastSeen);
+    peer.appVersion=require('../shared/profile.cjs').profile(value).appVersion;peer.name = value.name; peer.status = require('../shared/profile.cjs').profile(value).status; peer.lastSeen = Date.now(); peer.endpoints.set(`${remote}:${value.port}`, peer.lastSeen);
     for (const [endpoint, seen] of peer.endpoints) if (peer.lastSeen - seen > this.ttl || peer.endpoints.size > 8) peer.endpoints.delete(endpoint);
     this.peers.set(value.deviceId, peer); this.publish();
     if (value.kind === 'presence' && (!peer.profileAt || Date.now() - peer.profileAt > 30000) && (this.profileRequests || 0) < 4) this.loadProfile(peer,remote,value.port);

@@ -123,7 +123,7 @@
     }
     bind(s, channel) {
       s.channel = channel; channel.bufferedAmountLowThreshold = 131072;
-      channel.onopen = () => { clearTimeout(s.timer); s.resolve(s); this.notify(); this.rpc(s,'profile',this.self).then(result=>{s.features=result?.features||[];this.sendPreview(s).catch(()=>{});return this.flush(s)}).catch(e=>this.error(e.message));this.flush(s).catch(e=>this.error(e.message));s.previewTimer=setInterval(()=>this.sendPreview(s).catch(()=>{}),60000); };
+      channel.onopen = () => { clearTimeout(s.timer); s.resolve(s); this.notify(); (s.profileReady=this.rpc(s,'profile',this.self)).then(result=>{s.features=result?.features||[];this.sendPreview(s).catch(()=>{});return this.flush(s)}).catch(e=>this.error(e.message));this.flush(s).catch(e=>this.error(e.message));s.previewTimer=setInterval(()=>this.sendPreview(s).catch(()=>{}),60000); };
       channel.onclose = () => this.close(s, 'Chat connection closed.');
       channel.onmessage = event => {
         if (typeof event.data !== 'string' || event.data.length > 64000) return this.close(s, 'Invalid chat packet.');
@@ -172,11 +172,13 @@
       if (group.owner === this.self.deviceId) result.pending = group.members.map(m => m.deviceId).filter(id => id !== this.self.deviceId && id !== message.sender);
       return result;
     }
+    async computerInfo(peer){const id=peer.deviceId;let s=id&&this.peer(id);if(!s){const route=peer.route||((peer.endpoints?.length||peer.address)?{type:peer.endpoint?'id':'lan',address:peer.address||peer.endpoints[0],endpoint:peer.endpoint}:null);s=route?await this.connect({...route,deviceId:id,name:peer.name}):await this.ensurePeer(id);}if(s.profileReady){const result=await s.profileReady;s.features=result?.features||[];}if(!s.features?.includes('computer-info-v1'))throw Error('Update Shatoot Connect on this computer to view system details.');const data=await this.rpc(s,'system-info',{});return this.api.collaboration('system-info-result',{session:s.id,data});}
     async request(s, op, value) {
+      if(op==='system-info')return this.api.collaboration('system-info',{session:s.id});
       if (op === 'profile') {
         if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
-        Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status });
-        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1','message-reactions-v1']};
+        Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status,appVersion:typeof value.appVersion==='string'&&value.appVersion.length<=32&&/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.appVersion)?value.appVersion:'' });
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['computer-info-v1','message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1','message-reactions-v1']};
       }
       if(op==='desktop-card-preview'){if(value?.kind==='wallpaper'){await this.api.collaboration('peer-preview',{session:s.id,preview:value.preview,previewKind:'wallpaper'});await this.refresh();}return true;}
       if(op==='message-receipt'){

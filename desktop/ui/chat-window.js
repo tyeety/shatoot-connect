@@ -15,6 +15,7 @@
     connect(destination) { return api.chatCall('connect', [destination]); }
     cancelPending(){return api.chatCall('cancelPending');}
     send(conversation, text,options) { return api.chatCall('send', [conversation, text,options]); }
+    computerInfo(peer){return api.chatCall('computerInfo',[peer]);}
     forwardMessage(source,id,target){return api.chatCall('forwardMessage',[source,id,target]);}
     schedule(conversation,text,sendAt,id){return api.chatCall('schedule',[conversation,text,sendAt,id]);}
     cancelScheduled(id){return api.chatCall('cancelScheduled',[id]);}

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { ChatStore } = require('./chat-store.cjs');
 const { Transfers } = require('./transfers.cjs');
 const { UUID } = require('./discovery.cjs');
-function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, clipboardRead=async()=>({files:[]}), decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {}, messageReceived = () => {},catalogChanged=()=>{},previewImage=async()=>'' }) {
+function installCollaboration({ systemInfo=async()=>{throw Error('System details unavailable.');},ipcMain, state, app, safeStorage, dialog, shell, smoke, settings, clipboardRead=async()=>({files:[]}), decorateComputer = peer => peer, rememberComputer = () => {}, received = () => {}, messageReceived = () => {},catalogChanged=()=>{},previewImage=async()=>'' }) {
   let previewQueue=Promise.resolve();
   function store(s) {
     if (!s.identity) throw new Error('The device is not initialized.');
@@ -15,6 +15,8 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
   function grant(s, id) { const value = s.chatGrants?.get(id); if (!value) throw new Error('Chat permission is required.'); return value; }
   ipcMain.handle('collaboration', async (event, op, value = {}) => {
     const s = state(event), history = store(s);
+    if(op==='system-info'){const g=grant(s,value.session);if(g.infoAt&&Date.now()-g.infoAt<1000)throw Error('Please wait before refreshing system details.');g.infoAt=Date.now();return systemInfo(s.identity.deviceId);}
+    if(op==='system-info-result'){const g=grant(s,value.session);if(value.data?.deviceId!==g.peer.deviceId)throw Error('The computer identity changed.');return require('../shared/system-info.cjs').normalize(value.data);}
     if(op==='list'){const list=history.list();catalogChanged(s);return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
     if(op==='message')return history.history({conversation:value.conversation,limit:100}).find(m=>m.id===value.id)||history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation);
     if(op==='forward-sources'){const row=history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation&&!m.deleted);if(!row||row.kind!=='file')throw Error('This message is unavailable.');const token=Object.entries(history.load().attachments).find(([,attachment])=>attachment.message===row.id&&attachment.conversation===row.conversation)?.[0];if(!token)throw Error('This message is unavailable.');const files=history.files(token);if(!files.length)throw Error('This message is unavailable.');return files;}
