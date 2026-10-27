@@ -1,6 +1,6 @@
 {
   "name": "shatoot-connect",
-  "version": "0.23.3",
+  "version": "0.24.0",
   "description": "Windows remote desktop, LAN discovery, peer-to-peer chat, groups and file transfer",
   "main": "desktop/main.cjs",
   "private": true,
@@ -32,7 +32,8 @@
     "test:media-performance": "electron . --smoke-test --media-smoke --media-performance",
     "test:ice-ui": "electron . --smoke-test --ice-smoke",
     "test:connection-ui": "electron . --smoke-test --connection-ui-smoke",
-    "test:keyboard-shift": "electron tests/keyboard-shift-probe.cjs"
+    "test:keyboard-shift": "electron tests/keyboard-shift-probe.cjs",
+    "test:native-text": "node tests/native-text-pipe.cjs"
   },
   "dependencies": {
     "ws": "8.22.0"
@@ -62,6 +63,10 @@
       {
         "from": "build/icon.ico",
         "to": "app-icon.ico"
+      },
+      {
+        "from": "build/chat-icon.ico",
+        "to": "chat-icon.ico"
       }
     ],
     "win": {

@@ -2,6 +2,8 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['حذف پیام؟','Delete message?'],['مطمئنید می‌خواهید این پیام را حذف کنید؟','Are you sure you want to delete this message?'],
+    ['این دستگاه نشانی اتصال ذخیره‌شده ندارد.','This computer has no saved connection address.'],
     ['میزبان فعال است؛ کنترل ۲ ثانیه پس از پایان فعالیت آزاد می‌شود','Host active · resumes after 2 s of inactivity'],
     ['نمایش محل فعالیت موس میزبان','Highlight host mouse activity'],
 ['کیفیت خودکار','Automatic quality'],['اجازه بده کنترل‌کننده نمایشگرهای این سیستم را پنهان کند','Allow remote controllers to hide this computer’s monitors'],['پیش از اتصال فعال کنید. Ctrl + Shift + F12 تصویر را برمی‌گرداند و اتصال را قطع می‌کند.','Enable before connecting. Ctrl + Shift + F12 restores displays and disconnects.'],['پنهان کردن نمایشگرهای مقابل','Hide remote monitors'],['نمایش دوبارهٔ نمایشگرهای مقابل','Restore remote monitors'],['این قابلیت باید پیش از اتصال در سیستم مقابل فعال شده باشد.','Privacy screen requires prior permission on the remote computer.'],['پنهان کردن نمایشگر در این سیستم در دسترس نیست.','Privacy screen is unavailable on this computer.'],
@@ -150,7 +152,7 @@ window.i18n = (() => {
     document.documentElement.lang = language; document.documentElement.dir = language === 'fa' ? 'rtl' : 'ltr';
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
-    for (const node of nodes) { const trimmed = node.textContent.trim(), next = translate(trimmed); if (next !== trimmed) node.textContent = node.textContent.replace(trimmed, next); }
+    for (const node of nodes) { if(node.parentElement?.closest('[translate=no]'))continue;const trimmed = node.textContent.trim(), next = translate(trimmed); if (next !== trimmed) node.textContent = node.textContent.replace(trimmed, next); }
     for (const el of document.querySelectorAll('[placeholder],[title],[aria-label]')) for (const attribute of ['placeholder','title','aria-label']) {
       if (el.hasAttribute(attribute)) el.setAttribute(attribute, translate(el.getAttribute(attribute)));
     }

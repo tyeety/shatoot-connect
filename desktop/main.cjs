@@ -217,7 +217,7 @@ function chatFilesReceived(s,record,files){
     win.webContents.send('chat-files-received',{conversation:record.conversation,id:record.id});
   }
   publishUnread(s);
-  if(!reading&&!s.chatStore?.isMuted(record.conversation)){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
+  if(!reading&&!s.chatStore?.isMuted(record.conversation)){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{kind:'message',detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
 }
 const collaborationHost = require('./collaboration-host.cjs').installCollaboration({ ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, previewImage:file=>readProfilePhoto(file,true),catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
 ipcMain.handle('voice-recording',(event,enabled)=>{
@@ -226,7 +226,7 @@ ipcMain.handle('voice-recording',(event,enabled)=>{
 });
 function unreadIcon(total){
   const pixels=Buffer.alloc(32*32*4),digits=['111101101101111','010110010010111','111001111100111','111001111001111','101101111001001','111100111001111','111100111101111','111001001001001','111101111101111','111101111001111'],label=String(Math.min(99,total));
-  for(let y=0;y<32;y++)for(let x=0;x<32;x++)if((x-15.5)**2+(y-15.5)**2<=250){const i=(y*32+x)*4;pixels[i]=209;pixels[i+1]=62;pixels[i+2]=142;pixels[i+3]=255;}
+  for(let y=0;y<32;y++)for(let x=0;x<32;x++)if((x-15.5)**2+(y-15.5)**2<=250){const i=(y*32+x)*4;pixels[i]=69;pixels[i+1]=47;pixels[i+2]=211;pixels[i+3]=255;}
   const scale=3,left=Math.floor((32-(label.length*4-1)*scale)/2);for(let n=0;n<label.length;n++)for(let y=0;y<5;y++)for(let x=0;x<3;x++)if(digits[Number(label[n])][y*3+x]==='1')for(let dy=0;dy<scale;dy++)for(let dx=0;dx<scale;dx++){const i=((8+y*scale+dy)*32+left+(n*4+x)*scale+dx)*4;pixels.fill(255,i,i+4);}
   return require('electron').nativeImage.createFromBitmap(pixels,{width:32,height:32});
 }
@@ -297,7 +297,9 @@ function openChat(s,target) {
   if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show();if(s.chatWindow.isMinimized())s.chatWindow.restore();s.chatWindow.focus();if(target)s.chatWindow.webContents.send('chat-target',target);return; }
   const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor:settings().theme==='light'?'#faf6ff':'#160d20', title:chatWindowTitle(s), icon:path.join(__dirname,'ui/assets/chat-icon.png'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   win.on('page-title-updated',event=>event.preventDefault());
-  s.chatWindow = win; win.setContentProtection(settings().showChatInRemote!==true); win.removeMenu(); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
+  s.chatWindow = win; win.setContentProtection(settings().showChatInRemote!==true);
+  require('./chat-window.cjs').configureChatWindow({win,Menu,icon:app.isPackaged?path.join(process.resourcesPath,'chat-icon.ico'):path.join(__dirname,'../build/chat-icon.ico'),executable:process.env.PORTABLE_EXECUTABLE_FILE||process.execPath,appPath:app.getAppPath(),packaged:app.isPackaged});
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); win.webContents.on('will-navigate', event => event.preventDefault());
   for(const host of states.values())syncCursorExclusions(host);
   const chatContentsId=win.webContents.id;win.on('closed', () => { s.chatViews?.delete(chatContentsId);s.voicePermissions?.delete(chatContentsId);s.chatWindow = null;for(const host of states.values())syncCursorExclusions(host); });
   win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
@@ -307,6 +309,13 @@ function openUpdateSettings(s){showMain(s);s.win.webContents.send('settings-open
 ipcMain.handle('chat-open', e => openChat(state(e)));
 ipcMain.handle('profile-edit',e=>{const s=state(e);showMain(s);s.win.webContents.send('profile-edit');});
 ipcMain.handle('show-main', e => showMain(state(e)));
+ipcMain.handle('chat-connect-computer',(e,deviceId)=>{
+  const s=state(e);if(!require('./discovery.cjs').UUID.test(deviceId))throw new Error('Invalid computer.');
+  const contact=s.chatStore?.load().contacts[deviceId],peer=contact&&preferences.decorate(contact,contact.route||{});if(!peer?.route)throw new Error('This computer has no saved connection address.');
+  const target=preferences.destination({address:peer.route.address,endpoint:peer.route.endpoint});
+  const saved=preferences.list().find(record=>record.deviceId===deviceId||record.address===target.address&&record.endpoint===target.endpoint);
+  showMain(s);if(saved)s.win.webContents.send('connect-favorite',saved.id);else s.win.webContents.send('connect-computer',{address:target.address,endpoint:target.endpoint,password:preferences.recall(target)});
+});
 ipcMain.handle('chat-close', e => state(e).chatWindow?.close());
 ipcMain.handle('chat-call', (e, operation, args = []) => {
   const s = state(e);
@@ -767,6 +776,7 @@ app.whenReady().then(async () => {
     for (const s of states.values()) { release(s); s.source = null; s.captureAllowed = false; hideHostOverlay(s); s.win.webContents.send('emergency-stop'); }
   });
   const win = createWindow();
+  if(!smoke&&process.argv.includes('--open-chat'))win.webContents.once('did-finish-load',()=>openChat(states.get(win.webContents.id)));
   if (!smoke) {
     tray = new Tray(path.join(__dirname, 'ui/assets/app-icon.png')); tray.setToolTip('Shatoot Connect');
     refreshTray(states.get(win.webContents.id));tray.on('double-click', () => showMain(states.get(win.webContents.id)));
@@ -794,7 +804,7 @@ app.on('second-instance', (_event,args)=>{
   if(args.includes('--quit-if-background')){if(!BrowserWindow.getAllWindows().some(win=>win.isVisible())){quitting=true;app.quit();}return;}
   const s = [...states.values()][0];
   const id = args.find(value => /^--connect-saved=[a-f0-9-]{36}$/.test(value))?.split('=')[1];
-  if (s) { showMain(s); if (id) s.win.webContents.send('connect-favorite', id); }
+  if (s) { if(args.includes('--open-chat')){openChat(s);return;}showMain(s); if (id) s.win.webContents.send('connect-favorite', id); }
   else if (id) launchFavorite = id;
 });
 

@@ -53,7 +53,7 @@ static class KeyboardGrab {
                 // No IPC, layout lookup, disk access or stdout writes in the hook callback.
                 while (events.TryDequeue(out var value)) {
                     var json = JsonSerializer.Serialize(value);
-                    if (json.Contains("layoutSwitch")) { KeyboardSync.Cycle(); layout = KeyboardSync.Current(); }
+                    if (json.Contains("layoutSwitch")) { KeyboardSync.Cycle(); layout = KeyboardSync.Current(); json=JsonSerializer.Serialize(new{release=true,layoutSwitch=true,layout}); }
                     Console.WriteLine(json);
                 }
                 if (Environment.TickCount64 - sampled >= 80) { layout = KeyboardSync.Current(); sampled = Environment.TickCount64; }

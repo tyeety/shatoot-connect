@@ -2,6 +2,17 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { LayoutSync, GuestShiftState } = require('../desktop/ui/keyboard-sync.js');
 
+test('explicit Alt+Shift overrides an in-flight remote echo and ignores stale layout samples',()=>{
+ const host=new LayoutSync(true),guest=new LayoutSync(false);host.ready=guest.ready=true;
+ host.observe('00000409');const initial=guest.observe('00000409');host.receive(initial);host.observe('00000409');
+ const remote=host.observe('00000429');assert.ok(guest.receive(remote));
+ const local=guest.local('00000409');assert.equal(local.layout,'00000409');assert.ok(local.clock>remote.clock);
+ assert.equal(guest.observe('00000429'),undefined);assert.ok(host.receive(local));
+ assert.equal(host.observe('00000409'),undefined);assert.equal(guest.observe('00000409'),undefined);
+ assert.equal(guest.receive(remote),false);assert.equal(guest.expected,'');
+ const repeated=guest.local('00000429');assert.ok(repeated.clock>local.clock);assert.equal(guest.local('bad'),undefined);
+});
+
 test('a captured shifted slash recovers missing Shift-down before sending the physical key', () => {
   const state = new GuestShiftState(), slash = {type:'physical-key',vk:0xBF,scan:0x35,extended:false,down:true};
   assert.deepEqual(state.packets(slash, true), [{type:'key',code:'ShiftLeft',down:true}, slash]);

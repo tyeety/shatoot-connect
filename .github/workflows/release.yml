@@ -41,6 +41,7 @@ jobs:
       - run: ./native/publish/ShatootConnect.Input.exe --self-test
       - run: ./native/publish/ShatootConnect.Input.exe --shared-input-self-test
       - run: ./native/publish/ShatootConnect.Input.exe --menu-self-test
+      - run: npm run test:native-text
       - run: npm run test:ice-ui
       - run: npm run test:connection-ui
       - run: npm run test:chat-ui

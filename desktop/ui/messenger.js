@@ -59,12 +59,13 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     if(search!==$('chat-search').value.trim())return;
     rows=older?[...new Map([...result,...rows].map(row=>[row.id,row])).values()]:result;$('chat-older').hidden=page.length<100;renderMessages(!older);
   }
+  function selectedMessageText(text){const selection=window.getSelection();return selection&&!selection.isCollapsed&&text.contains(selection.anchorNode)&&text.contains(selection.focusNode)?selection.toString():'';}
   function createMessage(row){
 
       const item = document.createElement('article'); item.className = 'chat-message';item.dataset.messageId=row.id;if(row.id===targetMessage)item.classList.add('message-target'); const own = row.sender === self.deviceId;
       if (own) item.classList.add('own'); if (own && row.pending.length) item.classList.add('pending');
       const name = document.createElement('header'); name.textContent=row.sender===self.deviceId?self.name:row.displayName||displayName(contact(row.sender))||row.name;
-      const text = document.createElement('p'); text.dir = 'auto'; text.textContent = row.deleted?tr('Message deleted'):row.text;
+      const text = document.createElement('p'); text.dir = 'auto';text.setAttribute('translate','no'); text.textContent = row.deleted?tr('Message deleted'):row.text;
       const meta = document.createElement('small');meta.className='message-time';
       item.append(name, text);
       const footer=document.createElement('footer');footer.className='chat-message-footer';const timeGroup=document.createElement('span');timeGroup.className='message-meta';timeGroup.append(meta);footer.append(timeGroup);
@@ -78,9 +79,9 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
         }
         const actions=document.createElement('div');actions.className='chat-message-actions';
         if(row.attachment){actions.append(button(own?'Open sent files':'Open received files',()=>api.collaboration('open-attachment',{token:row.attachment}),'play_arrow'));actions.append(button('Open containing folder',()=>api.collaboration('reveal-attachment',{token:row.attachment}),'folder'));}
-        const copy=button('Copy',()=>row.kind==='file'?api.chatClipboard('copy',row.attachment):api.copyText(rows.find(m=>m.id===row.id)?.text||row.text),'content_copy');copy.disabled=row.kind==='file'&&!row.attachment;actions.append(copy);
+        const copy=button('Copy',()=>row.kind==='file'?api.chatClipboard('copy',row.attachment):api.copyText(selectedMessageText(text)||rows.find(m=>m.id===row.id)?.text||row.text),'content_copy');copy.disabled=row.kind==='file'&&!row.attachment;copy.addEventListener('pointerdown',event=>{if(selectedMessageText(text))event.preventDefault();});actions.append(copy);
         actions.append(button('React to message',()=>extras.openReaction(rows.find(m=>m.id===row.id)||row),'sentiment_satisfied'));
-        if(own){if(row.kind==='text')actions.append(button('Edit message',()=>editMessage(rows.find(m=>m.id===row.id)||row),'edit'));actions.append(button('Delete message',async()=>{await engine.changeMessage(row.conversation,row.id,'',true);await load(false);},'delete'));}
+        if(own){if(row.kind==='text')actions.append(button('Edit message',()=>editMessage(rows.find(m=>m.id===row.id)||row),'edit'));actions.append(button('Delete message',async()=>{if(!await confirmDelete(rows.find(m=>m.id===row.id)||row))return;await engine.changeMessage(row.conversation,row.id,'',true);await load(false);},'delete'));}
         footer.append(actions);
       }
       item.append(footer);
@@ -98,7 +99,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       let item=nodes.get(row.id);nodes.delete(row.id);
       if(!item||item.dataset.attachment!==(row.attachment||'')){const fresh=createMessage(row);fresh.dataset.attachment=row.attachment||'';if(item)item.replaceWith(fresh);item=fresh;}
       item.classList.toggle('pending',row.sender===self.deviceId&&row.pending.length>0);item.classList.toggle('message-target',row.id===targetMessage);item.querySelector('header').textContent=row.sender===self.deviceId?self.name:row.displayName||displayName(contact(row.sender))||row.name;
-      if(row.kind==='text')item.querySelector('p').textContent=row.text;
+      // Replacing an unchanged text node destroys the user's active selection.
+      if(row.kind==='text'&&item.querySelector('p').textContent!==row.text)item.querySelector('p').textContent=row.text;
       extras?.renderReactions(item,row);
       const status=row.status==='seen'?'seen':row.status==='delivered'?'delivered':row.status==='failed'?'failed':'queued',statusText=tr(({seen:'Seen',delivered:'Delivered',failed:'Send failed',queued:'Waiting for delivery'})[status]);
       const meta=item.querySelector('.message-time');meta.textContent=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{hour:'2-digit',minute:'2-digit'}).format(date);meta.title=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{dateStyle:'full',timeStyle:'short'}).format(date)+(row.sender===self.deviceId?' · '+statusText:'')+(row.editedAt?' · '+tr('Edited'):'');
@@ -136,6 +138,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     const group = selected.startsWith('g:') && engine.group(selected.slice(2)), peer = selected.startsWith('p:') && contact(selected.slice(2));
     if($('chat-mute')){const muted=!!engine.catalog.muted?.[selected],control=$('chat-mute');control.hidden=!selected;control.title=tr(muted?'Unmute notifications':'Mute notifications');control.setAttribute('aria-label',control.title);control.setAttribute('aria-pressed',String(muted));control.querySelector('.mi').className='mi '+(muted?'notifications_off':'notifications');}
     if($('chat-rename')){$('chat-rename').hidden=!selected;$('chat-rename').title=tr(selected.startsWith('g:')?'Conversation settings':'Rename saved computer');}
+    if($('chat-connect-computer'))$('chat-connect-computer').hidden=!peer;
     $('chat-edit-group').hidden=!group||group.owner!==self.deviceId;
     $('chat-title').textContent = group?.name || displayName(peer) || tr('Select a conversation');
     const peerStatus=$('chat-peer-status');peerStatus.textContent=group?group.members.map(m=>displayName(contact(m.deviceId))||displayName(m)).join(', '):'';peerStatus.className=peer?'presence-dot presence-'+(online(peer.deviceId)?peer.status||'available':'offline'):'';
@@ -175,10 +178,12 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('chat-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
   $('chat-older').onclick = run(() => load(true));
   $('chat-compose').onsubmit = run(async () => { const text = $('chat-text').value;if(voice?.active()||!text.trim()){voice?.activate();return;} await engine.send(selected, text); $('chat-text').value = '';voice?.sync(); following=true;await load(false); $('chat-messages').scrollTop = $('chat-messages').scrollHeight; });
-  function insertPaste(text){const field=$('chat-text');field.setRangeText(text,field.selectionStart,field.selectionEnd,'end');field.dispatchEvent(new Event('input',{bubbles:true}));}
-  async function pasteClipboard(event){const target=selected;if(!target)return;event.preventDefault();try{
+  function insertPaste(text){const field=$('chat-text');field.focus();document.execCommand('insertText',false,text);}
+  async function pasteClipboard(event){const target=selected;if(!target)return;try{
     const items=[...(event.clipboardData?.items||[])],image=items.find(item=>item.kind==='file'&&item.type.startsWith('image/')),text=event.clipboardData?.getData('text/plain')||'';
-    if(!image&&text){insertPaste(text);return;}
+    // Native text paste preserves selection replacement and Ctrl+Z/redo history.
+    if(!image&&text&&!event.clipboardData?.files?.length)return;
+    event.preventDefault();
     if(image){const file=image.getAsFile();if(!file)return;if(file.size>10*1024**2)throw new Error('Clipboard image is too large.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Invalid clipboard image.'));reader.readAsDataURL(file);});if(target===selected)await files('clipboard-image',data);return;}
     const localFiles=[...(event.clipboardData?.files||[])];if(localFiles.length){await files('drop',localFiles);return;}
     const data=await api.chatClipboard('read');if(target!==selected)return;if(data.files)await files('clipboard-sources');else if(data.text)insertPaste(data.text);else if(data.image)await files('clipboard-image',data.image);
@@ -189,6 +194,9 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   voice=window.installVoiceMessages({api,conversation:()=>selected,available:()=>!!selected&&!busy,send:(conversation,data)=>engine.sendFiles(conversation,'voice',data),error});
   extras=window.installChatExtras({api,engine,self,field:$('chat-text'),selected:()=>selected,button,run,tr,error,reload:()=>load(false)});
   $('chat-send-files').onclick = run(() => files());
+  $('chat-send-files').className='icon-button';$('chat-send-files').title=tr('Send files');$('chat-send-files').setAttribute('aria-label',tr('Send files'));
+  $('chat-send-files').innerHTML='<span class="mi attach_file" aria-hidden="true"></span>';
+  document.querySelector('.chat-extra-tools').prepend($('chat-send-files'));
   $('messenger-dialog').ondragover = event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = selected ? 'copy' : 'none'; } };
   $('messenger-dialog').ondrop = run(async event => { if (!selected || !event.dataTransfer.files.length) return; await files('drop', [...event.dataTransfer.files]); });
   const rename=button('Rename saved computer',async()=>{
@@ -200,6 +208,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     $('chat-name-form').onsubmit=async event=>{event.preventDefault();try{if(peer)await api.computerCard('rename',{peer:{...peer,...peer.route},name:$('chat-local-name').value});await engine.refresh();dialog.close();render(true);}catch(e){$('chat-name-error').textContent=e.message;}};
   },'edit');rename.id='chat-rename';document.querySelector('.chat-thread-heading').append(rename);
   const mute=button('Mute notifications',async()=>{const conversation=selected;if(!conversation)return;const muted=!engine.catalog.muted?.[conversation];await api.collaboration('conversation-state',{conversation,muted});await engine.refresh();window.actionNotice(tr(muted?'Notifications muted':'Notifications unmuted'));},'notifications');mute.id='chat-mute';mute.hidden=!selected;document.querySelector('.chat-thread-heading').append(mute);
+  const connectComputer=button('Connect to a computer',()=>api.chatConnectComputer(selected.slice(2)),'desktop_windows');connectComputer.id='chat-connect-computer';connectComputer.hidden=true;document.querySelector('.chat-thread-heading').append(connectComputer);
   const groupEditor=async existing=>{
     editingGroup=existing;const list = $('chat-group-members'); list.replaceChildren(); $('chat-group-error').textContent = ''; $('chat-group-name').value = existing?.name||'';
     groupBackground=existing?.background||'';groupAvatar=existing?.avatar||'';$('chat-group-avatar').src=groupAvatar||'assets/app-icon.png';$('chat-group-description').value=existing?.description||'';
@@ -214,6 +223,15 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   const description=document.createElement('label');description.textContent=tr('Group description');const descriptionInput=document.createElement('textarea');descriptionInput.id='chat-group-description';descriptionInput.maxLength=500;description.append(descriptionInput);$('chat-group-name').after(description);
   $('chat-new-group').onclick=run(()=>groupEditor());$('chat-edit-group').onclick=run(()=>groupEditor(engine.group(selected.slice(2))));
   $('chat-group-form').onsubmit = async event => { event.preventDefault(); $('chat-create-group').disabled = true; try { const group = await engine.createGroup($('chat-group-name').value.trim(), [...document.querySelectorAll('#chat-group-members input:checked')].map(i => i.value),editingGroup?.id,{avatar:groupAvatar,background:groupBackground,description:$('chat-group-description').value.trim()}); $('chat-group-dialog').close(); await select(`g:${group.id}`); } catch (e) { $('chat-group-error').textContent = tr(e.message); } finally { $('chat-create-group').disabled = false; } };
+  function confirmDelete(row){
+    const dialog=document.createElement('dialog');dialog.id='message-delete-dialog';dialog.className='chat-extra-dialog';
+    const title=document.createElement('h2');title.textContent=tr('Delete message?');
+    const description=document.createElement('p');description.textContent=tr('Are you sure you want to delete this message?');
+    const preview=document.createElement('p');preview.className='delete-message-preview';preview.dir='auto';preview.setAttribute('translate','no');preview.textContent=row.text.slice(0,160);
+    const actions=document.createElement('div');actions.className='inline-setting';
+    const cancel=document.createElement('button'),confirm=document.createElement('button');cancel.type=confirm.type='button';cancel.className='small-button';confirm.className='small-button stop';cancel.textContent=tr('Cancel');confirm.textContent=tr('Delete message');cancel.id='message-delete-cancel';confirm.id='message-delete-confirm';actions.append(cancel,confirm);dialog.append(title,description,preview,actions);document.body.append(dialog);
+    return new Promise(resolve=>{let accepted=false;confirm.onclick=()=>{accepted=true;dialog.close();};cancel.onclick=()=>dialog.close();dialog.addEventListener('close',()=>{dialog.remove();resolve(accepted);},{once:true});dialog.showModal();cancel.focus();});
+  }
   function editMessage(row){
     let dialog=$('message-edit-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='message-edit-dialog';dialog.innerHTML='<form id="message-edit-form"><h2></h2><textarea id="message-edit-text" maxlength="8000" required></textarea><div class="inline-setting"><button type="submit" class="small-button"></button><button type="button" class="small-button"></button></div><p class="error" role="alert"></p></form>';document.body.append(dialog);}
     dialog.querySelector('h2').textContent=tr('Edit message');dialog.querySelector('[type=submit]').textContent=tr('Save changes');const cancel=dialog.querySelector('[type=button]');cancel.textContent=tr('Cancel');cancel.onclick=()=>dialog.close();dialog.querySelector('.error').textContent='';$('message-edit-text').value=row.text;

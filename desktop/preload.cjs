@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   profilePhoto: remove => ipcRenderer.invoke('profile-photo', remove === true),
   chatPreferences: value => ipcRenderer.invoke('chat-preferences', value),
   chatRemoteVisible: value => ipcRenderer.invoke('chat-remote-visible', value),
+  chatConnectComputer: deviceId => ipcRenderer.invoke('chat-connect-computer',deviceId),
+  onConnectComputer: callback => ipcRenderer.on('connect-computer',(_event,value)=>callback(value)),
   onChatTarget:callback=>ipcRenderer.on('chat-target',(_event,value)=>callback(value)),
   pendingChatTarget:()=>ipcRenderer.invoke('chat-target'),
   onSettingsOpen:callback=>ipcRenderer.on('settings-open',(_event,value)=>callback(value)),

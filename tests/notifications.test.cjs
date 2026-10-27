@@ -17,6 +17,12 @@ function fixture(t){
   const disjoint=()=>{const boxes=[...api.entries.values()].map(r=>r.win.getBounds());for(const b of boxes){assert.equal(b.x+b.width,screen.area.x+screen.area.width-16);assert.ok(b.y>=screen.area.y&&b.y+b.height<=screen.area.y+screen.area.height)}for(let i=0;i<boxes.length;i++)for(let j=i+1;j<boxes.length;j++)assert.ok(boxes[i].y+boxes[i].height<=boxes[j].y||boxes[j].y+boxes[j].height<=boxes[i].y)};
   return{api,owner,screen,Window,clock,disjoint,answer,hide,event,listeners,active:value=>active=value,ready:()=>new Promise(resolve=>queueMicrotask(resolve))};
 }
+
+test('message notices retain their red-message category without recoloring general notices',async t=>{
+ const f=fixture(t),a=f.api.toast(f.owner,'New Persian message',{kind:'message'}),b=f.api.toast(f.owner,'Settings saved');await f.ready();
+ const records=[...f.api.entries.values()];assert.equal(records[0].data.kind,'message');assert.equal(records[1].data.kind,'general');
+ for(const record of records)f.hide(record);await Promise.all([a,b]);
+});
 test('one bottom-right queue never overlaps, reflows on display changes and preserves preempted toasts',async t=>{
   const f=fixture(t);let resolved=0;const promises=Array.from({length:6},(_,i)=>f.api.toast(f.owner,'File '+i).then(()=>resolved++));await f.ready();assert.equal(f.api.entries.size,3);f.disjoint();
   const question=f.api.showMessageBox(f.owner,{type:'question',priority:'critical',buttons:['Reject','Allow']});await f.ready();const critical=[...f.api.entries.values()].find(r=>r.data.urgent);assert.ok(critical);assert.equal(resolved,0);f.disjoint();f.answer(critical,0);assert.equal((await question).response,0);

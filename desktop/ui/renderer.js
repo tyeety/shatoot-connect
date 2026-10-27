@@ -496,7 +496,15 @@ api.onGrabbedKey(data => {
   if (data.ready) { keyboardGrabActive = true; return; }
   if (data.error || data.stopped) { keyboardGrabActive = false; input({ type: 'release' }); if (data.error) status(data.error, true); return; }
   if (role !== 'viewer' || !allowedControl || document.activeElement !== stage) return;
-  if (data.release) { input({ type: 'release' }); if (data.layoutSwitch) keyboardQueue = keyboardQueue.then(async () => { guestKeyboardLayout = await api.currentKeyboard(); sendKeyboardLayout(); }).catch(e => status(e.message, true)); return; }
+  if (data.release) { input({ type: 'release' }); if (data.layoutSwitch) {
+    const generation=peerGeneration;
+    keyboardQueue=keyboardQueue.then(async()=>{
+      const layout=/^[0-9a-f]{8}$/i.test(data.layout)?data.layout:await api.currentKeyboard();
+      if(generation!==peerGeneration||role!=='viewer')return;
+      guestKeyboardLayout=layout;const packet=layoutSync?.local(layout);
+      if(packet&&controlChannel?.readyState==='open')controlChannel.send(JSON.stringify(packet));
+    }).catch(e=>status(e.message,true));
+  } return; }
   if (!peerKeyboardSync) return;
   sendGuestKey({ type: 'physical-key', vk: data.vk, scan: data.scan, extended: data.extended, down: data.down }, data.down && ((data.ctrl && data.vk === 86) || (data.shift && data.vk === 45)), data.shift);
 });
@@ -506,7 +514,7 @@ for (const type of ['keydown', 'keyup']) stage.addEventListener(type, e => {
   if (keyboardGrabActive) { e.preventDefault(); return; }
   if (!peerKeyboardSync) { e.preventDefault(); status(tr('Update both clients to synchronize the keyboard.'), true); return; }
   const layoutShortcut = ((e.altKey || e.ctrlKey) && /^Shift/.test(e.code)) || (e.shiftKey && /^(Alt|Control)/.test(e.code)) || (e.metaKey && e.code === 'Space');
-  if (layoutShortcut) { input({ type: 'release' }); return; }
+  if (layoutShortcut) { input({ type: 'release' });if(layoutSync){layoutSync.expected='';layoutSync.initial=false;}return; }
   e.preventDefault();
   sendGuestKey({ type: 'key', code: e.code, down: type === 'keydown' }, type === 'keydown' && ((e.ctrlKey && e.code === 'KeyV') || (e.shiftKey && e.code === 'Insert')), e.shiftKey);
 });
@@ -795,4 +803,5 @@ $('language').onchange = guarded(async () => { window.i18n.setLanguage(await api
   } else if (config.internetEnabled !== false) connect().catch(e => { if (!window.shatootconnectDirect && role === 'idle') status(e.message, true); scheduleReconnect(); });
 })().catch(e => status(e.message, true));
 
+api.onConnectComputer(record=>guarded(()=>connectRecord(record))());
 api.onSettingsOpen(tab=>{if(!$('settings-dialog').open)$('settings-dialog').showModal();selectSettingsTab(tab);});

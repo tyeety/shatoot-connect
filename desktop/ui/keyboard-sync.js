@@ -1,6 +1,15 @@
 'use strict';
 class LayoutSync {
   constructor(host) { this.origin = host ? 1 : 0; this.clock = 0; this.stamp = -1; this.initial = host; this.observed = ''; this.expected = ''; this.ready = false; }
+  local(layout) {
+    if(!/^[0-9a-f]{8}$/i.test(layout))return;
+    // An explicit local shortcut takes precedence over an outstanding remote
+    // echo. Background samples must not turn that echo into a new local change.
+    this.expected='';this.observed='';this.initial=false;
+    const packet=this.observe(layout);
+    this.expected=layout.toUpperCase();this.deadline=Date.now()+500;
+    return packet;
+  }
   observe(layout) {
     if (!/^[0-9a-f]{8}$/i.test(layout)) return;
     layout = layout.toUpperCase();

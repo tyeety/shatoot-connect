@@ -23,7 +23,14 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   if(!await run(themedNotice.win,"getComputedStyle(document.querySelector('.notice p')).color==='rgb(114, 93, 126)'"))throw Error('Notification palette did not follow the saved light theme');
   themedNotice.finish(0);await themed;
   await run(host,"api.appearance('dark')");await until(()=>run(chat,"document.documentElement.dataset.theme==='dark'"));
-  log('Open chat theme updates live and new notifications inherit the persisted theme');
+  for(const theme of ['light','dark']){
+    await run(host,`api.appearance('${theme}')`);
+    const red=notices.toast(host,'Message color fixture',{kind:'message'});await until(()=>[...notices.entries.values()].some(r=>r.data.message==='Message color fixture'));
+    const item=[...notices.entries.values()].find(r=>r.data.message==='Message color fixture');await until(()=>run(item.win,`document.documentElement.dataset.theme==='${theme}'&&document.body.dataset.ready==='true'`));
+    if(!await run(item.win,"getComputedStyle(document.body).backgroundColor==='rgb(139, 24, 48)'&&getComputedStyle(document.querySelector('.notice p')).color==='rgb(255, 255, 255)'"))throw Error('New message notification was not red in '+theme);
+    item.finish(0);await red;
+  }
+  log('Open chat theme updates live; message notifications are red in light and dark themes');
   if(!chat.isContentProtected())throw Error('Chat is not excluded from remote screen capture');
   await run(host,"document.querySelector('#show-chat-in-remote').checked=true;document.querySelector('#show-chat-in-remote').dispatchEvent(new Event('change'));true");
   await until(()=>!chat.isContentProtected());
@@ -39,6 +46,11 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"document.title='Shatoot Connect';true");await pause(50);if(chat.getTitle()!=='Chats · Shatoot Connect')throw Error('HTML replaced the native chat title');
   await run(chat,"document.title='Chats · Shatoot Connect';true");
   await run(chat,`messenger.select('${conversation}').then(()=>true)`);
+  await until(()=>run(chat,"!document.querySelector('#chat-connect-computer').hidden"));
+  if(!await run(chat,"window.shatootconnect.chatConnectComputer('bad id').then(()=>false,()=>true)"))throw Error('Invalid chat connection target was accepted');
+  await run(chat,"document.querySelector('#chat-connect-computer').click();true");
+  await until(()=>run(host,`document.querySelector('#remote-id').value==='127.0.0.1:${peer.directInfo.port}'`));
+  chat.show();chat.focus();
   await run(host,"window.receiptEnsurePeer=collaboration.ensurePeer;collaboration.ensurePeer=async()=>{throw Error('This contact is offline.')};true");
   const receiptMessage=await run(host,`collaboration.send('${conversation}','Receipt lifecycle fixture').then(m=>m.id)`);
   const receiptStatus=()=>owner.chatStore.history({conversation}).find(m=>m.id===receiptMessage)?.status;
@@ -78,16 +90,25 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   const alternate=await run(chat,"collaboration.createGroup('Pointer switching fixture',[]).then(g=>g.id)");await until(()=>run(chat,`!!document.querySelector('[data-conversation="g:${alternate}"]')`));
   const originalConversationState=owner.chatStore.conversationState,selectionCalls=[];owner.chatStore.conversationState=function(id,value){if(value?.selected)selectionCalls.push(id);return originalConversationState.call(this,id,value);};
   await click(`[data-conversation="g:${alternate}"] .chat-conversation`);await until(()=>run(chat,`window.chatSelected==='g:${alternate}'`));
+  if(!await run(chat,"document.querySelector('#chat-connect-computer').hidden"))throw Error('Group chat exposed one-computer connection');
   await click(`[data-conversation="${conversation}"] .chat-conversation`);await until(()=>run(chat,`window.chatSelected==='${conversation}'`));
   await click(`[data-conversation="${conversation}"] .chat-conversation`);await pause(100);owner.chatStore.conversationState=originalConversationState;
   if(selectionCalls.length!==2||!await run(chat,"!document.querySelector('.chat-conversation.action-feedback')&&getComputedStyle(document.querySelector('.chat-conversation[aria-pressed=true]')).transform==='none'"))throw Error('Contact selection repeated or showed a second press animation');
-  await run(chat,"document.querySelector('#chat-text').focus();true");
+  if(!await run(chat,"document.querySelector('#chat-connect-computer').hidden===false"))throw Error('Private chat lost remote connection button');
+  await run(chat,"document.querySelector('#chat-text').value='';document.querySelector('#chat-text').focus();true");
+  await chat.webContents.insertText('Undo فارسی');
+  chat.webContents.sendInputEvent({type:'keyDown',keyCode:'Z',modifiers:['control']});chat.webContents.sendInputEvent({type:'keyUp',keyCode:'Z',modifiers:['control']});
+  await until(()=>run(chat,"document.querySelector('#chat-text').value===''" ));
+  chat.webContents.sendInputEvent({type:'keyDown',keyCode:'Y',modifiers:['control']});chat.webContents.sendInputEvent({type:'keyUp',keyCode:'Y',modifiers:['control']});
+  await until(()=>run(chat,"document.querySelector('#chat-text').value==='Undo فارسی'"));
   for(const language of ['en','fa']){
     await run(chat,`window.i18n.setLanguage('${language}');true`);
     for(const [text,direction] of [['Hello','ltr'],['سلام','rtl'],['123 — سلام Hello','rtl'],['123 — Hello سلام','ltr']]){
       if(!await run(chat,`(()=>{const field=document.querySelector('#chat-text');field.value=${JSON.stringify(text)};field.dispatchEvent(new Event('input',{bubbles:true}));return field.dir==='auto'&&getComputedStyle(field).direction==='${direction}'&&getComputedStyle(field).textAlign==='start'})()`))throw Error('Composer direction did not follow content in '+language);
     }
-    if(!await run(chat,"(()=>{const field=document.querySelector('#chat-text');field.value='';field.dispatchEvent(new Event('input',{bubbles:true}));const data=new DataTransfer();data.setData('text/plain','۱۲۳ — سلام');field.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));return field.value==='۱۲۳ — سلام'&&getComputedStyle(field).direction==='rtl'})()"))throw Error('Pasted message direction was not detected');
+    if(!await run(chat,"(()=>{const field=document.querySelector('#chat-text');field.value='';field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));const data=new DataTransfer();data.setData('text/plain','۱۲۳ — سلام');return field.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}))})()"))throw Error('Native text paste was intercepted');
+    await chat.webContents.insertText('۱۲۳ — سلام');
+    if(!await run(chat,"document.querySelector('#chat-text').value==='۱۲۳ — سلام'&&getComputedStyle(document.querySelector('#chat-text')).direction==='rtl'"))throw Error('Pasted message direction was not detected');
   }
   await run(chat,"window.i18n.setLanguage('en');document.querySelector('#chat-text').value='';document.querySelector('#chat-text').dispatchEvent(new Event('input',{bubbles:true}));true");
   await click(`[data-conversation="${conversation}"] .chat-pin`);await until(()=>owner.chatStore.list().pins[conversation]);
@@ -149,7 +170,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await until(()=>peer.chatStore.history({conversation:voiceConversation}).some(m=>m.text==='Enter send without snackbar'));
   await until(()=>run(chat,"!document.querySelector('#chat-compose').hasAttribute('aria-busy')"));
   if(!await run(chat,"!document.querySelector('#action-snackbar')||document.querySelector('#action-snackbar').hidden"))throw Error('Sending with Enter showed a redundant Done snackbar');
-  if(!await run(chat,"(()=>{const box=document.querySelector('#chat-text').getBoundingClientRect(),send=document.querySelector('#chat-send').getBoundingClientRect(),file=document.querySelector('#chat-send-files').getBoundingClientRect();return send.top>=box.top&&send.right<=box.right&&file.top>=send.bottom&&file.bottom<=box.bottom&&getComputedStyle(document.querySelector('#chat-send')).borderRadius==='50%'&&!document.body.textContent.includes('Show main window')})()"))throw Error('Combined composer geometry/main-window action regressed');
+  if(!await run(chat,"(()=>{const box=document.querySelector('#chat-text').getBoundingClientRect(),send=document.querySelector('#chat-send').getBoundingClientRect(),file=document.querySelector('#chat-send-files').getBoundingClientRect();return send.top>=box.top&&send.right<=box.right&&file.top>=box.top&&file.bottom<=box.bottom&&Math.abs(file.width-document.querySelector('#chat-emoji').getBoundingClientRect().width)<1&&Math.abs(file.height-document.querySelector('#chat-emoji').getBoundingClientRect().height)<1&&!!document.querySelector('#chat-send-files .attach_file')&&getComputedStyle(document.querySelector('#chat-send')).borderRadius==='50%'&&!document.body.textContent.includes('Show main window')})()"))throw Error('Combined composer geometry/main-window action regressed');
   clear();viewer.show();viewer.focus();await until(()=>!chat.isFocused());
   await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Background text notification').then(()=>true)`);
   await until(()=>[...notices.entries.values()].some(r=>r.owner===host&&r.data.detail==='Background text notification'));clear();
@@ -157,7 +178,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Focused text message').then(()=>true)`);
   await until(()=>owner.chatStore.history({conversation}).some(r=>r.text==='Focused text message'));
   if([...notices.entries.values()].some(r=>r.owner===host&&r.data.detail==='Focused text message'))throw Error('Focused chat text generated a redundant notice');
-  await run(chat,"(()=>{const dt=new DataTransfer();dt.setData('text/plain','plain paste');document.querySelector('#chat-text').dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));return true})()");await until(()=>run(chat,"document.querySelector('#chat-text').value.includes('plain paste')"));
+  if(!await run(chat,"(()=>{const dt=new DataTransfer();dt.setData('text/plain','plain paste');document.querySelector('#chat-text').focus();return document.querySelector('#chat-text').dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}))})()"))throw Error('Plain text paste lost native editing behavior');await chat.webContents.insertText('plain paste');await until(()=>run(chat,"document.querySelector('#chat-text').value.includes('plain paste')"));
   await run(chat,"(()=>{const canvas=document.createElement('canvas');canvas.width=4;canvas.height=4;canvas.getContext('2d').fillRect(0,0,4,4);const bytes=Uint8Array.from(atob(canvas.toDataURL('image/png').split(',')[1]),c=>c.charCodeAt(0));const dt=new DataTransfer();dt.items.add(new File([bytes],'clipboard.png',{type:'image/png'}));document.querySelector('#chat-text').dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));return true})()");
   const sentConversation=`p:${owner.identity.deviceId}`;
   await until(()=>peer.chatStore.history({conversation:sentConversation}).some(r=>r.kind==='file'&&r.text.startsWith('Image-')&&r.attachment));
@@ -178,7 +199,13 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   if(!fs.readFileSync(peer.chatStore.files(pastedImage.attachment)[0]).equals(fs.readFileSync(owner.chatStore.files(image.attachment)[0])))throw Error('Copied file Paste changed file bytes');
   log('File Copy retained original source paths on the simulated clipboard; Paste resent the actual file over RTC with identical bytes');
   if(!await run(chat,"(()=>{const item=[...document.querySelectorAll('.chat-message p')].find(p=>p.textContent==='Focused text message'),range=document.createRange(),selection=getSelection(),data=new DataTransfer();if(!item||!item.dispatchEvent(new Event('selectstart',{bubbles:true,cancelable:true}))||getComputedStyle(item).userSelect!=='text')return false;range.selectNodeContents(item);selection.removeAllRanges();selection.addRange(range);document.dispatchEvent(new ClipboardEvent('copy',{clipboardData:data,bubbles:true,cancelable:true}));selection.removeAllRanges();return data.getData('text/plain')==='Focused text message'&&!document.querySelector('#chat-title').dispatchEvent(new Event('selectstart',{bubbles:true,cancelable:true}))&&getComputedStyle(document.querySelector('#chat-text')).userSelect==='text'})()"))throw Error('Message selection/plain-text Copy or protected UI labels regressed');
-  log('Background text notifies, focused text stays in chat, clipboard image round-trip and retained sender source passed');
+  await run(chat,"(()=>{const item=[...document.querySelectorAll('.chat-message p')].find(p=>p.textContent==='Focused text message');item.scrollIntoView({block:'center'});const text=item.firstChild,range=document.createRange();range.setStart(text,8);range.setEnd(text,12);getSelection().removeAllRanges();getSelection().addRange(range);return true})()");
+  await run(chat,"collaboration.refresh().then(()=>true)");await pause(500);
+  if(!await run(chat,"getSelection().toString()==='text'"))throw Error('Background refresh destroyed partial selection');
+  const partialId=await run(chat,"[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Focused text message').dataset.messageId");
+  await click(`[data-message-id="${partialId}"] .content_copy`);
+  await until(()=>owner.copiedText==='text');await run(chat,"getSelection().removeAllRanges();true");
+  log('Partial message selection survived background refresh and Copy returned only the selected text; native undo/redo passed');
   const changedId=await run(chat,`collaboration.send('${conversation}','Editable fixture').then(m=>m.id)`);
   await until(()=>peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId));
   await until(()=>run(chat,"[...document.querySelectorAll('.chat-message')].some(e=>e.querySelector('p')?.textContent==='Editable fixture'&&e.querySelector('.edit'))"));
@@ -191,6 +218,12 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC').querySelector('.content_copy').parentElement.click();true");
   await until(()=>owner.copiedText==='Edited across RTC');
   await run(chat,"[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC').querySelector('.delete').parentElement.click();true");
+  await until(()=>run(chat,"document.querySelector('#message-delete-dialog')?.open"));
+  if(!peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId)||!await run(chat,"document.activeElement.id==='message-delete-cancel'"))throw Error('Deletion happened before confirmation or unsafe default focus');
+  await run(chat,"document.querySelector('#message-delete-cancel').click();true");await until(()=>run(chat,"!document.querySelector('#message-delete-dialog')"));
+  if(!peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId))throw Error('Cancel deleted the message');
+  await run(chat,`document.querySelector('[data-message-id="${changedId}"] .delete').parentElement.click();true`);await until(()=>run(chat,"document.querySelector('#message-delete-dialog')?.open"));
+  await run(chat,"document.querySelector('#message-delete-confirm').click();true");
   await until(()=>peer.chatStore.load().mutations.some(m=>m.message===changedId&&m.removed)&&!peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId));
   await until(()=>run(chat,`!document.querySelector('[data-message-id="${changedId}"]')&&!document.querySelector('.chat-message.deleted')`));
   for(let i=0;i<125;i++)owner.chatStore.append({id:require('node:crypto').randomUUID(),conversation,sender:peer.identity.deviceId,name:'Peer',kind:'text',text:'Timeline '+i,at:new Date(2026,9,20+Math.floor(i/45),12,i%45).getTime()});

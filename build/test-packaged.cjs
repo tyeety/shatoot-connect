@@ -12,6 +12,7 @@ if (process.argv[2] === '--probe') {
     process.noAsar = true; // Hash the archive bytes, not Electron's virtual directory.
     const resources = path.join(path.dirname(process.execPath), 'resources');
     if (!process.versions.electron || !process.env.PORTABLE_EXECUTABLE_FILE || !fs.existsSync(path.join(resources, 'input/ShatootConnect.Input.exe'))) throw new Error('Portable did not launch the packaged Electron/native payload.');
+    const chatIcon=path.join(resources,'chat-icon.ico');if(!fs.existsSync(chatIcon)||fs.readFileSync(chatIcon).readUInt16LE(2)!==1)throw Error('Packaged Windows chat taskbar icon is missing.');
     const nativeProbe=JSON.parse(execFileSync(path.join(resources,'input/ShatootConnect.Input.exe'),['--virtual-clipboard-self-test',__filename],{encoding:'utf8',windowsHide:true}));if(!nativeProbe.ok||!nativeProbe.deferred||!nativeProbe.clipboardUntouched)throw new Error('Packaged virtual clipboard probe failed.');
     fs.writeFileSync(process.argv[3], JSON.stringify({ virtualClipboard:nativeProbe,electron: process.versions.electron, archive: digest(path.join(resources, 'app.asar')) }));
   } catch(error) { fs.writeFileSync(process.argv[3], JSON.stringify({error:error.stack})); process.exitCode=1; }

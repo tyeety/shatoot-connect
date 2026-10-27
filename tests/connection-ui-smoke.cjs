@@ -196,6 +196,10 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     await run("stage.dispatchEvent(new KeyboardEvent('keydown',{code:'ShiftRight',shiftKey:true,bubbles:true,cancelable:true}));true");await until(()=>run('shiftPackets.length===7'));
     host.webContents.send('grabbed-key',{vk:0xA1,scan:0x36,extended:false,down:false,shift:true});await until(()=>run('shiftPackets.length===8'));
     if(!await run("shiftPackets[6].code==='ShiftRight'&&shiftPackets[6].type==='key'&&shiftPackets[7].code==='ShiftRight'&&!shiftPackets[7].down"))throw Error('DOM/native Shift handoff used mismatched key representations');
+    await run("layoutSync=new window.LayoutSync(false);layoutSync.ready=true;layoutSync.receive({layout:'00000409',clock:5,origin:1});true");
+    host.webContents.send('grabbed-key',{release:true,layoutSwitch:true,layout:'00000429'});
+    await until(()=>run("shiftPackets.some(p=>p.type==='layout-sync'&&p.layout==='00000429'&&p.clock===6&&p.origin===0)"));
+    if(!await run("guestKeyboardLayout==='00000429'&&!layoutSync.receive({layout:'00000409',clock:5,origin:1})&&!layoutSync.observe('00000409')"))throw Error('Captured Alt+Shift was reverted by an old layout echo');
     await run("sendGuestKey({type:'key',code:'Slash',down:true},false,true).then(()=>true)");await run('stopSession(false);true');
     if(!await run('guestShift.held.size===0'))throw Error('Session teardown retained a Shift modifier');
     log('Native modifier snapshots recover held Shift, DOM/native handoff releases the same key, and teardown resets modifiers');

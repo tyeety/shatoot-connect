@@ -1,6 +1,19 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using System.Text;
+
+// Node writes UTF-8 JSON to redirected pipes. Windows' OEM console code page
+// otherwise decodes Persian bytes as box-drawing characters before JSON parsing.
+Console.InputEncoding = new UTF8Encoding(false, true);
+Console.OutputEncoding = new UTF8Encoding(false);
+if(args.Contains("--text-pipe-self-test")){
+    using var value=JsonDocument.Parse(Console.ReadLine()??"{}");
+    var text=value.RootElement.GetProperty("text").GetString();
+    bool ok=text=="سلام. علیرضا یک پیام فارسی با نیم‌فاصله 👋\r\nCopy / کپی";
+    Console.WriteLine(JsonSerializer.Serialize(new{ok,text,inputCodePage=Console.InputEncoding.CodePage,outputCodePage=Console.OutputEncoding.CodePage}));
+    Environment.ExitCode=ok?0:1;return;
+}
 
 // Narrow local stdin protocol. No shell execution or network listener.
 Native.SetProcessDpiAwarenessContext(new IntPtr(-4));
