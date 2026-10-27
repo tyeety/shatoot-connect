@@ -14,7 +14,8 @@
     async refresh(){await api.chatCall('refresh');const snapshot=await api.chatCall('snapshot');changed(snapshot);}
     connect(destination) { return api.chatCall('connect', [destination]); }
     cancelPending(){return api.chatCall('cancelPending');}
-    send(conversation, text) { return api.chatCall('send', [conversation, text]); }
+    send(conversation, text,options) { return api.chatCall('send', [conversation, text,options]); }
+    forwardMessage(source,id,target){return api.chatCall('forwardMessage',[source,id,target]);}
     schedule(conversation,text,sendAt,id){return api.chatCall('schedule',[conversation,text,sendAt,id]);}
     cancelScheduled(id){return api.chatCall('cancelScheduled',[id]);}
     react(conversation,message,emoji){return api.chatCall('react',[conversation,message,emoji]);}

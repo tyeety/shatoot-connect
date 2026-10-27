@@ -164,7 +164,7 @@
     }
     normalize(s, message) {
       if (!message || !UUID.test(message.sender) || !UUID.test(message.id) || typeof message.conversation !== 'string') throw new Error('Invalid chat message.');
-      const result = { id: message.id, conversation: message.conversation, sender: message.sender, name: '', kind: message.kind, text: message.deleted?'Message deleted':message.text, at: message.at };
+      const result = { id: message.id, conversation: message.conversation, sender: message.sender, name: '', replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,kind: message.kind, text: message.deleted?'Message deleted':message.text, at: message.at };
       if (message.conversation === `p:${this.self.deviceId}` && message.sender === s.peer.deviceId) { result.conversation = `p:${s.peer.deviceId}`; result.name = s.peer.name; return result; }
       const group = this.group(message.conversation.slice(2));
       if (!message.conversation.startsWith('g:') || !group || !group.members.some(m => m.deviceId === message.sender) || (group.owner !== s.peer.deviceId && (group.owner !== this.self.deviceId || message.sender !== s.peer.deviceId))) throw new Error('Invalid group message.');
@@ -217,14 +217,20 @@
       }
       throw new Error('Unknown chat request.');
     }
-    async send(conversation, text) {
+    async send(conversation, text, options={}) {
       await this.ready; if (typeof text !== 'string' || !text.trim() || text.length > 8000) throw new Error('Enter a message of up to 8000 characters.');
       const group = conversation.startsWith('g:') && this.group(conversation.slice(2));
       const pending = group ? (group.owner === this.self.deviceId ? group.members.map(m => m.deviceId).filter(id => id !== this.self.deviceId) : [group.owner]) : [conversation.slice(2)];
-      const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'text', text: text.trim(), at: Date.now(), pending };
+      const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'text', text: text.trim(),replyTo:options.replyTo,forwardedFrom:options.forwardedFrom,at: Date.now(), pending };
       await this.api.collaboration('append', { message, outgoing: true }); await this.refresh();
       for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(async error=>{if(!/offline/i.test(error.message)){await this.api.collaboration('failed',{id:message.id,peer:id});await this.refresh();}});
       return message;
+    }
+    async forwardMessage(source,id,target){
+      const row=await this.api.collaboration('message',{conversation:source,id});if(!row||row.deleted)throw Error('This message is unavailable.');
+      const forwardedFrom={id:row.id,sender:row.sender,name:row.name,kind:row.kind,text:row.text.slice(0,600)};
+      if(row.kind==='text')return this.send(target,row.text,{forwardedFrom});
+      const paths=await this.api.collaboration('forward-sources',{conversation:source,id});return this.sendFiles(target,'sources',paths,{forwardedFrom});
     }
     async dispatchDue(){
       if(this.scheduling)return;this.scheduling=true;
@@ -279,7 +285,7 @@
         } while (s.flushAgain && !s.closed);
       } finally { s.flushing = false; }
     }
-    wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind, text: message.deleted?'Message deleted':message.text, at: message.at }; }
+    wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind, text: message.deleted?'Message deleted':message.text,replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,at: message.at }; }
     async createGroup(name, members, existingId,details={}) {
       if (typeof name !== 'string' || !name.trim() || name.length > 60) throw new Error('Enter a group name of up to 60 characters.');
       if(!Array.isArray(members))throw new Error('Invalid group membership.');
@@ -292,17 +298,17 @@
       for(const peer of peers){const s=this.peer(peer.deviceId);if(s){s.groups.delete(group.id);s.declined.delete(group.id);this.announceGroup(s,group).catch(error=>this.error(error.message));}else{const contact=this.catalog.contacts.find(c=>c.deviceId===peer.deviceId);if(contact?.route)this.connect({...contact.route,deviceId:peer.deviceId,name:peer.name}).catch(()=>{});}}
       return group;
     }
-    sendFiles(conversation, selection = 'pick', value) {
-      const operation = this.fileQueue.then(() => this.sendSelectedFiles(conversation, selection, value)); this.fileQueue = operation.catch(() => {}); return operation;
+    sendFiles(conversation, selection = 'pick', value,options={}) {
+      const operation = this.fileQueue.then(() => this.sendSelectedFiles(conversation, selection, value,options)); this.fileQueue = operation.catch(() => {}); return operation;
     }
-    async sendSelectedFiles(conversation, selection = 'pick', value) {
+    async sendSelectedFiles(conversation, selection = 'pick', value,options={}) {
       const group = conversation.startsWith('g:') && this.group(conversation.slice(2));
       const ids = group ? (group.owner === this.self.deviceId ? group.members.map(m => m.deviceId).filter(id => id !== this.self.deviceId) : [group.owner]) : [conversation.slice(2)];
       await Promise.all(ids.map(id=>this.ensurePeer(id)));
       const targets = ids.map(id => this.peer(id)); if (targets.some(s => !s)) throw new Error('All file recipients must be connected. Connect them and try again.');
       const first = targets[0]; if (!first) throw new Error('Connect to a contact first.');
       const entries = selection === 'drop' ? await this.api.collaborationDrop(first.id, value) : await this.api.collaborationFiles(first.id, selection, value); if (!entries.length) return;
-      const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'file', text: entries.slice(0, 12).map(e => e.name).join('\n').slice(0, 7800) + (entries.length > 12 ? `\n+ ${entries.length - 12}` : ''), at: Date.now(), pending: ids };
+      const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'file', text: entries.slice(0, 12).map(e => e.name).join('\n').slice(0, 7800) + (entries.length > 12 ? `\n+ ${entries.length - 12}` : ''), replyTo:options.replyTo,forwardedFrom:options.forwardedFrom,at: Date.now(), pending: ids };
       await this.api.collaboration('append', { message, outgoing: true });
       await this.api.collaborationFiles(first.id,'attach-sources',{id:message.id,conversation});await this.refresh();
       for (const s of targets) {

@@ -74,3 +74,7 @@ body .chat-message p,body .chat-message p *{-webkit-user-select:text!important;u
 .settings-tabs button:active:not(:disabled){transform:none}.settings-tabs button.action-feedback{animation:none}
 /* Session controls retain the existing compact material-icon toolbar. */
 #privacy-screen[aria-pressed=true]{background:#59306d;border-color:#c28afa;color:#fff;box-shadow:inset 0 0 0 1px #c28afa}
+
+.remote-window:not(.viewing)>aside,.remote-window .host-card,.remote-window #network-panel,.remote-window .intro{display:none}.remote-window:not(.viewing){grid-template-columns:1fr}.remote-window .connection-grid{grid-template-columns:1fr}.remote-window>main>header #open-settings{display:none}
+
+.favorite-connect>.avatar-wrap,.history-connect>.avatar-wrap{grid-row:1/3;grid-column:1;width:32px;height:32px}.favorite-connect,.history-connect{align-items:center}

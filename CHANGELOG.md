@@ -13,6 +13,20 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.25.0 — 2026-10-27
+
+### Added
+
+- A compact status selector beside the chat profile publishes availability changes immediately. Person labels consistently align an avatar (including a dedicated default image) with the name, and place the presence indicator on the avatar. Conversation cards show a shortened last message and its date/time.
+- Reply to text/files with a bounded quote snapshot and jump back to the original message. Forward messages and real attachments into another existing private or group conversation with a new message ID and source attribution. Metadata survives encrypted history and group relay; older peers can still read the message content.
+- Each outgoing desktop connection opens in an independent window. The main window remains available, multiple viewers have separate input/session state, and closing one viewer preserves the others. Viewer sockets do not replace the main device registration or start extra LAN listeners.
+
+### Fixed
+
+- Clear recovered connection warnings from the video overlay without removing active file-transfer progress.
+- Download updates using up to four parallel validated byte ranges, retry interrupted/stalled chunks automatically, persist and revalidate completed chunks across restarts, and verify the complete official SHA-256 before installation. Servers without range support retain a verified sequential fallback. Show download speed and reconnection state in update details.
+- Regression coverage exercises two simultaneous viewer windows and independent closing/input, live profile status, reply and text/file forwarding, encrypted reference snapshots, partial-download recovery, stalled streams, bad range headers and corrupt packages.
+
 ## 0.24.1 — 2026-10-27
 
 ### Added

@@ -2,6 +2,7 @@
 window.installMessenger = ({ api, self, internet, ensureInternet, remote, detached = false }) => {
   const $ = id => document.getElementById(id), tr = text => window.i18n.translate(text);
   let engine, targetMessage='',selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer;
+  let replying=null;
   let voice,extras,autoSelecting=false,renderedConversation='',historyRequest=0,dayFadeTimer,resizeFrame;
   const pendingNew=new Set();let readThrough=0;
   const logElement=$('chat-messages');
@@ -12,6 +13,15 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   const displayName=peer=>peer?.displayName||peer?.name||'';
   const previewCard=(element,peer)=>{element.classList.add('computer-preview');if(peer.preview){const image=document.createElement('img');image.className='desktop-preview';image.alt='';image.src=peer.preview;image.draggable=false;element.prepend(image);}};
   const own=document.createElement('button');own.id='chat-own-profile';own.type='button';own.className='small-button';own.onclick=()=>api.editProfile();document.querySelector('.chat-sidebar').prepend(own);
+  const ownBar=document.createElement('div');ownBar.className='chat-own-bar';own.before(ownBar);ownBar.append(own);
+  const statusChoice=document.createElement('select');statusChoice.id='chat-own-status';statusChoice.setAttribute('aria-label',tr('Your status'));
+  for(const [value,label]of [['available','Available'],['busy','Busy'],['away','Away'],['dnd','Do not disturb'],['offline','Offline']]){const option=document.createElement('option');option.value=value;option.dataset.label=label;option.dataset.symbol=({available:'🟢',busy:'🔴',away:'🟡',dnd:'⛔',offline:'⚫'})[value];option.textContent=option.dataset.symbol+' '+tr(label);statusChoice.append(option);}ownBar.append(statusChoice);
+  statusChoice.onchange=async()=>{statusChoice.disabled=true;try{Object.assign(self,await api.profileStatus(statusChoice.value));render();}catch(e){error(e);}finally{statusChoice.disabled=false;}};
+  api.onProfileChanged?.(next=>{Object.assign(self,next);render();publish();});
+  function avatar(peer={},group=false){const wrap=document.createElement('span');wrap.className='avatar-wrap';const img=document.createElement('img');img.className='profile-avatar';img.alt='';img.src=peer.avatar||'assets/person.svg';img.onerror=()=>{if(!img.src.endsWith('/assets/person.svg'))img.src='assets/person.svg';};wrap.append(img);if(!group){const dot=document.createElement('span');dot.className='presence-dot presence-'+presence(peer);wrap.append(dot);}return wrap;}
+  function presence(peer){return peer.deviceId===self.deviceId?self.status||'available':online(peer.deviceId)?peer.status||'available':discovery.peers.some(p=>p.deviceId===peer.deviceId)?peer.status||'available':'offline';}
+  function person(element,peer,group=false){element.classList.add('person-label');let wrap=element.querySelector('.avatar-wrap'),name=element.querySelector('.person-name');if(!wrap||!name){element.replaceChildren(avatar(peer,group));wrap=element.firstChild;name=document.createElement('span');name.className='person-name';name.setAttribute('translate','no');element.append(name);}const img=wrap.querySelector('img'),src=peer.avatar||'assets/person.svg';if(img.getAttribute('src')!==src)img.src=src;const dot=wrap.querySelector('.presence-dot');if(dot)dot.className='presence-dot presence-'+presence(peer);name.textContent=displayName(peer);}
+  window.renderChatPerson=person;
   const contacts=document.createElement('div');contacts.className='chat-contact-list';$('chat-conversations').before(contacts);contacts.append($('chat-conversations'),$('chat-new-group'));
   window.overlayScroll($('chat-conversations'));window.overlayScroll($('chat-messages'));
   window.installPinnedReorder($('chat-conversations'),async order=>{await api.collaboration('reorder-pins',{order});await engine.refresh();});
@@ -51,7 +61,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     catch(error){if(sequence===connectSequence)throw error;}
     finally{if(sequence===connectSequence){connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;}}
   }
-  async function select(id) { if(id!==selected)voice?.reset();if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = [];pendingNew.clear();readThrough=0;following=true; selectionVersion++; $('chat-search').value = ''; render(); await api.collaboration('conversation-state',{conversation:id,selected:true});engine.catalog.lastSelected=id;await reportView(); await load(false); publish(); }
+  async function select(id) { if(id!==selected){voice?.reset();replying=null;renderReply();}if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = [];pendingNew.clear();readThrough=0;following=true; selectionVersion++; $('chat-search').value = ''; render(); await api.collaboration('conversation-state',{conversation:id,selected:true});engine.catalog.lastSelected=id;await reportView(); await load(false); publish(); }
   async function navigate(target){await select(target.conversation);targetMessage=target.message||'';if(target.message){if(!rows.some(m=>m.id===target.message)){const message=await api.collaboration('message',{conversation:target.conversation,id:target.message});if(message&&!message.deleted){rows=await api.collaboration('history',{conversation:target.conversation,before:message.receivedAt+1});renderMessages(false);}}const item=[...$('chat-messages').querySelectorAll('.chat-message')].find(e=>e.dataset.messageId===target.message);item?.scrollIntoView({block:'center'});item?.classList.add('message-target');setTimeout(()=>{if(targetMessage!==target.message)return;targetMessage='';for(const row of document.querySelectorAll('.message-target'))row.classList.remove('message-target');},3000);}$('chat-text').focus();}
   async function load(older = false) {
     if(!selected)return;const request=++historyRequest,version=selectionVersion,id=selected,search=$('chat-search').value.trim(),earliest=rows.length?Math.min(...rows.map(m=>m.receivedAt)):Number.MAX_SAFE_INTEGER;let before=older?earliest:Number.MAX_SAFE_INTEGER,result=[],page;
@@ -59,15 +69,27 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     if(search!==$('chat-search').value.trim())return;
     rows=older?[...new Map([...result,...rows].map(row=>[row.id,row])).values()]:result;$('chat-older').hidden=page.length<100;renderMessages(!older);
   }
+  const replyBar=document.createElement('div');replyBar.id='chat-reply-preview';replyBar.hidden=true;$('chat-compose').before(replyBar);
+  function renderReply(){replyBar.hidden=!replying;replyBar.replaceChildren();if(replying){const text=document.createElement('span');text.dir='auto';text.setAttribute('translate','no');text.textContent=replying.reference.text;const author=document.createElement('span');author.className='reply-author';person(author,replying.reference.sender===self.deviceId?self:{...contact(replying.reference.sender),deviceId:replying.reference.sender,name:replying.reference.name});replyBar.append(author,text,button('Cancel reply',()=>{replying=null;renderReply();},'close'));}}
+  function beginReply(row){replying={reference:{id:row.id,sender:row.sender,name:row.sender===self.deviceId?self.name:row.name,text:row.text.slice(0,600),kind:row.kind}};renderReply();$('chat-text').focus();}
+  function forwardPicker(row){
+    const dialog=document.createElement('dialog');dialog.id='chat-forward-dialog';dialog.className='chat-extra-dialog';const title=document.createElement('h2');title.textContent=tr('Forward to');dialog.append(title);
+    const choices=document.createElement('div');choices.className='forward-choices';
+    const peers=[...engine.catalog.contacts.map(c=>({...c,conversation:'p:'+c.deviceId})),...engine.catalog.groups.map(g=>({...g,conversation:'g:'+g.id}))];
+    for(const peer of peers){const choose=button(displayName(peer),async()=>{for(const b of choices.querySelectorAll('button'))b.disabled=true;try{await engine.forwardMessage(row.conversation,row.id,peer.conversation);dialog.close();}finally{for(const b of choices.querySelectorAll('button'))b.disabled=false;}});choose.dataset.conversation=peer.conversation;person(choose,peer,peer.conversation.startsWith('g:'));choices.append(choose);}dialog.append(choices,button('Cancel',()=>dialog.close()));dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);dialog.showModal();
+  }
   function selectedMessageText(text){const selection=window.getSelection();return selection&&!selection.isCollapsed&&text.contains(selection.anchorNode)&&text.contains(selection.focusNode)?selection.toString():'';}
   function createMessage(row){
 
       const item = document.createElement('article'); item.className = 'chat-message';item.dataset.messageId=row.id;if(row.id===targetMessage)item.classList.add('message-target'); const own = row.sender === self.deviceId;
       if (own) item.classList.add('own'); if (own && row.pending.length) item.classList.add('pending');
-      const name = document.createElement('header'); name.textContent=row.sender===self.deviceId?self.name:row.displayName||displayName(contact(row.sender))||row.name;
+      const name = document.createElement('header');person(name,row.sender===self.deviceId?self:{...contact(row.sender),deviceId:row.sender,name:row.displayName||displayName(contact(row.sender))||row.name});
       const text = document.createElement('p'); text.dir = 'auto';text.setAttribute('translate','no'); text.textContent = row.deleted?tr('Message deleted'):row.text;
       const meta = document.createElement('small');meta.className='message-time';
-      item.append(name, text);
+      item.append(name);
+      if(row.forwardedFrom){const label=document.createElement('div');label.className='forwarded-label';person(label,{...contact(row.forwardedFrom.sender),deviceId:row.forwardedFrom.sender,name:row.forwardedFrom.name});const caption=document.createElement('span');caption.textContent=tr('Forwarded');label.prepend(caption);item.append(label);}
+      if(row.replyTo){const quote=document.createElement('button');quote.type='button';quote.className='message-quote';quote.setAttribute('translate','no');quote.dir='auto';const author=document.createElement('span'),excerpt=document.createElement('span');person(author,{...contact(row.replyTo.sender),deviceId:row.replyTo.sender,name:row.replyTo.name});excerpt.className='quote-text';excerpt.textContent=row.replyTo.text;quote.append(author,excerpt);quote.onclick=run(()=>navigate({conversation:row.conversation,message:row.replyTo.id}));item.append(quote);}
+      item.append(text);
       const footer=document.createElement('footer');footer.className='chat-message-footer';const timeGroup=document.createElement('span');timeGroup.className='message-meta';timeGroup.append(meta);footer.append(timeGroup);
       if(own){const receipt=document.createElement('span');receipt.className='message-receipt';receipt.setAttribute('role','img');meta.after(receipt);}
       if(row.deleted)item.classList.add('deleted');
@@ -80,6 +102,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
         const actions=document.createElement('div');actions.className='chat-message-actions';
         if(row.attachment){actions.append(button(own?'Open sent files':'Open received files',()=>api.collaboration('open-attachment',{token:row.attachment}),'play_arrow'));actions.append(button('Open containing folder',()=>api.collaboration('reveal-attachment',{token:row.attachment}),'folder'));}
         const copy=button('Copy',()=>row.kind==='file'?api.chatClipboard('copy',row.attachment):api.copyText(selectedMessageText(text)||rows.find(m=>m.id===row.id)?.text||row.text),'content_copy');copy.disabled=row.kind==='file'&&!row.attachment;copy.addEventListener('pointerdown',event=>{if(selectedMessageText(text))event.preventDefault();});actions.append(copy);
+        actions.append(button('Reply',()=>beginReply(rows.find(m=>m.id===row.id)||row),'reply'),button('Forward',()=>forwardPicker(rows.find(m=>m.id===row.id)||row),'forward'));
         actions.append(button('React to message',()=>extras.openReaction(rows.find(m=>m.id===row.id)||row),'sentiment_satisfied'));
         if(own){if(row.kind==='text')actions.append(button('Edit message',()=>editMessage(rows.find(m=>m.id===row.id)||row),'edit'));actions.append(button('Delete message',async()=>{if(!await confirmDelete(rows.find(m=>m.id===row.id)||row))return;await engine.changeMessage(row.conversation,row.id,'',true);await load(false);},'delete'));}
         footer.append(actions);
@@ -98,7 +121,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       if(!usedGroups.has(day)){if(log.children[groupIndex]!==group)log.insertBefore(group,log.children[groupIndex]||null);groupIndex++;usedGroups.add(day);}
       let item=nodes.get(row.id);nodes.delete(row.id);
       if(!item||item.dataset.attachment!==(row.attachment||'')){const fresh=createMessage(row);fresh.dataset.attachment=row.attachment||'';if(item)item.replaceWith(fresh);item=fresh;}
-      item.classList.toggle('pending',row.sender===self.deviceId&&row.pending.length>0);item.classList.toggle('message-target',row.id===targetMessage);item.querySelector('header').textContent=row.sender===self.deviceId?self.name:row.displayName||displayName(contact(row.sender))||row.name;
+      item.classList.toggle('pending',row.sender===self.deviceId&&row.pending.length>0);item.classList.toggle('message-target',row.id===targetMessage);person(item.querySelector('header'),row.sender===self.deviceId?self:{...contact(row.sender),deviceId:row.sender,name:row.displayName||displayName(contact(row.sender))||row.name});
       // Replacing an unchanged text node destroys the user's active selection.
       if(row.kind==='text'&&item.querySelector('p').textContent!==row.text)item.querySelector('p').textContent=row.text;
       extras?.renderReactions(item,row);
@@ -118,19 +141,19 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     if (!engine) return;
     const pending=connecting||(engine.connectAttempts?[...engine.connectAttempts].filter(a=>!a.background).length:engine.pendingConnections||0)>0;cancelConnect.hidden=!pending;$('chat-connect').disabled=pending;$('chat-address').disabled=pending;
     const total=Object.values(engine.catalog.unread||{}).reduce((a,b)=>a+b,0);$('chat-total-unread').textContent=total>99?'99+':String(total);$('chat-total-unread').hidden=!total;
-    own.replaceChildren();const ownImage=document.createElement('img');ownImage.src=self.avatar||'assets/app-icon.png';ownImage.className='profile-avatar';ownImage.alt='';const ownName=document.createElement('span');ownName.textContent=self.name;own.append(ownImage,ownName);
+    person(own,self);statusChoice.value=self.status||'available';for(const option of statusChoice.options)option.textContent=option.dataset.symbol+' '+tr(option.dataset.label);
     const list = $('chat-conversations');
     const items = [...engine.catalog.contacts.map(c => ({ id: `p:${c.deviceId}`, avatar:c.avatar,preview:c.preview,name:displayName(c),detail: c.route?.address || c.deviceId.slice(0, 8), status: online(c.deviceId) ? c.status || 'available' : discovery.peers.some(p => p.deviceId === c.deviceId) ? 'On LAN' : 'Offline' })), ...engine.catalog.groups.map(g => ({ id: `g:${g.id}`, avatar:g.avatar,preview:g.background,name: g.name,detail:g.description, status: 'Group' }))];
-    const last=new Map((engine.catalog.conversations||[]).map(c=>[c.id,c.last?.receivedAt||0]));
+    const summaries=new Map((engine.catalog.conversations||[]).map(c=>[c.id,c.last]));const last=new Map([...summaries].map(([id,row])=>[id,row?.receivedAt||0]));
     const pinRank=new Map((engine.catalog.pinOrder||[]).map((id,index)=>[id,index]));
     items.sort((a,b)=>Number(!!engine.catalog.pins?.[b.id])-Number(!!engine.catalog.pins?.[a.id])||(engine.catalog.pins?.[a.id]&&engine.catalog.pins?.[b.id]?(pinRank.get(a.id)??Number.MAX_SAFE_INTEGER)-(pinRank.get(b.id)??Number.MAX_SAFE_INTEGER):0)||(last.get(b.id)||0)-(last.get(a.id)||0));
     const existing=new Map([...list.children].map(row=>[row.dataset.conversation,row]));
     for (let index=0;index<items.length;index++) {
       const item=items[index];let row=existing.get(item.id);existing.delete(item.id);
-      if(!row){row=document.createElement('div');row.className='chat-contact-row';row.dataset.conversation=item.id;const b=document.createElement('button');b.className='chat-conversation';b.type='button';const image=document.createElement('img');image.className='profile-avatar';image.alt='';b.append(image,document.createElement('b'),document.createElement('small'));b.onclick=run(()=>selected===item.id?undefined:select(item.id));const pin=button('Pin chat',async()=>{await api.collaboration('conversation-state',{conversation:item.id,pinned:!engine.catalog.pins?.[item.id]});await engine.refresh();},'pin');pin.classList.add('chat-pin');row.append(b,pin);}
+      if(!row){row=document.createElement('div');row.className='chat-contact-row';row.dataset.conversation=item.id;const b=document.createElement('button');b.className='chat-conversation';b.type='button';const image=avatar({...contact(item.id.slice(2)),deviceId:item.id.slice(2),avatar:item.avatar},item.id.startsWith('g:'));b.append(image,document.createElement('b'),document.createElement('small'));const stamp=document.createElement('time');stamp.className='chat-last-time';b.append(stamp);b.onclick=run(()=>selected===item.id?undefined:select(item.id));const pin=button('Pin chat',async()=>{await api.collaboration('conversation-state',{conversation:item.id,pinned:!engine.catalog.pins?.[item.id]});await engine.refresh();},'pin');pin.classList.add('chat-pin');row.append(b,pin);}
       const b=row.querySelector('.chat-conversation'),name=b.querySelector('b'),detail=b.querySelector('small'),image=b.querySelector('.profile-avatar'),pin=row.querySelector('.chat-pin');
-      b.setAttribute('aria-pressed',String(item.id===selected));name.textContent=item.name;if(engine.catalog.muted?.[item.id]){const muted=document.createElement('span');muted.className='mi notifications_off conversation-muted';muted.title=tr('Notifications muted');muted.setAttribute('aria-label',muted.title);name.append(muted);}const count=engine.catalog.unread?.[item.id]||0;if(count){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=count>99?'99+':String(count);name.append(badge);}detail.textContent=item.detail||'';const src=item.avatar||'assets/app-icon.png';if(image.getAttribute('src')!==src)image.src=src;
-      if(!item.id.startsWith('g:')){let dot=b.querySelector('.presence-dot');if(!dot){dot=document.createElement('span');b.append(dot);}dot.className='presence-dot presence-'+(online(item.id.slice(2))?(contact(item.id.slice(2))?.status||'available'):discovery.peers.some(p=>p.deviceId===item.id.slice(2))?'available':'offline');}
+      b.setAttribute('aria-pressed',String(item.id===selected));name.textContent=item.name;if(engine.catalog.muted?.[item.id]){const muted=document.createElement('span');muted.className='mi notifications_off conversation-muted';muted.title=tr('Notifications muted');muted.setAttribute('aria-label',muted.title);name.append(muted);}const count=engine.catalog.unread?.[item.id]||0;if(count){const badge=document.createElement('span');badge.className='unread-badge';badge.textContent=count>99?'99+':String(count);name.append(badge);}const summary=summaries.get(item.id);detail.className='chat-last-message';detail.setAttribute('translate','no');detail.textContent=summary?((summary.sender===self.deviceId?tr('You')+': ':'')+summary.text.replace(/\s+/g,' ').slice(0,120)):item.detail||'';detail.title=detail.textContent;const stamp=b.querySelector('time');stamp.textContent=summary?new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(summary.at)):'';stamp.dateTime=summary?new Date(summary.at).toISOString():'';const src=item.avatar||'assets/person.svg';if(image.getAttribute('src')!==src)image.src=src;
+      if(!item.id.startsWith('g:')){let dot=b.querySelector('.presence-dot');if(!dot){dot=document.createElement('span');b.querySelector('.avatar-wrap').append(dot);}dot.className='presence-dot presence-'+(online(item.id.slice(2))?(contact(item.id.slice(2))?.status||'available'):discovery.peers.some(p=>p.deviceId===item.id.slice(2))?'available':'offline');}
       let preview=b.querySelector('.desktop-preview');b.classList.add('computer-preview');if(item.preview){if(!preview){preview=document.createElement('img');preview.className='desktop-preview';preview.alt='';preview.draggable=false;b.prepend(preview);}if(preview.getAttribute('src')!==item.preview)preview.src=item.preview;}else preview?.remove();
       const pinned=!!engine.catalog.pins?.[item.id];row.draggable=pinned;row.classList.toggle('pinned-draggable',pinned);row.dataset.pinKey=item.id;pin.title=tr(pinned?'Unpin chat':'Pin chat');pin.setAttribute('aria-label',pin.title);pin.setAttribute('aria-pressed',String(pinned));if(list.children[index]!==row)list.insertBefore(row,list.children[index]||null);
     }
@@ -140,8 +163,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     if($('chat-rename')){$('chat-rename').hidden=!selected;$('chat-rename').title=tr(selected.startsWith('g:')?'Conversation settings':'Rename saved computer');}
     if($('chat-connect-computer'))$('chat-connect-computer').hidden=!peer;
     $('chat-edit-group').hidden=!group||group.owner!==self.deviceId;
-    $('chat-title').textContent = group?.name || displayName(peer) || tr('Select a conversation');
-    const peerStatus=$('chat-peer-status');peerStatus.textContent=group?group.members.map(m=>displayName(contact(m.deviceId))||displayName(m)).join(', '):'';peerStatus.className=peer?'presence-dot presence-'+(online(peer.deviceId)?peer.status||'available':'offline'):'';
+    person($('chat-title'),group||peer||{name:tr('Select a conversation')},!!group);
+    const peerStatus=$('chat-peer-status');peerStatus.replaceChildren();if(group)for(const member of group.members){const label=document.createElement('span');person(label,member.deviceId===self.deviceId?self:{...member,...contact(member.deviceId)});peerStatus.append(label);}peerStatus.className=peer?'presence-dot presence-'+(online(peer.deviceId)?peer.status||'available':'offline'):'';
     $('chat-text').disabled = !selected; $('chat-send').disabled = !selected || busy; $('chat-send-files').disabled = !selected || busy;
     voice?.sync();
     extras?.sync();
@@ -157,8 +180,8 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     if (value.errors.length) { $('discovery-status').textContent += ' · ' + tr('Discovery is limited; check firewall or VPN LAN access.'); $('discovery-status').title = value.errors.join('\n'); }
     for (const peer of value.peers) {
       const card = document.createElement('div'); card.className = 'network-peer';
-      if (peer.avatar) { const avatar = document.createElement('img'); avatar.className = 'profile-avatar'; avatar.src = peer.avatar; avatar.alt = ''; card.append(avatar); }
-      const info = document.createElement('div'); info.className = 'network-peer-info'; const name = document.createElement('b'), address = document.createElement('small'); name.textContent=displayName(peer); address.textContent = peer.endpoints.join(' / ');const dot=document.createElement('span');dot.className='presence-dot presence-'+(peer.status||'available');name.append(dot); info.append(name, address);
+      card.append(avatar(peer));
+      const info = document.createElement('div'); info.className = 'network-peer-info'; const name = document.createElement('b'), address = document.createElement('small'); name.textContent=displayName(peer); address.textContent = peer.endpoints.join(' / '); info.append(name, address);
       previewCard(card,peer);card.append(info, button('Start chat', () => start({ type: 'lan', address: peer.endpoints[0], deviceId: peer.deviceId, name: peer.name }), 'chat'), button('Connect to a computer', () => remote(peer.endpoints[0]), 'desktop_windows')); list.append(card);
     }
     render();publish();
@@ -177,7 +200,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('chat-connect-form').onsubmit = run(async () => { const address = $('chat-address').value.trim(); await start({ type: address.includes('.') || address.includes(':') ? 'lan' : 'id', address }); });
   $('chat-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
   $('chat-older').onclick = run(() => load(true));
-  $('chat-compose').onsubmit = run(async () => { const text = $('chat-text').value;if(voice?.active()||!text.trim()){voice?.activate();return;} await engine.send(selected, text); $('chat-text').value = '';voice?.sync(); following=true;await load(false); $('chat-messages').scrollTop = $('chat-messages').scrollHeight; });
+  $('chat-compose').onsubmit = run(async () => { const text = $('chat-text').value;if(voice?.active()||!text.trim()){voice?.activate();return;} await engine.send(selected, text,{replyTo:replying?.reference});replying=null;renderReply();$('chat-text').value = '';voice?.sync(); following=true;await load(false); $('chat-messages').scrollTop = $('chat-messages').scrollHeight; });
   function insertPaste(text){const field=$('chat-text');field.focus();document.execCommand('insertText',false,text);}
   async function pasteClipboard(event){const target=selected;if(!target)return;try{
     const items=[...(event.clipboardData?.items||[])],image=items.find(item=>item.kind==='file'&&item.type.startsWith('image/')),text=event.clipboardData?.getData('text/plain')||'';
@@ -216,7 +239,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     for(const peer of discovery.peers)if(!engine.catalog.contacts.some(c=>c.deviceId===peer.deviceId))await api.collaboration('contact',{peer:{deviceId:peer.deviceId,name:peer.name},route:{type:'lan',address:peer.endpoints[0]}});
     await engine.refresh();
     const candidates=new Map([...engine.catalog.contacts,...engine.connected(),...(existing?.members||[])].filter(p=>p.deviceId!==self.deviceId).map(p=>[p.deviceId,p]));
-    for (const peer of candidates.values()) { const label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span'); input.type = 'checkbox'; input.value = peer.deviceId;input.checked=!!existing?.members.some(m=>m.deviceId===peer.deviceId);text.textContent=displayName(peer); label.append(input, text); list.append(label); }
+    for (const peer of candidates.values()) { const label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span'); input.type = 'checkbox'; input.value = peer.deviceId;input.checked=!!existing?.members.some(m=>m.deviceId===peer.deviceId);person(text,peer); label.append(input, text); list.append(label); }
     $('chat-group-dialog').showModal();
   };
   const photo=document.createElement('div');photo.className='chat-group-photo';photo.innerHTML='<img id="chat-group-avatar" class="profile-avatar" alt="">';photo.append(button('Choose photo',async()=>{const avatar=await api.groupPhoto(editingGroup?.id);if(avatar!==undefined){groupAvatar=avatar;$('chat-group-avatar').src=avatar||'assets/app-icon.png';}},'person'),button('Remove photo',()=>{groupAvatar='';$('chat-group-avatar').src='assets/app-icon.png';},'delete'));photo.append(button('Choose card background',async()=>{const image=await api.groupPhoto(editingGroup?.id,true);if(image!==undefined){groupBackground=image;window.actionNotice(tr('Card background selected'));}},'wallpaper'),button('Remove card background',()=>{groupBackground='';window.actionNotice(tr('Card background removed'));},'delete'));$('chat-group-form').prepend(photo);

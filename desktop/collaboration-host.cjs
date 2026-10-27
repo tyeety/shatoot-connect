@@ -17,6 +17,7 @@ function installCollaboration({ ipcMain, state, app, safeStorage, dialog, shell,
     const s = state(event), history = store(s);
     if(op==='list'){const list=history.list();catalogChanged(s);return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
     if(op==='message')return history.history({conversation:value.conversation,limit:100}).find(m=>m.id===value.id)||history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation);
+    if(op==='forward-sources'){const row=history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation&&!m.deleted);if(!row||row.kind!=='file')throw Error('This message is unavailable.');const token=Object.entries(history.load().attachments).find(([,attachment])=>attachment.message===row.id&&attachment.conversation===row.conversation)?.[0];if(!token)throw Error('This message is unavailable.');const files=history.files(token);if(!files.length)throw Error('This message is unavailable.');return files;}
     if(op==='history')return history.history(value).map(m=>({...m,displayName:decorateComputer({deviceId:m.sender,name:m.name}).displayName||m.name}));
     if(op==='conversation-state')return history.conversationState(value.conversation,value);
     if(op==='reorder-pins')return history.reorderPins(value.order);

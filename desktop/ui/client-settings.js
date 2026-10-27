@@ -51,7 +51,7 @@ window.installClientSettings = (config, profileChanged) => {
     lastUpdate=value;
     const messages = { idle: 'Check for updates', checking: 'Checking for updates…', current: 'You are using the latest version.', available: 'Update available', downloading: 'Downloading update…', ready: 'Update ready', installing: 'Installing update…', error: value.error };
     const busy=['checking','downloading','installing'].includes(value.state),amount=Math.max(0,Math.min(100,Math.floor(Number(value.percent)||0)));
-    $('update-details').textContent = tr(messages[value.state] || value.state) + (value.version ? ` · ${value.version}` : '') + (value.state === 'downloading' ? ` ${amount}%` : '');
+    $('update-details').textContent = tr(messages[value.state] || value.state) + (value.version ? ` · ${value.version}` : '') + (value.state === 'downloading' ? ` ${amount}%`+(value.retrying?' · '+tr('Reconnecting download…'):value.speed>0?' · '+(value.speed/1048576).toFixed(2)+' MB/s':'') : '');
     $('check-update').disabled=busy;
     $('install-update').hidden=!(['available','ready','downloading','installing'].includes(value.state)||(value.state==='error'&&value.version&&value.version!==config.version));notice.hidden=$('install-update').hidden;
     const label=['downloading','installing'].includes(value.state)?messages[value.state]:'Update and restart';

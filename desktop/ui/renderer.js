@@ -27,7 +27,7 @@ function inputLabel(updateStatus=false){ $('control-label').textContent=tr(!allo
 api.onInputState(data=>{hostInputState=data;if(role==='host'&&controlChannel?.readyState==='open')controlChannel.send(JSON.stringify(data));});
 function signalReady() { return sessionRoute === 'lan-host' || (sessionRoute === 'lan-viewer' ? directSocket : socket)?.readyState === WebSocket.OPEN; }
 
-function status(message, error = false) { if(error && role==='viewer' && $('file-transfer-status')){$('file-transfer-status').hidden=false;$('file-transfer-status').textContent=tr(message);} if ($('settings-status')) { $('settings-status').textContent = tr(message); $('settings-status').classList.toggle('error', error); } $('session-status').textContent = tr(message); $('session-status').classList.toggle('error', error); }
+function status(message, error = false) { const notice=$('file-transfer-status');if(!error&&notice?.dataset.statusError==='true'){notice.hidden=true;notice.textContent='';delete notice.dataset.statusError;}if(error&&notice)notice.dataset.statusError='true'; if(error && role==='viewer' && $('file-transfer-status')){$('file-transfer-status').hidden=false;$('file-transfer-status').textContent=tr(message);} if ($('settings-status')) { $('settings-status').textContent = tr(message); $('settings-status').classList.toggle('error', error); } $('session-status').textContent = tr(message); $('session-status').classList.toggle('error', error); }
 function toast(message) { window.actionNotice?.(tr(message)); }
 function serverState(online, text) { $('server-status').dataset.state = online ? 'online' : 'offline'; $('server-status').querySelector('span').textContent = tr(text); }
 function send(message) {
@@ -117,7 +117,7 @@ async function connectServer(attempt) {
         window.collaborationServerReady = message.features?.includes('collaboration-v1') === true;
         clearTimeout(timeout); serverIce = Array.isArray(message.iceServers) ? message.iceServers : []; serverRelay = message.forceRelay === true;
         if (sessionRoute === 'server') { iceServers = serverIce; forceRelay = serverRelay; }
-        api.saveEndpoint(endpoint, $('server-key').value.trim()).then(() => {
+        (config.viewerWindow?Promise.resolve():api.saveEndpoint(endpoint, $('server-key').value.trim())).then(() => {
           if (socket !== ws) return;
           config.endpoint = endpoint;
           reconnectAttempts = 0; clearTimeout(reconnectTimer); serverState(true, 'سرور آمادهٔ اتصال'); register(); resolve();
@@ -253,7 +253,7 @@ function createPeer() {
     }
   };
 }
-function bindExchange(channel) { if (exchange) { channel.close(); return; } exchange = new window.SessionExchange(channel, (message,error,detail) => { const text=tr(message)+(detail?.percent!==undefined?' '+detail.percent+'%':'');status(text,error); $('file-transfer-status').hidden=false; $('file-transfer-status').textContent=text; if (detail?.received) { $('open-received').hidden = false; toast(message); } }); }
+function bindExchange(channel) { if (exchange) { channel.close(); return; } exchange = new window.SessionExchange(channel, (message,error,detail) => { const text=tr(message)+(detail?.percent!==undefined?' '+detail.percent+'%':'');status(text,error); delete $('file-transfer-status').dataset.statusError;$('file-transfer-status').hidden=false; $('file-transfer-status').textContent=text; if (detail?.received) { $('open-received').hidden = false; toast(message); } }); }
 function bindChannel(channel) {
   const generation = peerGeneration;
   let opened = false;
@@ -575,6 +575,7 @@ $('host-stop').onclick = () => {
   registered = false; internetId = ''; renderHostCredentials(); updateControls(); status('اتصال ورودی متوقف شد.');
 };
 async function joinTarget(record) {
+  if(!config.viewerWindow&&!config.smoke)return api.openRemote(record?.address?record:{address:$('remote-id').value,password:$('remote-password').value,endpoint:$('server-url').value,serverKey:$('server-key').value});
   if(role!=='idle'||outgoingAttempt)return;
   const attempt=new window.ConnectionAttempt();outgoingAttempt=attempt;role='joining';updateControls();
   joinTimer=setTimeout(()=>{if(outgoingAttempt!==attempt)return;stopSession(true);status('Connection timed out. Check host approval and network settings.',true);},60000);
@@ -584,7 +585,7 @@ async function joinTarget(record) {
       if(record.endpoint!==$('server-url').value||record.serverKey!==$('server-key').value){
         clearTimeout(reconnectTimer);serverAttempt?.cancel();serverAttempt=null;connectPromise=null;
         const previous=socket;socket=null;previous?.close();registered=false;
-        $('server-url').value=record.endpoint;$('server-key').value=record.serverKey||'';registrationWanted=true;
+        $('server-url').value=record.endpoint;$('server-key').value=record.serverKey||'';registrationWanted=!config.viewerWindow;
       }
     }
     const id=$('remote-id').value.replace(/\s/g,'');let password=$('remote-password').value;
@@ -629,8 +630,8 @@ async function renderComputers(){
     row.draggable=record.pinned;row.classList.toggle('pinned-draggable',record.pinned);row.dataset.pinKey=record.pinKey;
     const marker=document.createElement('span');marker.className='computer-kind mi '+(record.saved?'star_outline':'schedule');marker.title=tr(record.saved?'Saved computer':'Recent connection');marker.setAttribute('role','img');marker.setAttribute('aria-label',marker.title);
     const connectButton=document.createElement('button');connectButton.className=record.saved?'favorite-connect':'history-connect';connectButton.disabled=role!=='idle';
-    const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/app-icon.png';avatar.alt='';
-    const name=document.createElement('b');name.textContent=record.displayName||record.name;const dot=document.createElement('span');const live=window.collaboration?.peer(record.deviceId)||window.collaboration?.nearby?.find(p=>p.deviceId===record.deviceId);dot.className='presence-dot presence-'+(live?record.status||'available':'offline');name.append(dot);const address=document.createElement('small');address.textContent=record.address;address.dir='ltr';connectButton.append(avatar,name,address);
+    const avatar=document.createElement('img');avatar.className='profile-avatar';avatar.src=record.avatar||'assets/person.svg';avatar.alt='';
+    const name=document.createElement('b');name.textContent=record.displayName||record.name;const dot=document.createElement('span');const live=window.collaboration?.peer(record.deviceId)||window.collaboration?.nearby?.find(p=>p.deviceId===record.deviceId);dot.className='presence-dot presence-'+(live?record.status||'available':'offline');const wrap=document.createElement('span');wrap.className='avatar-wrap';wrap.append(avatar,dot);const address=document.createElement('small');address.textContent=record.address;address.dir='ltr';connectButton.append(wrap,name,address);
     const resolve=()=>record.saved?api.favoriteGet(record.id):api.connections('get',record.id);
     connectButton.onclick=guarded(async()=>connectRecord(await resolve()));
     const actions=document.createElement('div');actions.className='favorite-actions';
@@ -646,6 +647,7 @@ async function connectFavorite(id) {
   return connectRecord(record);
 }
 async function connectRecord(record) {
+  if(!config.viewerWindow&&!config.smoke)return api.openRemote({password:'',...record});
   if(role!=='idle')throw new Error('End the current session first.');
   $('remote-id').value=record.address;$('remote-password').value=record.password||'';
   if(record.password)return joinTarget(record);
@@ -654,7 +656,7 @@ async function connectRecord(record) {
     if(record.endpoint!==$('server-url').value||record.serverKey!==$('server-key').value){
       clearTimeout(reconnectTimer);serverAttempt?.cancel();serverAttempt=null;connectPromise=null;
       const previous=socket;socket=null;previous?.close();registered=false;
-      $('server-url').value=record.endpoint;$('server-key').value=record.serverKey||'';registrationWanted=true;updateControls();
+      $('server-url').value=record.endpoint;$('server-key').value=record.serverKey||'';registrationWanted=!config.viewerWindow;updateControls();
     }
   }
   $('remote-password').focus();toast('Enter the password to connect.');
@@ -779,12 +781,19 @@ window.shatootconnectCapture = async () => {
 $('language').onchange = guarded(async () => { window.i18n.setLanguage(await api.language($('language').value)); renderFavorites(config.favorites || []); });
 (async () => {
   config = await api.config(); registrationWanted = config.internetEnabled !== false; $('internet-enabled').checked = registrationWanted; $('show-guest-cursor').checked = config.showGuestCursor; $('quality').value = config.autoQuality!==false?'auto':config.qualityProfile;profileName=config.autoQuality!==false?'balanced':config.qualityProfile;$('allow-privacy-screen').checked=config.allowPrivacyScreen===true;$('allow-privacy-screen').disabled=!config.privacyScreenSupported; window.i18n.setLanguage(config.language); $('language').value = config.language;
+  if(config.viewerWindow){
+    registrationWanted=false;incomingEnabled=false;document.body.classList.add('remote-window');
+    $('server-url').value=config.remoteTarget.endpoint||config.endpoint;$('server-key').value=config.remoteTarget.serverKey||'';$('app-version').textContent='Shatoot Connect '+config.version;
+    const back=document.createElement('button');back.className='small-button';back.textContent=tr('Main window');back.onclick=()=>api.showMain();document.querySelector('main>header').prepend(back);
+    updateControls();await api.appReady();window.shatootconnectReady=true;await connectRecord(config.remoteTarget);return;
+  }
   renderHistory(await api.connections('history'));
   window.shatootconnectSmoke = config.smoke;
   api.onComputerCards(()=>{api.config().then(c=>renderFavorites(c.favorites));api.connections('history').then(renderHistory);window.collaboration?.refresh();api.discovery().then(v=>window.messenger?.renderDiscovery(v));});
   api.onEditProfile(()=>{$('settings-dialog').showModal();selectSettingsTab('profile');$('profile-name').focus();});
   window.messenger = window.installMessenger({ api, self: { deviceId: config.deviceId, name: config.name, avatar: config.avatar, status: config.status }, internet: () => ({ registered, supported: window.collaborationServerReady, endpoint: config.endpoint, send: data => { if (socket?.readyState !== WebSocket.OPEN) throw new Error('Not connected to the server.'); socket.send(JSON.stringify(data)); } }), ensureInternet: connect, remote: address => { $('remote-id').value = address; $('remote-password').focus(); } });
-  const own=document.createElement('button');own.id='own-profile';own.className='small-button';own.onclick=()=>{$('settings-dialog').showModal();selectSettingsTab('profile');};document.querySelector('main>header').prepend(own);const ownProfile=()=>{own.replaceChildren();const image=document.createElement('img');image.src=config.avatar||'assets/app-icon.png';image.className='profile-avatar';image.alt='';const name=document.createElement('span');name.textContent=config.name;own.append(image,name);};ownProfile();
+  const own=document.createElement('button');own.id='own-profile';own.className='small-button';own.onclick=()=>{$('settings-dialog').showModal();selectSettingsTab('profile');};document.querySelector('main>header').prepend(own);const ownProfile=()=>window.renderChatPerson(own,config);ownProfile();
+  api.onProfileChanged(next=>{Object.assign(config,next);if($('profile-status'))$('profile-status').value=next.status;ownProfile();Object.assign(window.collaboration.self,next);if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'profile',...next}));for(const s of window.collaboration.sessions.values())if(s.channel?.readyState==='open')window.collaboration.rpc(s,'profile',window.collaboration.self).catch(()=>{});window.collaboration.notify();});
   window.installClientSettings(config, async next => {ownProfile(); Object.assign(window.collaboration.self, next); if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'profile', ...next })); for (const s of window.collaboration.sessions.values()) if (s.channel?.readyState === 'open') window.collaboration.rpc(s, 'profile', window.collaboration.self).catch(e => status(e.message,true)); window.collaboration.notify(); });
   $('shared-cursor').checked = config.sharedCursor === true; $('show-host-cursor').checked = config.showHostCursor;
   $('unattended').checked = config.unattended === true; $('fixed-password').value = config.fixedPassword || ''; $('password-label').textContent = tr(config.fixedPassword ? 'Host password' : 'رمز موقت'); renderFavorites(config.favorites || []);

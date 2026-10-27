@@ -2,6 +2,9 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['مقصد اتصال معتبر نیست.','Invalid remote destination.'],['پیش از اتصال جدید، یکی از پنجره‌های ریموت را ببندید.','Close a remote window before opening another.'],['پاسخ بخش دانلود معتبر نیست.','Invalid update range response.'],['ارجاع پیام معتبر نیست.','Invalid message reference.'],['دانلود زودتر از کامل‌شدن پایان یافت.','Update download ended early.'],
+    ['در حال برقراری دوبارهٔ دانلود…','Reconnecting download…'],
+    ['وضعیت شما','Your status'],['شما','You'],['پاسخ','Reply'],['فوروارد','Forward'],['فورواردشده','Forwarded'],['فوروارد به','Forward to'],['لغو پاسخ','Cancel reply'],['پنجرهٔ اصلی','Main window'],['این پیام در دسترس نیست.','This message is unavailable.'],
     ['حذف پیام؟','Delete message?'],['مطمئنید می‌خواهید این پیام را حذف کنید؟','Are you sure you want to delete this message?'],
     ['این دستگاه نشانی اتصال ذخیره‌شده ندارد.','This computer has no saved connection address.'],
     ['میزبان فعال است؛ کنترل ۲ ثانیه پس از پایان فعالیت آزاد می‌شود','Host active · resumes after 2 s of inactivity'],
