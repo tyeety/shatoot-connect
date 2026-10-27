@@ -282,7 +282,7 @@ ipcMain.on('host-send', (e, message) => { const s = state(e,false); if (!s?.owne
 ipcMain.handle('host-sessions-stop', e => { const owner = state(e); for (const s of states.values()) if (s.owner === owner) closeExtraHost(s); });
 const chatPending = new Map();
 ipcMain.handle('app-ready',e=>{
-  const s=state(e);if(smoke||!app.isPackaged||s.owner||s.readyAnnounced)return;s.readyAnnounced=true;
+  const s=state(e);if(!smoke&&!s.owner&&!s.chatLaunchHandled&&process.argv.includes('--open-chat')){s.chatLaunchHandled=true;openChat(s);}if(smoke||!app.isPackaged||s.owner||s.readyAnnounced)return;s.readyAnnounced=true;
   const launcher=getLauncher();launcher.repair(app.getPath('desktop'),shell);
   try{const resultFile=path.join(update.directory,'last-update.json'),result=JSON.parse(fs.readFileSync(resultFile,'utf8'));if(result.state==='error'&&!result.reported){update.emit({state:'error',version:result.version,error:result.error});notices.toast(s.win,result.error,{onActivate:()=>openUpdateSettings(s)});fs.writeFileSync(resultFile,JSON.stringify({...result,reported:true}));}}catch{}
   for(const record of preferences.list())if(record.shortcut&&fs.existsSync(path.join(app.getPath('desktop'),preferences.shortcutName(record.id))))createFavoriteShortcut(record.id);
@@ -776,7 +776,6 @@ app.whenReady().then(async () => {
     for (const s of states.values()) { release(s); s.source = null; s.captureAllowed = false; hideHostOverlay(s); s.win.webContents.send('emergency-stop'); }
   });
   const win = createWindow();
-  if(!smoke&&process.argv.includes('--open-chat'))win.webContents.once('did-finish-load',()=>openChat(states.get(win.webContents.id)));
   if (!smoke) {
     tray = new Tray(path.join(__dirname, 'ui/assets/app-icon.png')); tray.setToolTip('Shatoot Connect');
     refreshTray(states.get(win.webContents.id));tray.on('double-click', () => showMain(states.get(win.webContents.id)));

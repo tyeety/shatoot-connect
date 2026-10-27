@@ -13,6 +13,23 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.24.1 — 2026-10-27
+
+### Added
+
+- Confirm before deleting a chat message, with Cancel focused by default. A computer button in private chat headers opens the existing remote connection flow, including saved credentials and host approval.
+- Give the chat window its own Windows taskbar identity and packaged icon. Add a paperclip attachment button alongside the equally sized emoji and scheduling tools.
+
+### Fixed
+
+- Read and write native helper pipes explicitly as UTF-8 so Persian remote clipboard text, emoji and mixed-language strings survive JSON transport to the Unicode Windows clipboard.
+- Preserve selected message text during background refreshes and language translation. Copy selected text independently of the whole message. Restore native editing menus, context menus, text paste and undo/redo history in chat composers.
+- Treat a captured Alt+Shift language change as explicit local intent, sending the newly selected native keyboard layout with a fresh synchronization version so delayed echoes cannot restore the previous language.
+- Use red unread badges, Windows taskbar overlays and new-message notifications in both themes, including incoming files and voice messages.
+- Add regression coverage for Unicode native pipes, language-switch synchronization, native chat editing and taskbar configuration, partial message selection/copy, deletion confirmation, header connection and notification colors.
+
+- Corrected the Windows integration probe to use string request IDs required by the clipboard protocol. Version 0.24.0 did not reach publication; this release includes all of its chat and Unicode fixes. A pinned chat taskbar launch waits for the main renderer to be ready before requesting the chat snapshot.
+
 ## 0.24.0 — 2026-10-27
 
 ### Added

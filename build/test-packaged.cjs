@@ -51,7 +51,7 @@ async function main() {
       const profile = path.join(fixture, 'profile'); fs.mkdirSync(profile);
       fs.writeFileSync(path.join(profile, 'connection.json'), JSON.stringify({ internetEnabled: false, startupEnabled: false, language: 'en', profile: { name: 'Packaged launch test' } }));
       const updateToken=crypto.randomUUID();
-      launch([`--update-token=${updateToken}`,`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { ELECTRON_RUN_AS_NODE: null });
+      launch([`--update-token=${updateToken}`,`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1','--open-chat'], { ELECTRON_RUN_AS_NODE: null });
       const activePort = path.join(profile, 'DevToolsActivePort');
       await until(() => { if (child.launchError) throw child.launchError; if (child.exitCode !== null) throw new Error(`Packaged UI closed on startup (${child.exitCode}): ${child.output}`); return fs.existsSync(activePort); }, 90000);
       const port = fs.readFileSync(activePort, 'utf8').split('\n')[0];
@@ -73,7 +73,11 @@ async function main() {
         const ack=JSON.parse(fs.readFileSync(path.join(profile,'updates',updateToken+'.ready.json'),'utf8'));
         const launcher=JSON.parse(fs.readFileSync(path.join(profile,'launcher/launcher.json'),'utf8'));
         if(ack.token!==updateToken||ack.version!==version||path.resolve(ack.executable)!==executable||launcher.target!==executable||launcher.version!==version||!fs.existsSync(path.join(profile,'launcher/launcher.ico')))throw new Error('Packaged update-readiness acknowledgement/stable launcher did not match the final executable.');
-        console.log('Final portable confirmed update readiness and registered its stable launcher/icon.');
+        let chatTarget;await until(async()=>{const pages=await fetch(`http://127.0.0.1:${port}/json/list`).then(r=>r.json());chatTarget=pages.find(p=>p.url.includes('/ui/index.html?chat=1'));return !!chatTarget;});
+        const chatSocket=new WebSocket(chatTarget.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{chatSocket.once('open',resolve);chatSocket.once('error',reject);});
+        try{let id=0;const chatReady=()=>new Promise((resolve,reject)=>{chatSocket.once('message',data=>{const reply=JSON.parse(data);if(reply.error||reply.result?.exceptionDetails)reject(Error('Packaged chat renderer failed'));else resolve(reply.result?.result?.value===true);});chatSocket.send(JSON.stringify({id:++id,method:'Runtime.evaluate',params:{expression:'window.shatootconnectChatReady===true',returnByValue:true}}));});await until(chatReady);}
+        finally{chatSocket.close();}
+        console.log('Final portable confirmed update readiness, registered its stable launcher/icon and opened chat from the taskbar launch command.');
         for (const language of ['en', 'fa']) {
           const errors = await evaluate(`(async()=>{
             window.i18n.setLanguage('${language}'); document.body.classList.add('viewing'); document.querySelector('#session-panel').hidden=false;
