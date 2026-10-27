@@ -17,6 +17,12 @@ let supportsFixedPassword = false, guestKeyboardLayout = '', keyboardTimer, keyb
 let connectionAttempt, recallRevision=0;
 let videoQuality,hostPrivacyAllowed=false,remotePrivacyAllowed=false,remotePrivacyActive=false,privacyHeartbeat;
 let hostInputState={type:'input-state',reason:'ready'},remoteInputReason='ready';
+let cursorSequence=0,lastHostCursorSequence=-1,hostCursorTimer,guestPointerPoint;
+function setRemoteInputState(data){
+  if(!['ready','host','busy','unavailable'].includes(data.reason))return;
+  if(data.reason!==remoteInputReason){remoteInputReason=data.reason;if(remoteInputReason!=='ready'){latestPointer=null;releaseGuestKeyboard();sendGuestCursor({visible:false});}inputLabel(true);}
+  renderHostCursor();renderPointerPause();
+}
 function inputLabel(updateStatus=false){ $('control-label').textContent=tr(!allowedControl?'View only':remoteInputReason==='unavailable'?'Remote input is unavailable. Reconnect.':remoteInputReason==='host'?'Control paused while the host is active':remoteInputReason==='busy'?'Another guest is controlling':'Mouse and keyboard enabled');if(updateStatus&&role==='viewer'&&allowedControl)status(remoteInputReason==='ready'?'Connected. Click the video to send mouse and keyboard input.':$('control-label').textContent,remoteInputReason==='unavailable'); }
 api.onInputState(data=>{hostInputState=data;if(role==='host'&&controlChannel?.readyState==='open')controlChannel.send(JSON.stringify(data));});
 function signalReady() { return sessionRoute === 'lan-host' || (sessionRoute === 'lan-viewer' ? directSocket : socket)?.readyState === WebSocket.OPEN; }
@@ -253,7 +259,7 @@ function bindChannel(channel) {
   let opened = false;
   channel.onopen = () => {
     if (opened || generation !== peerGeneration) return; opened = true;
-    if (channel.label === 'pointer' && role === 'host' && lastLocalCursor) channel.send(JSON.stringify({ ...lastLocalCursor, visible: config.showHostCursor && lastLocalCursor.visible }));
+    if (channel.label === 'pointer' && role === 'host' && lastLocalCursor) channel.send(JSON.stringify({ ...lastLocalCursor, sequence:++cursorSequence, visible: config.showHostCursor && lastLocalCursor.visible }));
     if (channel.label === 'control') api.watchKeyboard(true).catch(e => status(e.message, true));
     if(role==='host'&&channel.label==='control')channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,privacyScreen:hostPrivacyAllowed}));
     if(channel.label==='control'&&role==='host')channel.send(JSON.stringify(hostInputState));
@@ -271,7 +277,7 @@ function bindChannel(channel) {
     if (!data || typeof data !== 'object') return;
     if(channel.label==='control'&&data.type==='privacy-screen-state'&&role==='viewer'){setRemotePrivacy(data);return;}
     if(channel.label==='control'&&data.type==='privacy-screen'&&role==='host'&&typeof data.active==='boolean'){api.privacyScreen(data.active).then(value=>channel.readyState==='open'&&channel.send(JSON.stringify({type:'privacy-screen-state',...value}))).catch(e=>{if(channel.readyState==='open')channel.send(JSON.stringify({type:'privacy-screen-state',active:false,allowed:false,error:e.message}));});return;}
-    if(role==='viewer'&&channel.label==='control'&&data.type==='input-state'&&['ready','host','busy','unavailable'].includes(data.reason)){if(data.reason!==remoteInputReason){remoteInputReason=data.reason;if(remoteInputReason!=='ready')releaseGuestKeyboard();inputLabel(true);}return;}
+    if(role==='viewer'&&channel.label==='control'&&data.type==='input-state'){setRemoteInputState(data);return;}
     if (data.type === 'features' && channel.label === 'control') {
       if (role === 'host' && data.keyboardSync === true) channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true, privacyScreen:hostPrivacyAllowed }));
       if(role==='viewer'){remotePrivacyAllowed=data.privacyScreen===true&&allowedControl;privacyButton();}
@@ -283,7 +289,12 @@ function bindChannel(channel) {
       $('keyboard-status').dataset.state = data.ok ? 'ok' : 'error'; return;
     }
     if (data.type === 'guest-cursor' && role === 'host') { api.guestCursor(data); return; }
-    if (data.type === 'host-cursor' && role === 'viewer') { hostCursor = data; renderHostCursor(); return; }
+    if (data.type === 'host-cursor' && role === 'viewer') {
+      if(!Number.isFinite(data.x)||!Number.isFinite(data.y)||!Number.isSafeInteger(data.sequence)||data.sequence<=lastHostCursorSequence)return;
+      lastHostCursorSequence=data.sequence;hostCursor=data;clearTimeout(hostCursorTimer);
+      if(data.visible)hostCursorTimer=setTimeout(()=>{hostCursor=null;renderHostCursor();},2000);
+      renderHostCursor();return;
+    }
     if (data.type === 'layout-sync' && channel.label === 'control' && allowedControl) { if (layoutSync.receive(data)) { guestKeyboardLayout = data.layout; api.applyKeyboard(data.layout).catch(e => status(e.message, true)); } return; }
     if (role !== 'host') return;
     if (data.type === 'profile' && channel.label === 'control' && config.profiles[data.name]) {
@@ -296,14 +307,22 @@ function sendKeyboardLayout() {
   const message = layoutSync.observe(guestKeyboardLayout); if (message) controlChannel.send(JSON.stringify(message));
 }
 api.onKeyboardLayout(layout => { if (layoutSync?.expected && layoutSync.expected !== layout && Date.now() < layoutSync.deadline) return; guestKeyboardLayout = layout; sendKeyboardLayout(); });
-api.onHostCursor(data => { lastLocalCursor = data; if (role === 'host' && pointerChannel?.readyState === 'open' && pointerChannel.bufferedAmount < 4096) pointerChannel.send(JSON.stringify({ ...data, visible: config.showHostCursor && data.visible })); });
+api.onHostCursor(data => { lastLocalCursor = data; if (role === 'host' && pointerChannel?.readyState === 'open' && pointerChannel.bufferedAmount < 4096) pointerChannel.send(JSON.stringify({ ...data, sequence:++cursorSequence, visible: config.showHostCursor && data.visible })); });
 function renderHostCursor() {
   const marker = $('host-cursor'), video = $('remote-video'), stage = $('video-stage');
-  if (!config?.showHostCursor || role !== 'viewer' || !hostCursor?.visible || hostCursor.x < 0 || hostCursor.x > 1 || hostCursor.y < 0 || hostCursor.y > 1 || !video.videoWidth) { marker.hidden = true; return; }
+  if (!config?.showHostCursor || role !== 'viewer' || remoteInputReason!=='host' || hostCursor?.physical!==true || !hostCursor.visible || hostCursor.x < 0 || hostCursor.x > 1 || hostCursor.y < 0 || hostCursor.y > 1 || !video.videoWidth) { marker.hidden = true; return; }
   const width = stage.clientWidth, height = stage.clientHeight, scale = Math.min(width / video.videoWidth, height / video.videoHeight), w = video.videoWidth * scale, h = video.videoHeight * scale;
   marker.style.left = ((width-w)/2+hostCursor.x*w)+'px'; marker.style.top = ((height-h)/2+hostCursor.y*h)+'px'; marker.hidden = false;
 }
-new ResizeObserver(renderHostCursor).observe($('video-stage'));
+function renderPointerPause(){
+  const badge=$('pointer-pause'),stage=$('video-stage');
+  badge.hidden=role!=='viewer'||!allowedControl||remoteInputReason!=='host'||!guestPointerPoint;
+  if(badge.hidden)return;
+  badge.lastElementChild.textContent=tr('Host active · resumes after 2 s of inactivity');
+  badge.style.left=Math.max(0,Math.min(guestPointerPoint.x+18,stage.clientWidth-badge.offsetWidth-4))+'px';
+  badge.style.top=Math.max(0,Math.min(guestPointerPoint.y+20,stage.clientHeight-badge.offsetHeight-4))+'px';
+}
+new ResizeObserver(()=>{renderHostCursor();renderPointerPause();}).observe($('video-stage'));
 $('remote-video').addEventListener('resize',()=>{const video=$('remote-video');if(role==='viewer'&&video.videoWidth&&!document.fullscreenElement)requestAnimationFrame(()=>api.fitVideo({width:video.videoWidth,height:video.videoHeight,extraWidth:innerWidth-$('video-stage').clientWidth,extraHeight:innerHeight-$('video-stage').clientHeight}).catch(()=>{}));});
 document.addEventListener('dragstart',event=>{if(!event.target.closest('input,textarea,[contenteditable=true],.pinned-draggable'))event.preventDefault();});
 api.onKeyboardApplied(data => { if (role === 'host' && controlChannel?.readyState === 'open') controlChannel.send(JSON.stringify(data)); if (!data.ok && allowedControl) { input({ type: 'release' }); status(tr('Keyboard sync failed; typing paused'), true); if (layoutSync) layoutSync.expected = ''; api.currentKeyboard().then(layout => { guestKeyboardLayout = layout; sendKeyboardLayout(); }).catch(e => status(e.message, true)); } });
@@ -349,6 +368,8 @@ function closePeer() {
   api.fitVideo(null).catch(()=>{});
   guestCursorPosition=null; keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); exchange?.close(); exchange = null;
   keyboardEpoch++; guestShift.reset(); guestKeyboardLayout = ''; layoutSync = null; hostCursor = null; $('host-cursor').hidden = true;
+  clearTimeout(hostCursorTimer);lastHostCursorSequence=-1;guestPointerPoint=null;$('pointer-pause').hidden=true;
+  clearTimeout(pointerFrame);pointerFrame=0;latestPointer=null;
   peerKeyboardSync = false;
   remoteInputReason='ready';hostInputState={type:'input-state',reason:'ready'};
   exitVideoFullscreen().catch(() => {});
@@ -423,16 +444,17 @@ function input(data, pointer = false) {
   // Moves share the ordered stream with down/up. Only visual pointer markers
   // use the disposable unordered channel, so a late move cannot corrupt a drag.
   const channel = data.type==='move'?controlChannel:pointer ? pointerChannel : controlChannel;
-  if (channel?.readyState === 'open' && channel.bufferedAmount < 32768) channel.send(JSON.stringify(data));
+  if (channel?.readyState === 'open' && channel.bufferedAmount < (data.type==='move'?1024:32768)) channel.send(JSON.stringify(data));
   else if (data.type!=='move'&&!pointer && channel?.readyState === 'open') stopSession(true); // Never silently lose a key-up.
 }
 const stage = $('video-stage');
 const activeGuestPointers = new Set(); let guestCursorPosition;
-function sendGuestCursor(position) { if (role === 'viewer' && pointerChannel?.readyState === 'open' && pointerChannel.bufferedAmount < 4096) pointerChannel.send(JSON.stringify({type:'guest-cursor', ...position})); }
+function sendGuestCursor(position) { if (role === 'viewer' && pointerChannel?.readyState === 'open' && pointerChannel.bufferedAmount < 4096) pointerChannel.send(JSON.stringify({type:'guest-cursor', ...position, visible:position.visible&&remoteInputReason==='ready'})); }
 setInterval(()=>{ if (guestCursorPosition && role === 'viewer') sendGuestCursor(guestCursorPosition); },1000);
-stage.addEventListener('pointerleave',()=>{guestCursorPosition=null;sendGuestCursor({visible:false});});
+stage.addEventListener('pointerleave',()=>{guestPointerPoint=null;renderPointerPause();guestCursorPosition=null;latestPointer=null;sendGuestCursor({visible:false});});
 stage.addEventListener('pointermove', event => {
-  const p = position(event); if (!p) return;
+  const p = position(event),bounds=stage.getBoundingClientRect();guestPointerPoint=p?{x:event.clientX-bounds.left,y:event.clientY-bounds.top}:null;renderPointerPause();
+  if (!p) {guestCursorPosition=null;latestPointer=null;sendGuestCursor({visible:false});return;}
   guestCursorPosition = { ...p, visible:true }; latestPointer = p; if (pointerFrame) return;
   pointerFrame = setTimeout(() => { pointerFrame = 0; if (guestCursorPosition) sendGuestCursor(guestCursorPosition); if (latestPointer) input({ type: 'move', ...latestPointer }, true); }, 8);
 });
@@ -686,7 +708,7 @@ $('internet-enabled').onchange = guarded(async () => {
 });
 $('show-guest-cursor').onchange = guarded(async () => { config.showGuestCursor = await api.showGuestCursor($('show-guest-cursor').checked); });
 for (const id of ['open-settings','session-settings']) $(id).onclick = () => { $('settings-dialog').showModal(); };
-$('show-host-cursor').onchange = guarded(async () => { config.showHostCursor = await api.showHostCursor($('show-host-cursor').checked); renderHostCursor(); if (role === 'host' && lastLocalCursor && pointerChannel?.readyState === 'open') pointerChannel.send(JSON.stringify({ ...lastLocalCursor, visible: config.showHostCursor && lastLocalCursor.visible })); });
+$('show-host-cursor').onchange = guarded(async () => { config.showHostCursor = await api.showHostCursor($('show-host-cursor').checked); renderHostCursor(); if (role === 'host' && lastLocalCursor && pointerChannel?.readyState === 'open') pointerChannel.send(JSON.stringify({ ...lastLocalCursor, sequence:++cursorSequence, visible: config.showHostCursor && lastLocalCursor.visible })); });
 for (const button of document.querySelectorAll('[data-password]')) button.onclick = () => { const field = $(button.dataset.password), reveal = field.type === 'password'; field.type = reveal ? 'text' : 'password'; button.setAttribute('aria-pressed', String(reveal)); };
 $('show-lan-password').onclick = () => { const field = $('direct-password'), reveal = field.textContent === '••••••••'; field.textContent = reveal ? window.shatootconnectDirect?.password || '' : '••••••••'; };
 $('show-host-password').onclick = () => { hostPasswordShown = !hostPasswordShown; $('host-password').textContent = hostPasswordShown ? hostPasswordValue : '••••••••'; $('show-host-password').setAttribute('aria-pressed', String(hostPasswordShown)); };

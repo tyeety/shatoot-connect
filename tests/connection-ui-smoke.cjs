@@ -164,6 +164,29 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     await run("animationProbe.disconnect();document.querySelector('#refresh-discovery').click();true");await until(()=>run("document.querySelector('#network-list').classList.contains('data-feedback')"));
     log('Update progress stays visible outside Settings and a failed update reports its error');
     if(!await run("!!document.querySelector('.favorite-actions .mi.shortcut') && !!document.querySelector('.favorite-actions .mi.screen_share')"))throw Error('Saved computer actions omitted shortcut/connect icons');
+    await run("window.pointerPackets=[];role='viewer';allowedControl=true;config.showHostCursor=true;controlChannel={readyState:'open',label:'control',bufferedAmount:0,send:value=>pointerPackets.push(JSON.parse(value)),close:()=>{}};showSession();Object.defineProperty($('remote-video'),'videoWidth',{configurable:true,value:1920});Object.defineProperty($('remote-video'),'videoHeight',{configurable:true,value:1080});true");
+    await run("(()=>{const r=stage.getBoundingClientRect();stage.dispatchEvent(new PointerEvent('pointermove',{clientX:r.x+r.width/2,clientY:r.y+r.height/2,bubbles:true}));setRemoteInputState({reason:'host'});return true})()");
+    if(!await run("!$('pointer-pause').hidden&&$('pointer-pause').textContent.includes('2 s')&&$('host-cursor').hidden"))throw Error('Host pause indicator is missing or an echoed cursor is visible');
+    await run("window.cursorWire={label:'pointer',readyState:'open',bufferedAmount:0,send:()=>{}};bindChannel(cursorWire);cursorWire.onmessage({data:JSON.stringify({type:'host-cursor',x:.3,y:.4,visible:true,physical:false,sequence:1})});true");
+    if(!await run("$('host-cursor').hidden"))throw Error('Injected guest movement created a host cursor');
+    await run("cursorWire.onmessage({data:JSON.stringify({type:'host-cursor',x:.6,y:.7,visible:true,physical:true,sequence:3})});cursorWire.onmessage({data:JSON.stringify({type:'host-cursor',x:.1,y:.1,visible:true,physical:true,sequence:2})});true");
+    if(!await run("!$('host-cursor').hidden&&hostCursor.x===.6&&getComputedStyle($('host-cursor')).clipPath==='none'"))throw Error('Physical host highlight was duplicated as an arrow or moved backwards by an old packet');
+    const pausedMoves=await run("pointerPackets.filter(p=>p.type==='move').length");
+    await run("input({type:'move',x:.4,y:.5});input({type:'button',button:0,down:true,x:.4,y:.5});true");
+    if(await run("pointerPackets.some(p=>p.type==='button')||pointerPackets.filter(p=>p.type==='move').length!=="+pausedMoves))throw Error('Paused pointer input was sent');
+    for(const language of ['en','fa']){
+      await run(`window.i18n.setLanguage('${language}');renderPointerPause();true`);
+      if(!await run("(()=>{const badge=$('pointer-pause'),b=badge.getBoundingClientRect(),s=stage.getBoundingClientRect();return !badge.hidden&&badge.textContent.includes(window.i18n.translate('Host active · resumes after 2 s of inactivity'))&&b.left>=s.left&&b.right<=s.right+1&&b.top>=s.top&&b.bottom<=s.bottom+1&&getComputedStyle(badge).pointerEvents==='none'})()"))throw Error('Pause badge is clipped or untranslated in '+language);
+      fs.writeFileSync(path.join(artifacts,`pointer-pause-${language}.png`),(await host.webContents.capturePage()).toPNG());
+    }
+    await run("stage.dispatchEvent(new PointerEvent('pointerleave'));true");if(!await run("$('pointer-pause').hidden"))throw Error('Pause badge remained after pointer left video');
+    await run("setRemoteInputState({reason:'ready'});input({type:'move',x:.7,y:.8});true");
+    if(!await run("$('pointer-pause').hidden&&pointerPackets.some(p=>p.type==='move'&&p.x===.7)"))throw Error('Control did not resume immediately with native ready state');
+    await run("controlChannel.bufferedAmount=1024;input({type:'move',x:.9,y:.9});input({type:'button',button:0,down:false,x:.7,y:.8});true");
+    if(!await run("!pointerPackets.some(p=>p.type==='move'&&p.x===.9)&&pointerPackets.some(p=>p.type==='button'&&!p.down)"))throw Error('Move backpressure queued stale motion or lost button-up');
+    await run("stopSession(false);window.i18n.setLanguage('en');true");
+    if(!await run("$('pointer-pause').hidden&&$('host-cursor').hidden&&guestPointerPoint===null&&latestPointer===null"))throw Error('Pointer feedback survived teardown');
+    log('Host activity badge follows the guest pointer in both languages, paused input is blocked, ready resumes immediately, and queued moves cannot delay button-up');
     await run("window.shiftPackets=[];role='viewer';allowedControl=true;peerKeyboardSync=true;guestKeyboardLayout='00000409';controlChannel={readyState:'open',bufferedAmount:0,send:value=>shiftPackets.push(JSON.parse(value)),close:()=>{}};showSession();stage.focus();true");
     host.webContents.send('grabbed-key',{vk:0xBF,scan:0x35,extended:false,down:true,shift:true,ctrl:false});
     await until(()=>run('shiftPackets.length===2'));

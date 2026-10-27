@@ -142,6 +142,8 @@ function hideGuestCursor(s) {
 ipcMain.on('guest-cursor',(e,data)=>{
   const s=state(e,false);if(!s)return;
   if(!s.captureAllowed || !s.source || s.showGuestCursor===false || !data || typeof data.visible!=='boolean')return;
+  // Shared input already moves the Windows pointer; a second overlay duplicates it.
+  if(s.sharedCursor!==false){if(s.guestCursor)hideGuestCursor(s);return;}
   if(!data.visible){s.guestPointerData=null;s.guestCursor?.hide();return;}
   if(!Number.isFinite(data.x)||!Number.isFinite(data.y)||data.x<0||data.x>1||data.y<0||data.y>1)return;
   const display=screen.getAllDisplays().find(d=>String(d.id)===s.source.display_id)||screen.getPrimaryDisplay();
@@ -275,7 +277,7 @@ ipcMain.handle('host-session', async (e, message, route, sourceId) => {
   if (message.type === 'desktop-ended') { closeExtraHost(s); return; }
   if (['desktop-ready','desktop-signal'].includes(message.type)) s.win.webContents.send('host-signal', message);
 });
-ipcMain.handle('host-init', e => { const s = state(e); if (!s.owner) throw new Error('Invalid desktop worker.'); return { invitation: s.invitation, source: s.sourceId, lan: s.hostRoute === 'lan-host', profiles: PROFILES, autoQuality:settings().autoQuality!==false, profile: settings().qualityProfile || 'speed' }; });
+ipcMain.handle('host-init', e => { const s = state(e); if (!s.owner) throw new Error('Invalid desktop worker.'); return { invitation: s.invitation, source: s.sourceId, lan: s.hostRoute === 'lan-host', profiles: PROFILES, showHostCursor:settings().showHostCursor!==false, autoQuality:settings().autoQuality!==false, profile: settings().qualityProfile || 'speed' }; });
 ipcMain.on('host-send', (e, message) => { const s = state(e,false); if (!s?.owner || !message || !['desktop-accept','desktop-reject','desktop-signal','desktop-end'].includes(message.type) || JSON.stringify(message).length > 110000) return; if (['desktop-accept','desktop-signal'].includes(message.type) && !s.captureAllowed) return; hostReply(s,message); if (['desktop-reject','desktop-end'].includes(message.type)) closeExtraHost(s); });
 ipcMain.handle('host-sessions-stop', e => { const owner = state(e); for (const s of states.values()) if (s.owner === owner) closeExtraHost(s); });
 const chatPending = new Map();
@@ -492,7 +494,7 @@ function watchKeyboard(s, enabled) {
   let buffer = '';
   proc.on('error', () => { if (s.keyboardMonitor === proc) s.keyboardMonitor = null; });
   proc.stdin.on('error', () => {});
-  proc.stdout.on('data', chunk => { buffer += chunk; if (buffer.length > 16000) buffer = ''; let end; while ((end = buffer.indexOf('\n')) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); try { const data = JSON.parse(line); if (data.type === 'host-cursor' && s.captureAllowed && s.source && s.keyboardMonitor === proc && !s.win.isDestroyed()) { const display = screen.getAllDisplays().find(d => String(d.id) === s.source.display_id); if (display) { const b = screen.dipToScreenRect(null, display.bounds); s.win.webContents.send('host-cursor', { type: 'host-cursor', x: (data.x-b.x)/Math.max(1,b.width-1), y: (data.y-b.y)/Math.max(1,b.height-1), visible: data.visible }); } } if (/^[0-9a-f]{8}$/i.test(data.layout) && s.keyboardMonitor === proc && !s.win.isDestroyed()) { s.win.webContents.send('keyboard-layout', data.layout); const waiting = s.keyboardRequests?.get(data.request); if (waiting) { clearTimeout(waiting.timer); s.keyboardRequests.delete(data.request); waiting.resolve(data.layout); } } } catch {} } });
+  proc.stdout.on('data', chunk => { buffer += chunk; if (buffer.length > 16000) buffer = ''; let end; while ((end = buffer.indexOf('\n')) >= 0) { const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); try { const data = JSON.parse(line); if (data.type === 'host-cursor' && s.captureAllowed && s.source && s.keyboardMonitor === proc && !s.win.isDestroyed()) { const display = screen.getAllDisplays().find(d => String(d.id) === s.source.display_id); if (display) { const b = screen.dipToScreenRect(null, display.bounds); s.win.webContents.send('host-cursor', { type: 'host-cursor', x: (data.x-b.x)/Math.max(1,b.width-1), y: (data.y-b.y)/Math.max(1,b.height-1), visible: data.visible, physical:data.physical===true }); } } if (/^[0-9a-f]{8}$/i.test(data.layout) && s.keyboardMonitor === proc && !s.win.isDestroyed()) { s.win.webContents.send('keyboard-layout', data.layout); const waiting = s.keyboardRequests?.get(data.request); if (waiting) { clearTimeout(waiting.timer); s.keyboardRequests.delete(data.request); waiting.resolve(data.layout); } } } catch {} } });
   proc.on('exit', () => { if (s.keyboardMonitor === proc) s.keyboardMonitor = null; });
 }
 ipcMain.handle('keyboard-watch', (e, enabled) => watchKeyboard(state(e), enabled));
@@ -943,11 +945,14 @@ async function runSmoke(host) {
   await viewer.webContents.executeJavaScript("(()=>{ for(let i=0;i<20;i++){sendGuestKey({type:'key',code:'KeyA',down:true});sendGuestKey({type:'key',code:'KeyA',down:false});} return keyboardQueue; })()");
   for (let i = 0; i < 30 && (hostState.testInputPackets || 0) < inputsBeforeKeys + 40; i++) await delay(50);
   if ((hostState.testInputPackets || 0) !== inputsBeforeKeys + 40 || (states.get(viewer.webContents.id).keyboardQueryCount || 0) !== queriesBeforeKeys) throw new Error('Cached keyboard fast path regressed');
-  host.webContents.send('host-cursor', { type: 'host-cursor', x: 0.3, y: 0.4, visible: true });
+  host.webContents.send('input-state',{type:'input-state',reason:'host'});
+  host.webContents.send('host-cursor', { type: 'host-cursor', x: 0.3, y: 0.4, visible: true, physical:true });
   await wait(viewer, "!document.querySelector('#host-cursor').hidden");
   await viewer.webContents.executeJavaScript("config.showHostCursor=false; renderHostCursor(); true");
   if (!await viewer.webContents.executeJavaScript("document.querySelector('#host-cursor').hidden")) throw new Error('Cursor indicator setting failed');
   await viewer.webContents.executeJavaScript("config.showHostCursor=true; renderHostCursor(); true");
+  host.webContents.send('input-state',{type:'input-state',reason:'ready'});
+  await wait(viewer,"remoteInputReason==='ready'");
   smokeLog('40 RTC keyboard packets used zero layout-query IPC calls; cursor indicator toggled without moving the guest cursor');
   await host.webContents.executeJavaScript("api.exchange('clipboard-write','متن فارسی — WebRTC').then(()=>exchange.flushClipboard())");
   if (await viewer.webContents.executeJavaScript("api.exchange('clipboard-read').then(c=>c.text)") !== 'متن فارسی — WebRTC') throw new Error('RTC text clipboard did not arrive');
@@ -1014,6 +1019,10 @@ async function runSmoke(host) {
   if(!fs.readFileSync(hostState.testClipboard.files[0]).equals(transferBytes))throw new Error('Serverless LAN upload corrupted');
   await host.webContents.executeJavaScript("exchange.sendFiles('clipboard-sources')");
   if(!fs.readFileSync(states.get(viewer.webContents.id).testClipboard.files[0]).equals(transferBytes))throw new Error('Serverless LAN download corrupted');
+  await viewer.webContents.executeJavaScript("sendGuestCursor({x:0.4,y:0.5,visible:true});true");
+  await delay(100);
+  if(hostState.guestCursor?.isVisible())throw new Error('Shared mouse duplicated the Windows pointer');
+  hostState.sharedCursor=false;
   await viewer.webContents.executeJavaScript("sendGuestCursor({x:0.4,y:0.5,visible:true});true");
   for(let i=0;i<40 && !hostState.guestCursor?.isVisible();i++)await delay(50);
   if(!hostState.guestCursor?.isAlwaysOnTop() || !hostState.guestPointerData)throw new Error('Host cannot see the independent guest pointer');

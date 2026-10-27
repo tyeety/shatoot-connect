@@ -13,6 +13,15 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.23.3 — 2026-10-27
+
+### Fixed
+
+- Removed the duplicate guest overlay in shared mouse mode. The host activity highlight now uses physical mouse coordinates instead of echoing injected guest movement, and uses a small ring rather than another arrow. Sequence checks and expiry reject stale or reordered highlight packets.
+- A localized pause badge follows the guest pointer when the host is active. Control resumes after the native two-second quiet period; held host buttons/keys and continued activity keep priority. Additional desktop sessions now receive the same pause/ready notifications.
+- Reduced the motion buffer limit while preserving ordered button/key events so congestion drops obsolete movement instead of building up a long pointer trail. Pending motion and activity feedback are cleared at disconnect.
+- Added regression coverage for the two-second handoff, physical/injected pointer distinction, packet ordering, pause feedback in both languages, motion backpressure and additional-host state forwarding.
+
 ## 0.23.2 — 2026-10-26
 
 ### Fixed

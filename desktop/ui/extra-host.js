@@ -2,6 +2,7 @@
 (() => {
   const api = window.shatootconnect;
   let videoQuality,privacyAllowed=false;
+  let hostInputState={type:'input-state',reason:'ready'},lastCursor,cursorSequence=0;
   let config, pc, stream, sender, exchange, control, pointer, allowed = false, profile, candidates = [], stopped = false, queue = Promise.resolve(), sync = new window.LayoutSync(true);
   const send = data => api.hostSend(data);
   window.shatootconnectHostDiagnostics=()=>({automaticQuality:videoQuality?.automatic,qualityProfile:videoQuality?.name,privacyAllowed});
@@ -14,9 +15,13 @@
     else await videoQuality.setMode(automatic,name);
   }
   api.onPrivacyScreenState(value=>{privacyAllowed=value.allowed===true;if(control?.readyState==='open')control.send(JSON.stringify({type:'privacy-screen-state',...value}));});
+  api.onInputState(value=>{hostInputState=value;if(control?.readyState==='open')control.send(JSON.stringify(value));});
 
   function bind(channel) {
-    channel.onopen = () => { if (channel.label === 'control') {api.watchKeyboard(true);channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,privacyScreen:privacyAllowed}));} };
+    channel.onopen = () => {
+      if (channel.label === 'control') {api.watchKeyboard(true);channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,privacyScreen:privacyAllowed}));channel.send(JSON.stringify(hostInputState));}
+      if(channel.label==='pointer'&&lastCursor)channel.send(JSON.stringify({...lastCursor,sequence:++cursorSequence,visible:config.showHostCursor&&lastCursor.visible}));
+    };
     channel.onmessage = event => {
       if (typeof event.data !== 'string' || event.data.length > 2048) return;
       let data; try { data = JSON.parse(event.data); } catch { return; }
@@ -32,7 +37,7 @@
   }
   api.onKeyboardLayout(layout => { if (allowed && control?.readyState === 'open') { const packet = sync.observe(layout); if (packet) control.send(JSON.stringify(packet)); } });
   api.onKeyboardApplied(data => { if (control?.readyState === 'open') control.send(JSON.stringify(data)); });
-  api.onHostCursor(data => { if (pointer?.readyState === 'open') pointer.send(JSON.stringify(data)); });
+  api.onHostCursor(data => {lastCursor=data;if(pointer?.readyState==='open'&&pointer.bufferedAmount<4096)pointer.send(JSON.stringify({...data,sequence:++cursorSequence,visible:config.showHostCursor&&data.visible}));});
   api.onHostDisconnect(stop); api.onEmergency(stop);
   api.onHostSignal(message => { queue = queue.then(async () => {
     if (stopped) return;

@@ -214,7 +214,7 @@ sealed class IndependentPointer {
             Bounds(start);Click(start,true);Pump();worker.StandardInput.Close();deadline=Environment.TickCount64+4000;while(!worker.HasExited&&Environment.TickCount64<deadline)Pump(20);Pump();
             bool released=down==2&&up==2&&!dragging;
             bool classification=HostActivity.PhysicalMouse(0)&&!HostActivity.PhysicalMouse(1)&&HostActivity.PhysicalKey(0)&&!HostActivity.PhysicalKey(0x10);
-            bool quiet=!monitor.Paused&&!output.Any(s=>s.Contains("host-activity"));
+            bool quiet=!monitor.Paused&&monitor.Pointer.Revision==0&&!output.Any(s=>s.Contains("host-activity"));
             bool ok=drag&&textSelected&&resized&&released&&quiet&&classification&&worker.HasExited&&worker.ExitCode==0;
             Console.WriteLine(JsonSerializer.Serialize(new{ok,drag,textSelected,resized,released,physicalHooks=monitor.Ready,injectedInputIgnored=quiet,classification,down,up,moves,errors=errors.ToArray(),events=output.ToArray()}));return ok?0:1;
         }finally{if(!worker.HasExited){worker.StandardInput.Close();if(!worker.WaitForExit(1000))worker.Kill();}DestroyWindow(host);UnregisterClass(name,wc.Instance);if(!monitor.Paused)Native.Pointer(original.X,original.Y);GC.KeepAlive(procedure);}

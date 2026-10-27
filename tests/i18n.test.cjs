@@ -12,6 +12,11 @@ function translations() {
   return context.window.i18n;
 }
 
+test('host pause badge translates in English and Persian',()=>{
+ const i18n=translations(),en='Host active · resumes after 2 s of inactivity',fa='میزبان فعال است؛ کنترل ۲ ثانیه پس از پایان فعالیت آزاد می‌شود';
+ assert.equal(i18n.translate(fa),en);i18n.setLanguage('fa');assert.equal(i18n.translate(en),fa);
+});
+
 test('connection timeout and dynamic errors translate in both directions without altering unknown details', () => {
   const i18n = translations();
   const timeout = 'Connection timed out. Check host approval and network settings.';

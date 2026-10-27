@@ -10,6 +10,8 @@ sealed class HostActivity : IDisposable {
     readonly Thread thread; readonly ManualResetEventSlim ready=new(false); readonly object gate=new();
     readonly HashSet<uint> keys=new(); readonly HashSet<int> buttons=new();
     long last; int ended;
+    int pointerX,pointerY; long pointerRevision;
+    public (int X,int Y,long Revision) Pointer { get {lock(gate)return (pointerX,pointerY,pointerRevision);} }
     public bool Ready { get; private set; }
     public bool Paused=>Environment.TickCount64-Interlocked.Read(ref last)<2000||Held;
     bool Held { get {lock(gate){if(Environment.TickCount64-Interlocked.Read(ref last)>100){keys.RemoveWhere(key=>GetAsyncKeyState((int)key)>=0);buttons.RemoveWhere(button=>GetAsyncKeyState(button==0?1:button==2?2:4)>=0);}return keys.Count+buttons.Count>0;}} }
@@ -21,7 +23,7 @@ sealed class HostActivity : IDisposable {
     void Run(){
         Hook mouse=(code,message,data)=>{
             if(code>=0){var value=Marshal.PtrToStructure<MouseData>(data);if(PhysicalMouse(value.Flags)){
-                int id=message.ToInt32();lock(gate){int button=id is 0x201 or 0x202?0:id is 0x204 or 0x205?2:id is 0x207 or 0x208?1:-1;if(button>=0){if(id is 0x201 or 0x204 or 0x207)buttons.Add(button);else buttons.Remove(button);}}
+                int id=message.ToInt32();lock(gate){pointerX=value.X;pointerY=value.Y;pointerRevision++;int button=id is 0x201 or 0x202?0:id is 0x204 or 0x205?2:id is 0x207 or 0x208?1:-1;if(button>=0){if(id is 0x201 or 0x204 or 0x207)buttons.Add(button);else buttons.Remove(button);}}
                 Interlocked.Exchange(ref last,Environment.TickCount64);
             }}return CallNextHookEx(IntPtr.Zero,code,message,data);
         };

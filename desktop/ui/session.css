@@ -18,3 +18,8 @@ main{width:calc(100% - 206px);margin-inline-start:206px}.inline-setting,.favorit
 #host-id.lan-address{font-size:16px;letter-spacing:0;overflow-wrap:anywhere}.file-transfer-status{position:absolute;bottom:10px;inset-inline-start:10px;max-width:min(560px,85%);background:#13232eef;border:1px solid #365963;border-radius:6px;padding:9px 12px;line-height:1.8;color:#d9f8ed;z-index:4;font-size:11px}.session-panel{position:relative}
 
 .viewing #settings-dialog .server-card{display:block}
+
+/* Host activity is a highlight, never a second copy of the Windows arrow. */
+#host-cursor{width:16px;height:16px;border:2px solid #efb84b;border-radius:50%;background:#efb84b22;clip-path:none;filter:drop-shadow(0 1px 2px #000);transform:translate(-50%,-50%)}
+#pointer-pause{position:absolute;display:flex;align-items:center;gap:6px;max-width:min(230px,calc(100% - 8px));padding:5px 8px;border:1px solid #e8b959;border-radius:6px;background:#30220ff2;color:#ffe1a4;font:11px 'Segoe UI',sans-serif;line-height:1.5;pointer-events:none;z-index:5;box-shadow:0 2px 6px #0008}
+#pointer-pause[hidden]{display:none}

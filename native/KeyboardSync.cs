@@ -53,13 +53,18 @@ sealed class KeyboardSync {
     public static void Monitor() {
         var requests = new System.Collections.Concurrent.ConcurrentQueue<string>(); int ended = 0;
         _ = Task.Run(() => { string? line; while ((line = Console.ReadLine()) != null) if (line.Length <= 64) requests.Enqueue(line); Volatile.Write(ref ended, 1); });
-        string? previous = null; long sampled = 0, cursorSampled = 0, lastLayoutSent = 0; int lastX = int.MinValue, lastY = int.MinValue; bool lastVisible = false;
+        using var activity = new HostActivity();
+        string? previous = null; long sampled = 0, cursorSampled = 0, lastLayoutSent = 0, lastPointerRevision = -1; bool lastVisible = false;
         while (Volatile.Read(ref ended) == 0) {
             while (requests.TryDequeue(out var request)) Console.WriteLine(JsonSerializer.Serialize(new { layout = Current(), request }));
             if (Environment.TickCount64 - sampled >= 100) { var id = Current(); if (id != previous || Environment.TickCount64 - lastLayoutSent >= 250) { Console.WriteLine(JsonSerializer.Serialize(new { layout = id })); previous = id; lastLayoutSent = Environment.TickCount64; } sampled = Environment.TickCount64; }
             if (Environment.TickCount64 - cursorSampled >= 33) {
                 var cursor = new CURSORINFO { Size = Marshal.SizeOf<CURSORINFO>() };
-                if (GetCursorInfo(ref cursor)) { bool visible = (cursor.Flags & 1) != 0; if (cursor.X != lastX || cursor.Y != lastY || visible != lastVisible) { Console.WriteLine(JsonSerializer.Serialize(new { type = "host-cursor", x = cursor.X, y = cursor.Y, visible })); lastX = cursor.X; lastY = cursor.Y; lastVisible = visible; } }
+                // GetCursorInfo also follows injected guest input in shared mode.
+                // Publish only coordinates observed by the physical-input hook.
+                var pointer = activity.Pointer;
+                bool visible = activity.Ready && pointer.Revision > 0 && activity.Paused && GetCursorInfo(ref cursor) && (cursor.Flags & 1) != 0;
+                if (pointer.Revision != lastPointerRevision || visible != lastVisible) { Console.WriteLine(JsonSerializer.Serialize(new { type = "host-cursor", x = pointer.X, y = pointer.Y, visible, physical = true })); lastPointerRevision = pointer.Revision; lastVisible = visible; }
                 cursorSampled = Environment.TickCount64;
             }
             Thread.Sleep(10);

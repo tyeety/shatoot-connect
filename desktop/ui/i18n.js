@@ -2,6 +2,8 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['میزبان فعال است؛ کنترل ۲ ثانیه پس از پایان فعالیت آزاد می‌شود','Host active · resumes after 2 s of inactivity'],
+    ['نمایش محل فعالیت موس میزبان','Highlight host mouse activity'],
 ['کیفیت خودکار','Automatic quality'],['اجازه بده کنترل‌کننده نمایشگرهای این سیستم را پنهان کند','Allow remote controllers to hide this computer’s monitors'],['پیش از اتصال فعال کنید. Ctrl + Shift + F12 تصویر را برمی‌گرداند و اتصال را قطع می‌کند.','Enable before connecting. Ctrl + Shift + F12 restores displays and disconnects.'],['پنهان کردن نمایشگرهای مقابل','Hide remote monitors'],['نمایش دوبارهٔ نمایشگرهای مقابل','Restore remote monitors'],['این قابلیت باید پیش از اتصال در سیستم مقابل فعال شده باشد.','Privacy screen requires prior permission on the remote computer.'],['پنهان کردن نمایشگر در این سیستم در دسترس نیست.','Privacy screen is unavailable on this computer.'],
 
 

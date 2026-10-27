@@ -28,3 +28,14 @@ test('invalid packets cannot claim control and a held physical key keeps all gue
  assert.equal(control.owner,null);control.host(true);time=100000;assert.equal(control.accept(a,{type:'move',x:0,y:0}),false);
  control.host(false);assert.equal(control.accept(a,{type:'move',x:0,y:0}),true);
 });
+
+test('native host pause ends after its two-second quiet period without a second pause',()=>{
+ let time=0;const a={},control=new InputControl({now:()=>time});
+ control.accept(a,{type:'move',x:.2,y:.3});control.host(true);
+ time=1999;assert.equal(control.reason(a),'host');
+ time=2000;control.host(false);
+ assert.equal(control.reason(a),'ready');assert.equal(control.accept(a,{type:'move',x:.4,y:.5}),true);
+ // Continuing physical input keeps control paused, including a held host key.
+ control.host(true);time+=4000;assert.equal(control.reason(a),'host');
+ control.host(false);assert.equal(control.reason(a),'ready');
+});
