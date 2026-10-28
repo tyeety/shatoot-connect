@@ -13,6 +13,22 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.29.0 — 2026-10-28
+
+### Added
+
+- Video/music stories (MP4/WebM and MP3/M4A/OGG/WAV, up to 32 MB) transfer on demand over authenticated WebRTC chat in bounded chunks, with SHA-256 verification and an isolated bounded media cache. Media-capable peers advertise compatibility; old peers continue receiving text/image stories.
+- Story viewer includes previous/next navigation and native audio/video controls. Stories expire 24 hours after publication, including an already-open player.
+
+### Changed
+
+- Profile, New story and status share one three-part control when no stories exist. With stories, a compact overlapping avatar stack shares the row with a profile dropdown containing Profile, Change status and New story. Expanding the stack hides the profile and gives individual stories the whole row, with a collapse control.
+- A custom status menu replaces the clipped emoji/select control. Presence dots stay inside their avatar bounds. Home pause is icon-only with an accessible label, and password input/eye buttons have bounded equal-height layout and spacing.
+
+### Validation
+
+- Unit tests cover media validation, cache expiry, chunk offsets/checksums and 24-hour metadata. Real RTC tests verify deferred multi-chunk audio/video transfers and actual WAV/WebM decoding. Workspace checks exercise compact/expanded story controls, status menus, repeated tab clicks and bilingual light/dark screenshots.
+
 ## 0.28.1 — 2026-10-28
 
 ### Fixed

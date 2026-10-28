@@ -148,6 +148,7 @@ window.i18n = (() => {
     ['اتصال با میان‌بر اضطراری قطع شد.','Disconnected with the emergency shortcut.'],['اشتراک‌گذاری و کنترل متوقف شدند.','Screen sharing and control stopped.'],['ویندوز ورودی را نپذیرفت؛ کنترل پنجره‌های Administrator و صفحهٔ UAC در این نسخه پشتیبانی نمی‌شود.','Windows blocked input. Elevated windows and the UAC screen are not supported.'],
     ['شناسه آماده است. برای اتصال، شناسه و رمز را با فرد مورد اعتماد به اشتراک بگذارید.','Your ID is ready. Share your ID and password with someone you trust.'],['در حال تلاش مجدد برای اتصال به سرور…','Retrying the server connection…'],['دریافت شناسه از سرور…','Getting your ID from the server…'],['اتصال ورودی متوقف شد.','Incoming connections paused.'],['پیکربندی سرور با این نسخه سازگار نیست. سرور را به نسخهٔ جدید ارتقا دهید.','This server is incompatible. Upgrade the server to the current version.']
   ];
+  entries.push(['تغییر وضعیت','Change status'],['استوری‌ها','Stories'],['استوری قبلی','Previous story'],['استوری بعدی','Next story'],['ویدیو یا موسیقی','Video or music'],['در حال دریافت رسانه…','Loading media…'],['سازندهٔ استوری آفلاین است.','The story author is offline.'],['استوری منقضی شده یا در دسترس نیست.','Story expired or unavailable.']);
   const fa = new Map(entries), en = new Map(entries.map(([a,b]) => [b,a]));
   function translate(value) {
     if (typeof value !== 'string') return value;

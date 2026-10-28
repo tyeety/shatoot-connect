@@ -331,7 +331,7 @@ ipcMain.handle('chat-connect-computer',(e,deviceId)=>{
 ipcMain.handle('chat-close', e => state(e).chatWindow?.close());
 ipcMain.handle('chat-call', (e, operation, args = []) => {
   const s = state(e);
-  if (s.chatWindow?.webContents !== e.sender || !['snapshot','refresh','connect','computerInfo','cancelPending','send','forwardMessage','sendFiles','close','createGroup','changeMessage','schedule','cancelScheduled','react'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
+  if (s.chatWindow?.webContents !== e.sender || !['snapshot','refresh','storyMediaCache','connect','computerInfo','cancelPending','send','forwardMessage','sendFiles','close','createGroup','changeMessage','schedule','cancelScheduled','react'].includes(operation) || !Array.isArray(args) || chatPending.size >= 32) throw new Error('Invalid chat window request.');
   const id = crypto.randomUUID();
   return new Promise((resolve,reject) => { const timer = setTimeout(() => { chatPending.delete(id); reject(new Error('Chat operation timed out.')); }, ['sendFiles','forwardMessage'].includes(operation) ? 1800000 : 75000); chatPending.set(id, { s, resolve, reject, timer }); s.win.webContents.send('chat-command', { id, operation, args }); });
 });

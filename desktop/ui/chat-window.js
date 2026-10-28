@@ -9,6 +9,7 @@
   class ChatWindowClient {
     constructor(options) { this.options = options; this.catalog = initial.catalog;this.pendingConnections=initial.pendingConnections||0; this.online = initial.connected; this.ready = Promise.resolve(); changed = snapshot => { this.catalog = snapshot.catalog;this.pendingConnections=snapshot.pendingConnections||0; this.online = snapshot.connected; Object.assign(initial.self, snapshot.self); if (window.i18n.language !== snapshot.language) window.i18n.setLanguage(snapshot.language); for (const [conversation, text] of snapshot.progress) { if (conversation === window.chatSelected) document.getElementById('chat-progress').textContent = text; } options.changed(); }; }
     peer(id) { const peer = this.online.find(p => p.deviceId === id); return peer && { peer }; }
+    async storyMedia(story){await api.chatCall('storyMediaCache',[story.id]);const parts=[];for(let offset=0;offset<story.media.size;){const chunk=await api.collaboration('story-media-local',{id:story.id,offset});parts.push(Uint8Array.from(atob(chunk.bytes),c=>c.charCodeAt(0)));offset+=chunk.length;}return new Blob(parts,{type:story.media.mime});}
     connected() { return this.online; }
     group(id) { return this.catalog.groups.find(g => g.id === id); }
     async refresh(){await api.chatCall('refresh');const snapshot=await api.chatCall('snapshot');changed(snapshot);}

@@ -179,8 +179,9 @@
       if (op === 'profile') {
         if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
         Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status,bio:value.bio,photos:value.photos,appVersion:typeof value.appVersion==='string'&&value.appVersion.length<=32&&/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.appVersion)?value.appVersion:'' });
-        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['computer-info-v1','message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1','message-reactions-v1','stories-v1','message-age-v1']};
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['computer-info-v1','message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1','message-reactions-v1','stories-v1','story-media-v1','message-age-v1']};
       }
+      if(op==='story-media-read')return this.api.collaboration('story-media-read',{...value,session:s.id});
       if(op==='story-delete'){if(value?.sender!==s.peer.deviceId)throw new Error('Invalid story author.');await this.api.collaboration('delete-story',{session:s.id,id:value.id});await this.refresh();return true;}
       if(op==='story'){await this.api.collaboration('story',{session:s.id,story:value});await this.refresh();return true;}
       if(op==='desktop-card-preview'){if(value?.kind==='wallpaper'){await this.api.collaboration('peer-preview',{session:s.id,preview:value.preview,previewKind:'wallpaper'});await this.refresh();}return true;}
@@ -249,6 +250,12 @@
       const reaction={id:crypto.randomUUID(),message,conversation,sender:this.self.deviceId,emoji,revision:(row.reactions?.[this.self.deviceId]?.revision||0)+1,pending};
       await this.api.collaboration('react',{reaction,outgoing:true});await this.refresh();for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});return reaction;
     }
+    async storyMediaCache(id){const story=this.catalog.stories.find(v=>v.id===id);if(!story)throw Error('Story expired or unavailable.');await this.storyMedia(story);return true;}
+    async storyMedia(story){
+      if(!story.media)throw Error('Story media is unavailable.');
+      if(!await this.api.collaboration('story-media-status',{id:story.id})){const s=this.peer(story.sender);if(!s)throw Error('The story author is offline.');for(let offset=0;offset<story.media.size;){const chunk=await this.rpc(s,'story-media-read',{id:story.id,offset});if(!Number.isSafeInteger(chunk.length)||chunk.length<1||chunk.length>32768)throw Error('Invalid story media chunk.');await this.api.collaboration('story-media-write',{session:s.id,id:story.id,offset,bytes:chunk.bytes});offset+=chunk.length;}}
+      const parts=[];for(let offset=0;offset<story.media.size;){const chunk=await this.api.collaboration('story-media-local',{id:story.id,offset}),bytes=Uint8Array.from(atob(chunk.bytes),c=>c.charCodeAt(0));parts.push(bytes);offset+=chunk.length;}return new Blob(parts,{type:story.media.mime});
+    }
     async sendPreview(s){if(s.closed||!s.features?.includes('desktop-card-preview-v1')||s.previewBusy)return;s.previewBusy=true;try{const preview=await this.api.desktopCardPreview();if(preview&&preview!==s.lastPreview){await this.rpc(s,'desktop-card-preview',s.features.includes('wallpaper-card-v1')?{kind:'wallpaper',preview}:preview);s.lastPreview=preview;}}finally{s.previewBusy=false;}}
     async changeMessage(conversation,id,text,removed=false){
       await this.ready;const rows=await this.api.collaboration('history',{conversation,limit:100,search:''});let row=rows.find(m=>m.id===id);
@@ -271,7 +278,7 @@
         for(const group of this.catalog.groups)if(group.owner===this.self.deviceId&&group.members.some(m=>m.deviceId===s.peer.deviceId))await this.announceGroup(s,group);
         do {
         s.flushAgain = false;
-        if(s.features?.includes('stories-v1')){s.sentStoryDeletes||=new Set();for(const deletion of this.catalog.storyDeletes||[])if(deletion.sender===this.self.deviceId&&!s.sentStoryDeletes.has(deletion.id)){await this.rpc(s,'story-delete',deletion);s.sentStoryDeletes.add(deletion.id);}s.sentStories||=new Set();for(const story of this.catalog.stories||[])if(story.sender===this.self.deviceId&&!s.sentStories.has(story.id)){await this.rpc(s,'story',{...story,ageMs:Math.max(0,Date.now()-story.at)});s.sentStories.add(story.id);}}
+        if(s.features?.includes('stories-v1')){s.sentStoryDeletes||=new Set();for(const deletion of this.catalog.storyDeletes||[])if(deletion.sender===this.self.deviceId&&!s.sentStoryDeletes.has(deletion.id)){await this.rpc(s,'story-delete',deletion);s.sentStoryDeletes.add(deletion.id);}s.sentStories||=new Set();for(const story of this.catalog.stories||[])if(story.sender===this.self.deviceId&&!s.sentStories.has(story.id)&&(!story.media||s.features?.includes('story-media-v1'))){await this.rpc(s,'story',{...story,ageMs:Math.max(0,Date.now()-story.at)});s.sentStories.add(story.id);}}
         const messages = await this.api.collaboration('pending', { peer: s.peer.deviceId });
         for (const message of messages) {
           if (message.kind !== 'text') continue;

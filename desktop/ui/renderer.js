@@ -833,6 +833,7 @@ $('language').onchange = guarded(async () => { window.i18n.setLanguage(await api
   window.installClientSettings(config, async next => {ownProfile(); Object.assign(window.collaboration.self, next); if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type:'profile',name:next.name,status:next.status,avatar:next.avatar})); for (const s of window.collaboration.sessions.values()) if (s.channel?.readyState === 'open') window.collaboration.rpc(s, 'profile', window.collaboration.self).catch(e => status(e.message,true)); window.collaboration.notify(); });
   $('shared-cursor').checked = config.sharedCursor === true; $('show-host-cursor').checked = config.showHostCursor;
   $('unattended').checked = config.unattended === true; $('fixed-password').value = config.fixedPassword || ''; $('password-label').textContent = tr(config.fixedPassword ? 'Host password' : 'رمز موقت'); renderFavorites(config.favorites || []);
+  $('host-stop').innerHTML='<span class="mi pause" aria-hidden="true"></span>';$('host-stop').title=tr('Pause incoming connections');$('host-stop').setAttribute('aria-label',tr('Pause incoming connections'));
   $('server-url').value = config.endpoint; $('server-key').value = config.serverKey || ''; $('app-version').textContent = `Shatoot Connect ${config.version} · Windows x64`;
   const sources = await api.sources(); $('screen-select').replaceChildren();
   for (const source of sources) { const option = document.createElement('option'); option.value = source.id; option.textContent = source.name; $('screen-select').append(option); }
