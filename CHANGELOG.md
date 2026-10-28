@@ -13,6 +13,20 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.28.1 — 2026-10-28
+
+### Fixed
+
+- Live chat/catalog updates no longer replace workspace tab or story buttons between pointer down and pointer up. Their DOM nodes, focus and click targets stay stable while unread counts, avatars and captions update.
+- Tab panels switch immediately without waiting for an IPC round trip. Rapid selections ignore older pending results; redundant native selection work and duplicate capture-protection calls are removed.
+- The standalone Home profile button has a complete rounded border and spacing. New story has a visible translated label, sufficient width, and themed composer controls in both light and dark modes.
+- Closing an inactive remote tab preserves the selected remote tab.
+- Light mode uses a light tab strip, readable contact names on cards without wallpaper, and a white message input instead of leftover dark surfaces.
+
+### Validation
+
+- 36 physical tab clicks with 12 catalog renders during each held pointer, every settings page, the story composer and two simultaneous RTC tabs. Visual snapshots cover Home/Messages/Settings in English/Persian and light/dark themes; UI checks reject clipped story labels and missing tab labels.
+
 ## 0.28.0 — 2026-10-28
 
 ### Added

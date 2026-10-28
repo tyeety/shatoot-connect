@@ -6,8 +6,16 @@ module.exports=async({host,states,app,log})=>{
  await until(host,'window.shatootconnectReady&&!!window.shatootconnectDirect&&!!window.workspace');
  await run(host,"document.querySelector('#internet-enabled').checked=false;document.querySelector('#internet-enabled').dispatchEvent(new Event('change'));true");
  await run(host,"workspace.show('home')");await pause(150);fs.writeFileSync(path.join(__dirname,'../artifacts/workspace-home.png'),(await host.webContents.capturePage()).toPNG());
+
+ // Hold the pointer while live catalog renders run: replacing a button here loses the click.
+ const physical=async selector=>{const point=await run(host,`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);host.webContents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});await run(host,"for(let n=0;n<12;n++){messenger.render();workspace.render();}true");await pause(70);host.webContents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});};
+ for(let n=0;n<12;n++)for(const [index,id]of ['home','chat','settings'].entries()){await physical(`#app-tabs .workspace-tab:nth-child(${index+1}) [role=tab]`);await until(host,`document.body.dataset.workspace==='${id}'`);}
+ await run(host,"workspace.show('chat')");await physical('#new-story');await until(host,"document.querySelector('#story-composer')?.open");await run(host,"document.querySelector('#story-composer').close();workspace.show('home')");
+ if(!await run(host,"(()=>{const b=getComputedStyle(document.querySelector('#own-profile'));return b.borderTopLeftRadius==='9px'&&b.borderTopRightRadius==='9px'})()"))throw Error('Standalone profile has a clipped joined-button corner');
+ log('36 real tab clicks and story composer survived 12 catalog renders during each held pointer');
  await run(host,"workspace.show('settings')");
  if(!await run(host,"document.querySelector('#settings-dialog').open&&document.querySelector('#app-tabs').children.length===3"))throw Error('Fixed workspace tabs missing');
+ const settingsPages=await run(host,"[...document.querySelectorAll('.settings-tabs button')].map(b=>b.id)");for(const id of settingsPages){await physical('#'+id);await until(host,`document.querySelector('#${id}').getAttribute('aria-selected')==='true'&&document.querySelector('#'+document.querySelector('#${id}').getAttribute('aria-controls')).getClientRects().length>0`);}
  const peer='11111111-1111-4111-8111-111111111111',other='22222222-2222-4222-8222-222222222222';
  await run(host,`(async()=>{for(const [id,name]of ${JSON.stringify([[peer,'Contact X'],[other,'Contact Z']])})await api.collaboration('contact',{peer:{deviceId:id,name}});await collaboration.refresh();await workspace.show('chat');await messenger.select('p:${peer}');await api.openChat('${other}');return true})()`);
  await until(host,`window.chatSelected==='p:${other}'`);
@@ -23,6 +31,9 @@ module.exports=async({host,states,app,log})=>{
  if(!await run(host,"document.querySelector('#person-profile').open&&document.querySelector('.profile-bio').textContent==='Bio fixture'"))throw Error('Profile modal failed');
  await run(host,"document.querySelector('#person-profile').close();workspace.show('chat')");
  for(const language of ['en','fa']){await run(host,`i18n.setLanguage('${language}');workspace.show('chat')`);await pause(200);fs.writeFileSync(path.join(__dirname,`../artifacts/workspace-${language}.png`),(await host.webContents.capturePage()).toPNG());await run(host,"workspace.show('settings')");await pause(150);fs.writeFileSync(path.join(__dirname,`../artifacts/workspace-settings-${language}.png`),(await host.webContents.capturePage()).toPNG());}
+
+ for(const theme of ['dark','light'])for(const language of ['en','fa'])for(const section of ['home','chat','settings']){await run(host,`document.documentElement.dataset.theme='${theme}';i18n.setLanguage('${language}');workspace.show('${section}')`);await run(host,"document.fonts.ready.then(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))))");if(!await run(host,"[...document.querySelectorAll('#app-tabs [role=tab]')].every(b=>b.textContent.trim()&&b.getBoundingClientRect().height>=40)"))throw Error('An app tab lost its label or hit target');if(section==='chat'&&!await run(host,"(()=>{const b=document.querySelector('#new-story');return b.scrollWidth<=b.clientWidth+1&&b.getBoundingClientRect().width>65})()"))throw Error('New story label is clipped');if(theme==='light'&&!await run(host,"getComputedStyle(document.querySelector('#app-tabs')).backgroundColor==='rgb(241, 232, 248)'&&getComputedStyle(document.querySelector('#chat-text')).backgroundColor==='rgb(255, 255, 255)'&&getComputedStyle(document.querySelector('.chat-conversation b')).color==='rgb(48, 32, 57)'"))throw Error('Light workspace contrast regressed');fs.writeFileSync(path.join(__dirname,`../artifacts/review-${section}-${theme}-${language}.png`),(await host.webContents.capturePage()).toPNG());}
+ await run(host,"document.documentElement.dataset.theme='dark'");
  await run(host,"i18n.setLanguage('en');workspace.show('home')");
  const direct=await run(host,'window.shatootconnectDirect');
  await run(host,`api.openRemote({address:${JSON.stringify('127.0.0.1:'+direct.port)},password:${JSON.stringify(direct.password)}})`);
@@ -34,7 +45,9 @@ module.exports=async({host,states,app,log})=>{
  if(BrowserWindow.getAllWindows().filter(w=>w.webContents.getURL().includes('index.html')).length!==1)throw Error('Remote created another native app window');
  await run(host,"workspace.show('chat')");if(tab.win.isVisible())throw Error('Remote view remained above chat');
  await run(host,`workspace.show('${tab.win.id}')`);if(!tab.win.isVisible())throw Error('Remote tab did not restore');
+ await run(host,`workspace.show('${second.win.id}')`);
  await run(host,`api.workspace('close',{id:'${tab.win.id}'})`);
+ if(!await run(host,`document.body.dataset.workspace==='${second.win.id}'`))throw Error('Closing an inactive remote tab changed the selected tab');
  for(let n=0;n<100&&!tab.win.isDestroyed();n++)await pause(100);if(!tab.win.isDestroyed())throw Error('Closing tab did not close the RTC renderer');
  if(!process.argv.includes('--workspace-ui-only')&&!await run(second.win,"pc?.connectionState==='connected'"))throw Error('Closing one tab disconnected another');
  await run(host,`api.workspace('close',{id:'${second.win.id}'})`);
@@ -42,5 +55,5 @@ module.exports=async({host,states,app,log})=>{
  for(const state of states.values())if(!state.owner&&!state.viewerOwner)await run(state.win,"stopSession(true);true");
  await pause(1000);
  log('Single-window fixed tabs, exact contact navigation, message menu/pin, profile modal and real RTC tab lifecycle passed');
- console.log('SHATOOTCONNECT_WORKSPACE_SMOKE passed');app.quit();
+ console.log('SHATOOTCONNECT_WORKSPACE_SMOKE passed');if(!process.argv.includes('--workspace-review'))app.quit();
 };
