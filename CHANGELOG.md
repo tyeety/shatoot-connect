@@ -13,6 +13,21 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.30.0 — 2026-10-28
+
+### Added
+
+- Stories group by author, with a single avatar for all of each person's active stories. Locally seen stories persist in encrypted history; an author's ring fades after all active stories are viewed and becomes bright again when a new one arrives.
+- Portrait story viewer with segmented progress bars, avatar/name header, automatic sequential playback, tap/keyboard navigation, pause/resume, press-and-hold pause and sound controls. Text/photos have a reading interval; audio/video advance on their real playback end. Loading and autoplay-blocked media do not consume unseen time.
+
+### Changed
+
+- Opening an author begins at their first unseen story, plays their stories chronologically, then proceeds to the next author. Progress segments can be selected directly. Hidden-window playback pauses; closing or navigating stops the old player and cancels its timers.
+
+### Validation
+
+- Unit tests cover grouped ordering, first-unseen selection, new-story ring reset, expiry and persisted seen state. Workspace UI checks play three same-author stories automatically, verify pause/resume/progress and a single faded ring, and verify that a real WAV advances to the next story on playback end.
+
 ## 0.29.0 — 2026-10-28
 
 ### Added

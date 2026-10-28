@@ -20,6 +20,7 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
     if(op==='block'){const result=history.block(value.peer,value.blocked);catalogChanged(s);return result;}
     if(op==='emoji-usage')return history.emojiUsage(value.emoji);
     if(op==='list'){const list=history.list();catalogChanged(s);return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
+    if(op==='story-seen')return history.storySeen(value.id);
     if(op==='pin-message')return history.pinMessage(value.conversation,value.id);
     const mediaStore=()=>s.storyMedia||=(new(require('./story-media.cjs').StoryMedia)(path.join(app.getPath('userData'),'story-media')));
     if(op==='story-media-pick'){const chosen=await dialog.showOpenDialog(s.win,{properties:['openFile'],filters:[{name:'Video and music (32 MB)',extensions:['mp4','webm','mp3','m4a','ogg','wav']}]});if(chosen.canceled)return;const media=mediaStore();media.prune(history.list().stories);return media.import(chosen.filePaths[0]);}

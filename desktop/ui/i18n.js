@@ -149,6 +149,7 @@ window.i18n = (() => {
     ['شناسه آماده است. برای اتصال، شناسه و رمز را با فرد مورد اعتماد به اشتراک بگذارید.','Your ID is ready. Share your ID and password with someone you trust.'],['در حال تلاش مجدد برای اتصال به سرور…','Retrying the server connection…'],['دریافت شناسه از سرور…','Getting your ID from the server…'],['اتصال ورودی متوقف شد.','Incoming connections paused.'],['پیکربندی سرور با این نسخه سازگار نیست. سرور را به نسخهٔ جدید ارتقا دهید.','This server is incompatible. Upgrade the server to the current version.']
   ];
   entries.push(['تغییر وضعیت','Change status'],['استوری‌ها','Stories'],['استوری قبلی','Previous story'],['استوری بعدی','Next story'],['ویدیو یا موسیقی','Video or music'],['در حال دریافت رسانه…','Loading media…'],['سازندهٔ استوری آفلاین است.','The story author is offline.'],['استوری منقضی شده یا در دسترس نیست.','Story expired or unavailable.']);
+  entries.push(['پخش استوری','Play story'],['توقف استوری','Pause story'],['قطع یا وصل صدا','Toggle sound']);
   const fa = new Map(entries), en = new Map(entries.map(([a,b]) => [b,a]));
   function translate(value) {
     if (typeof value !== 'string') return value;
