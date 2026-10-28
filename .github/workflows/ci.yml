@@ -27,6 +27,7 @@ jobs:
       - run: npm run dist -- --publish never
       - run: npm run test:native-text
       - run: npm run test:ice-ui
+      - run: npm run test:workspace -- --workspace-ui-only
       - run: npm run test:connection-ui
       - run: npm run test:chat-ui
       - run: npm run test:crash-recorder

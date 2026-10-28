@@ -15,6 +15,42 @@ function fixture(t) {
   const store = new ChatStore(options); store.contact({ deviceId: peer, name: 'همکار' }, { type: 'lan', address: '192.168.1.10:8788' }); return { store, options, self, peer, other };
 }
 
+test('receiver-local message age compensates clock skew and preserves an offline queue delay across reload',t=>{
+ const {store,options,self,peer}=fixture(t),conversation=`p:${peer}`,now=Date.now();
+ const own=store.append({id:crypto.randomUUID(),sender:self,name:'Me',conversation,kind:'text',text:'first',at:now,pending:[peer]},true).message;
+ const reply=store.append({id:crypto.randomUUID(),sender:peer,name:'Peer',conversation,kind:'text',text:'reply',at:now-300000,ageMs:0}).message;
+ assert.ok(reply.at>=own.at);
+ const old=store.append({id:crypto.randomUUID(),sender:peer,name:'Peer',conversation,kind:'text',text:'offline',at:now+300000,ageMs:86400000}).message;
+ assert.ok(Math.abs(old.at-(now-86400000))<1000);const reload=new ChatStore(options);assert.equal(reload.history({conversation}).at(-1).originAgeMs,86400000);
+ store.append({...old,ageMs:0});assert.equal(store.history({conversation}).at(-1).at,old.at);
+});
+
+test('message pins persist and unread reactions clear only when that message is seen',t=>{
+ const {store,options,self,peer}=fixture(t),conversation=`p:${peer}`,id=crypto.randomUUID();store.append({id,sender:self,name:'Me',conversation,kind:'text',text:'pinned',at:Date.now(),pending:[peer]},true);store.pinMessage(conversation,id);
+ assert.equal(new ChatStore(options).list().messagePins[conversation],id);
+ store.react({id:crypto.randomUUID(),message:id,conversation,sender:peer,emoji:'👍',revision:1,pending:[]});assert.equal(Object.values(store.list().unseenReactions)[0].emoji,'👍');
+ store.seenMessages(conversation,[]);assert.equal(Object.keys(store.list().unseenReactions).length,1);store.seenMessages(conversation,[id]);assert.equal(Object.keys(store.list().unseenReactions).length,0);
+});
+
+test('stories enforce author, expiry, deduplication and deletion replay protection',t=>{
+ const {store,self,peer,other}=fixture(t),story={id:crypto.randomUUID(),sender:peer,text:'Story',image:'',ageMs:3600000};
+ assert.throws(()=>store.story(story,false,other));store.story(story,false,peer);assert.equal(store.list().stories.length,1);assert.ok(store.list().stories[0].expiresAt<Date.now()+24*3600000);assert.equal(store.story(story,false,peer),false);
+ assert.throws(()=>store.deleteStory(story.id,self));store.deleteStory(story.id,peer);assert.equal(store.list().stories.length,0);assert.equal(store.story(story,false,peer),false);
+ assert.equal(store.story({...story,id:crypto.randomUUID(),ageMs:86400000},false,peer),false);
+});
+
+test('muted unread counts stay on the contact but leave the notification total; blocking survives reload and rejects incoming content',t=>{
+ const {store,options,self,peer}=fixture(t),conversation='p:'+peer,make=()=>({id:crypto.randomUUID(),sender:peer,name:'Peer',conversation,kind:'text',text:'Incoming',at:Date.now()});
+ store.append(make());store.conversationState(conversation,{muted:true});assert.equal(store.unread()[conversation],1);assert.equal(Object.values(store.notificationUnread()).reduce((n,v)=>n+v,0),0);
+ store.block(peer,true);const reopened=new ChatStore(options);assert.equal(reopened.isBlocked(peer),true);assert.throws(()=>reopened.append(make()),/blocked/);assert.throws(()=>reopened.story({id:crypto.randomUUID(),sender:peer,text:'blocked',image:'',ageMs:0},false,peer),/blocked/);
+ reopened.block(peer,false);reopened.append(make());reopened.conversationState(conversation,{muted:false});assert.equal(reopened.notificationUnread()[conversation],2);
+});
+
+test('full bundled emoji inventory has unique qualified sequences and frequency counts persist',t=>{
+ const {store,options}=fixture(t),data=require('../desktop/ui/assets/emoji-data.js'),items=data.groups.flatMap(g=>g.items);assert.ok(items.length>3900);assert.equal(new Set(items.map(e=>e[0])).size,items.length);assert.ok(data.license.includes('COPYRIGHT'));assert.ok(items.some(([e])=>e==='1️⃣'));
+ store.emojiUsage('👍');store.emojiUsage('❤️');store.emojiUsage('👍');assert.equal(new ChatStore(options).emojiUsage()['👍'],2);assert.throws(()=>store.emojiUsage('not an emoji'));
+});
+
 test('scheduled messages persist, edit/cancel and atomically become a single durable outgoing message when due',t=>{
   const {store,options,self,peer}=fixture(t),conversation=`p:${peer}`,sendAt=Date.now()+60000;
   const scheduled=store.schedule({conversation,text:'Tomorrow at 8',sendAt});assert.equal(store.history({conversation}).length,0);

@@ -13,6 +13,28 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.28.0 — 2026-10-28
+
+### Added
+
+- Contact blocking rejects new chat/file grants and incoming content, closes active peer chat channels, persists across restarts and can be reversed. Muted conversations keep gray contact-only unread counts and do not contribute to app/taskbar totals.
+- Complete bundled Unicode Emoji 18.0 inventory (3,963 qualified sequences), symbol-only category tabs, search/paging and a persistent Most used tab shared by insertion/reactions.
+- One-window tabbed workspace: Home, Messages, Settings and independent remote-connection tabs backed by isolated WebContentsViews. Closing a remote tab releases its RTC/input state without interrupting another tab; hidden workers and transient notices remain utility surfaces.
+- Persistent local message pins, a clickable pinned-message banner and unseen-reaction emoji indicators next to contacts, cleared when the reacted-to message is viewed.
+- Profile Bio, up to four bounded profile photos and a larger gallery modal accessible from avatars and conversation headings. Profile pictures in self-replies use the actual self profile.
+- Text/image stories with a 24-hour lifetime, authenticated author deletion and replay protection. Updated contacts synchronize stories and deletions over their established peer channel; offline contacts can receive unexpired stories on reconnect.
+
+### Changed
+
+- A unified main-page connection card combines local credentials and remote connection controls, using a plain ID readout and icon-only Save. Chat-list system/version rows are hidden, avatars align to the top, and interface counts use singular/plural labels.
+- Message operations move into a click/context/keyboard menu, preserving text selection and native Copy behavior. Own profile/status controls form one joined group with a separator; message notifications keep the app theme and only unread-count badges use red.
+- Received messages use receiver-local time minus the sender-side queue duration; relays accumulate elapsed age rather than trusting a foreign wall clock. Old peers and existing historical timestamps remain compatible, and cannot be retroactively corrected without missing timing evidence.
+- Exact-target chat navigation reuses the Messages tab rather than reopening the previous conversation. Remote settings open the shared Settings tab; chat capture privacy follows the selected tab.
+
+### Validation
+
+- Unit coverage for clock skew/offline delay, persistent message pins, unread reactions and story authorization/expiry/deletion replay; real RTC chat tests cover story delivery/deletion and skew correction. A dedicated workspace test checks contact selection, profile/menu/pin behavior and two simultaneous RTC tabs in one native window.
+
 ## 0.27.0 — 2026-10-27
 
 ### Added

@@ -12,12 +12,17 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
       encrypt: text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows credential encryption is unavailable.'); return safeStorage.encryptString(text); },
       decrypt: bytes => safeStorage.decryptString(bytes) });
   }
-  function grant(s, id) { const value = s.chatGrants?.get(id); if (!value) throw new Error('Chat permission is required.'); return value; }
+  function grant(s, id) { const value = s.chatGrants?.get(id); if (!value) throw new Error('Chat permission is required.');if(store(s).isBlocked(value.peer.deviceId))throw new Error('Contact is blocked.');return value; }
   ipcMain.handle('collaboration', async (event, op, value = {}) => {
     const s = state(event), history = store(s);
     if(op==='system-info'){const g=grant(s,value.session);if(g.infoAt&&Date.now()-g.infoAt<1000)throw Error('Please wait before refreshing system details.');g.infoAt=Date.now();return systemInfo(s.identity.deviceId);}
     if(op==='system-info-result'){const g=grant(s,value.session);if(value.data?.deviceId!==g.peer.deviceId)throw Error('The computer identity changed.');return require('../shared/system-info.cjs').normalize(value.data);}
+    if(op==='block'){const result=history.block(value.peer,value.blocked);catalogChanged(s);return result;}
+    if(op==='emoji-usage')return history.emojiUsage(value.emoji);
     if(op==='list'){const list=history.list();catalogChanged(s);return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
+    if(op==='pin-message')return history.pinMessage(value.conversation,value.id);
+    if(op==='story')return history.story(value.story,value.outgoing===true,value.outgoing?undefined:grant(s,value.session).peer.deviceId);
+    if(op==='delete-story')return history.deleteStory(value.id,value.session?grant(s,value.session).peer.deviceId:s.identity.deviceId);
     if(op==='message')return history.history({conversation:value.conversation,limit:100}).find(m=>m.id===value.id)||history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation);
     if(op==='forward-sources'){const row=history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation&&!m.deleted);if(!row||row.kind!=='file')throw Error('This message is unavailable.');const token=Object.entries(history.load().attachments).find(([,attachment])=>attachment.message===row.id&&attachment.conversation===row.conversation)?.[0];if(!token)throw Error('This message is unavailable.');const files=history.files(token);if(!files.length)throw Error('This message is unavailable.');return files;}
     if(op==='history')return history.history(value).map(m=>({...m,displayName:decorateComputer({deviceId:m.sender,name:m.name}).displayName||m.name}));
@@ -82,6 +87,7 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
     if (op === 'open-attachment') { const files = history.files(value.token); if(value.index!==undefined&&(!Number.isInteger(value.index)||value.index<0||value.index>=files.length))throw new Error('This attachment is unavailable.');if(!fs.existsSync(files[value.index??0]))throw new Error('The file was moved or deleted.');const error=await shell.openPath(value.index!==undefined?files[value.index]:files.length===1?files[0]:path.dirname(files[0]));if(error)throw new Error(error);return; }
     if (op === 'approve' || op === 'grant') {
       if (!UUID.test(value.session) || !UUID.test(value.peer?.deviceId) || typeof value.peer.name !== 'string' || value.peer.name.length > 60) throw new Error('Invalid chat request.');
+      if(history.isBlocked(value.peer.deviceId)){if(op==='approve')return false;throw new Error('Contact is blocked.');}
       if (op === 'approve' && settings().requireChatApproval === true) {
         if (s.chatPrompt) return false;
         s.chatPrompt = true;
@@ -134,6 +140,7 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
     }
     if (op === 'read') return g.send.read(value);
     if (op === 'begin') {
+      if(history.isBlocked(value?.message?.sender))throw new Error('Contact is blocked.');
       if (!Array.isArray(value?.entries) || value.entries.length > 1000 || !value.message || value.message.kind !== 'file' || !UUID.test(value.message.id)) throw new Error('Invalid file offer.');
       if (g.receive.incoming || g.prompt) throw new Error('Another incoming file offer is awaiting approval.');
       const conversation = value.message.conversation;

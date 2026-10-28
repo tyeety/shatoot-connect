@@ -4,19 +4,30 @@ Windows remote desktop, nearby-computer discovery, private/group chat and file t
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)
 
-The chat window uses a blue speech-bubble icon and a role-first **Chats · Shatoot Connect** title, distinct from the main purple application icon. Both update buttons keep a dedicated download percentage visible in English and Persian, even when the status text is clipped in a narrow header.
+The app uses one native window: **Home**, **Messages**, **Settings**, then a separate tab for each remote connection. Switching tabs preserves live sessions; closing a remote tab disconnects only that session. Both update buttons keep a dedicated download percentage visible in English and Persian, even when the status text is clipped in a narrow header.
 
 **Settings > Application > Start with Windows in the tray** is on by default. Windows sign-in starts the app in the system tray without opening its main window. Turn it off to disable automatic startup; your choice is preserved across restarts and updates.
 
-## Version 0.19.0
+## Version 0.28.0
+
+Mute a conversation to keep its unread count in a gray badge on that contact while excluding it from total/taskbar counts and notifications. Block a contact to stop its messages/files and close its active chat channel; unblock from the same conversation header. Chat-list avatars align to the top and system/version data stays in the explicit details tool.
+
+The emoji picker bundles all 3,963 qualified sequences from Unicode Emoji 18.0, with symbol-only categories, search, paging and a persisted Most used category for both reactions and insertion. Actual glyph coverage depends on the installed emoji font. The derived data and full Unicode License V3 are bundled in `desktop/ui/assets/emoji-data.js`; source: [Unicode emoji data](https://www.unicode.org/Public/UCD/latest/emoji/emoji-test.txt).
+
+Message actions (Copy, Reply, Forward, React, Edit/Delete and Pin) live in a click/right-click menu; selected text remains copyable. A pinned message is saved locally per conversation and its banner jumps to the message. Unseen reactions to your own messages show their emoji beside the contact until the affected message is viewed. Notifications use the app palette; numeric unread badges remain red.
+
+Profile avatars and message/reply authors open a larger gallery modal. Settings > Profile and status saves a Bio and retains the latest four profile photos; adding a photo makes it the current avatar. Gallery images are bounded, shared over the established chat channel, and stored with encrypted contact history. Stories support text and/or a chosen image, last 24 hours, synchronize to connected contacts (including reconnects before expiry) and support author deletion. They require the updated clients; there is no always-online story host.
+
+New messages carry their elapsed sender-side queue time instead of relying on synchronized clocks. The receiver subtracts that duration from its own receipt time for display; relays preserve the original elapsed time. This handles an offline backlog without making yesterday’s queued messages look newly written. Legacy peers without this field retain their prior timestamp behavior; existing historic timestamps cannot be reconstructed reliably. A sender wall-clock change across an app restart can still affect the estimated queue duration.
+
 
 The main sidebar combines saved and recent computers into one list, sorted by the last successful connection. Saved systems have a muted outline star; unsaved recent systems have a clock. A saved system does not also appear as a recent row. Rename is an icon action; saving, credentials and existing shortcuts retain their identities.
 
 | Package | Purpose |
 | --- | --- |
-| `ShatootConnect-Setup-0.19.0-win-x64.exe` | Offline Windows installer |
-| `ShatootConnect-0.19.0-win-x64.exe` | Portable client |
-| `ShatootConnect-Server-0.19.0-win-x64.zip` | Coordinator, runtime and service manager |
+| `ShatootConnect-Setup-0.28.0-win-x64.exe` | Offline Windows installer |
+| `ShatootConnect-0.28.0-win-x64.exe` | Portable client |
+| `ShatootConnect-Server-0.28.0-win-x64.zip` | Coordinator, runtime and service manager |
 
 Builds go to `release/`. Binaries belong in GitHub Release assets, not source control. Update both clients and the coordinator for chat by Internet ID. Serverless LAN chat requires only updated clients. An exact application version match is not required: remote-desktop protocol 2 remains compatible with earlier protocol-2 coordinators; fixed/unattended access requires their fixed-password feature.
 
@@ -40,9 +51,9 @@ If version 0.19.3 or earlier reports **Update installer could not start (0)**, d
 Run the same installer to upgrade or repair. Settings, saved computers, encrypted credentials and history stay in the same Windows profile as the portable app. Opening the installed client refreshes app-created saved-computer shortcuts. Uninstall retains personal data and received files. DPAPI-protected data cannot simply be copied to another Windows account and decrypted. Hardware failures, power loss and antivirus intervention cannot be fully transactional; rerun Setup to repair a partial installation.
 
 ```powershell
-ShatootConnect-Setup-0.19.0-win-x64.exe /S /currentuser
-ShatootConnect-Setup-0.19.0-win-x64.exe /S /allusers
-ShatootConnect-Setup-0.19.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
+ShatootConnect-Setup-0.28.0-win-x64.exe /S /currentuser
+ShatootConnect-Setup-0.28.0-win-x64.exe /S /allusers
+ShatootConnect-Setup-0.28.0-win-x64.exe /S /currentuser /D=C:\Apps\Shatoot Connect
 ```
 
 For `/allusers`, use an elevated process. `/D=` must be the final argument, without quotes, following NSIS syntax. Silent installation does not launch the app. Custom exit codes: `0` success, `10` unsupported system, `11` unsafe folder, `12` write denied, `13` insufficient space, `14` payload integrity failure, `16` newer version installed, `17` registration failure, `1603` other installation/removal failure and `1618` application running. Diagnostics append to `%TEMP%\ShatootConnect-Setup.log` without passwords. Windows/NSIS can handle damaged-download, cancellation or elevation errors before custom checks. A trusted signing certificate is not included; unsigned builds can trigger SmartScreen.
@@ -91,7 +102,7 @@ The app keeps local crash minidumps in `%APPDATA%\shatoot-connect\crashes` with 
 
 Open **Chats and files**, enter an Internet ID/private LAN IP or click a nearby device's chat button. Known chats reconnect automatically on startup and periodically, preferring a discovered LAN route and falling back to the saved LAN/Internet route. Selecting a contact or sending text/files also connects without a separate Connect click. Offline text remains queued. Outgoing messages show a clock while awaiting delivery, one tick after delivery, two ticks after reading, or an error icon after a failed send attempt. Read receipts require both clients to support them and a focused chat with the message displayed. Group ticks require all intended recipients; receipts persist while offline and synchronize after reconnection. Ordinary messages connect without a recipient approval prompt by default. Settings > Chat and files can restore explicit chat approval. Chat needs no desktop password. Updated clients exchange their Windows wallpaper thumbnail on chat connection and when it changes; the last image is encrypted locally and remains on offline cards. Wallpaper sharing grants no screen capture, mouse, keyboard or clipboard permission. Older clients retain normal chat/file compatibility. ID chat requires both devices on the same updated coordinator; LAN chat needs no coordinator/STUN/TURN.
 
-A separate reliable WebRTC data connection carries messages/files. The coordinator sees invitation and ICE/SDP signaling, not their contents. Direct traffic bypasses the coordinator; optional TURN relays encrypted transport and consumes relay bandwidth. The messenger runs in a separate window. Closing either main/chat UI keeps the background engine and connected sessions alive in the tray; use the tray to restore the main UI. Quit completely in Settings > Application or the tray exits the process and ends sessions; Known chats reconnect automatically; there is no separate Connect/Disconnect chat action.
+A separate reliable WebRTC data connection carries messages/files. The coordinator sees invitation and ICE/SDP signaling, not their contents. Direct traffic bypasses the coordinator; optional TURN relays encrypted transport and consumes relay bandwidth. Home, Messages, Settings and remote connections share one tabbed application window. Closing the main window keeps the background engine and chat sessions alive in the tray; use the tray to restore it. Closing a remote tab ends that remote connection. Quit completely in Settings > Application or the tray exits the process and ends sessions; Known chats reconnect automatically; there is no separate Connect/Disconnect chat action.
 
 Use the emoji button inside the composer to insert emoji at the caret, or the smile beside a message to react. Clicking your reaction chip removes it; choosing another emoji changes it. Chips show counts and participant names on hover. Reactions are saved locally and relayed to offline group members; all participating clients need reaction support.
 
@@ -167,7 +178,7 @@ The app adopts Shatoot's purple palette (#7400a8 / #9f38d7) on dark surfaces wit
 
 Closing the main window hides it to the tray even without an open chat. **Quit completely** is available in Settings > Application and the tray. Packaged clients enable startup with Windows by default and open in the tray using the installed/portable executable; the Application tab can turn startup off. Source/smoke runs never modify real Windows startup. A signed-in desktop session is still required; this is not pre-login or post-logout desktop service support.
 
-All application notifications share a themed bottom-right stack and queue. Up to three are visible within the screen work area; visible host panels reserve space. Critical approvals take priority without losing queued informational notices. File completion appears directly in the selected chat when that chat tool has keyboard focus (including the separate chat window with main UI hidden); otherwise it produces a desktop notice. Passive notices have **Hide**, remain while the system is idle, and fade after about 6.5 seconds of activity; hovering pauses dismissal. Required-action prompts retain a bounded, safe-decline expiry. Native file/folder pickers, Windows elevation and installer dialogs remain OS dialogs. A host can hide its connection panel without disconnecting guests, then restore panels from Settings or the tray. Emergency disconnect remains available.
+All application notifications share a themed bottom-right stack and queue. Up to three are visible within the screen work area; visible host panels reserve space. Critical approvals take priority without losing queued informational notices. File completion appears directly in the selected chat when that chat tool has keyboard focus (including the Messages tab with main UI hidden); otherwise it produces a desktop notice. Passive notices have **Hide**, remain while the system is idle, and fade after about 6.5 seconds of activity; hovering pauses dismissal. Required-action prompts retain a bounded, safe-decline expiry. Native file/folder pickers, Windows elevation and installer dialogs remain OS dialogs. A host can hide its connection panel without disconnecting guests, then restore panels from Settings or the tray. Emergency disconnect remains available.
 
 Windowed viewing fits the received display aspect ratio and measured controls/chrome, caps size to the current work area, and preserves the ratio during manual resize. Ending viewing restores normal main-window dimensions. Fullscreen continues to apply to the video panel.
 

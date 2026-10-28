@@ -16,6 +16,16 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(viewer,`collaboration.connect({type:'lan',address:'127.0.0.1:${owner.directInfo.port}'}).then(()=>true)`);
   await until(()=>run(host,`collaboration.catalog.contacts.some(c=>c.deviceId==='${peer.identity.deviceId}'&&c.preview?.startsWith('data:image/jpeg;base64,'))`));
   if(owner.captureAllowed||peer.captureAllowed)throw Error('Chat thumbnail acquired remote screen/control permission');
+  await run(viewer,`(async()=>{const s=collaboration.peer('${owner.identity.deviceId}');await s.profileReady;const story={id:crypto.randomUUID(),sender:config.deviceId,text:'Story transport fixture',image:''};await api.collaboration('story',{outgoing:true,story});await collaboration.refresh();await collaboration.flush(s);return true})()`);
+  await until(()=>run(host,"collaboration.catalog.stories.some(s=>s.text==='Story transport fixture')"));
+  const storyId=owner.chatStore.list().stories.find(s=>s.text==='Story transport fixture').id;
+  await run(viewer,`(async()=>{await api.collaboration('delete-story',{id:'${storyId}'});await collaboration.refresh();await collaboration.flush(collaboration.peer('${owner.identity.deviceId}'));return true})()`);
+  await until(()=>owner.chatStore.list().stories.length===0);
+  await run(viewer,`(async()=>{const s=collaboration.peer('${owner.identity.deviceId}');const id=crypto.randomUUID();await api.collaboration('append',{outgoing:true,message:{id,conversation:'p:${owner.identity.deviceId}',sender:config.deviceId,name:config.name,kind:'text',text:'Clock-skew transport fixture',at:Date.now()+300000,pending:['${owner.identity.deviceId}']}});await collaboration.flush(s);return true})()`);
+  await until(()=>owner.chatStore.history({conversation}).some(m=>m.text==='Clock-skew transport fixture'));
+  const calibrated=owner.chatStore.history({conversation}).find(m=>m.text==='Clock-skew transport fixture');if(Math.abs(calibrated.at-Date.now())>5000)throw Error('Receiver adopted the sender clock offset');
+  log('Live RTC story publication/deletion and receiver-local clock-skew correction passed');
+
   await run(host,'api.openChat()');await until(()=>owner.chatWindow);const chat=owner.chatWindow;
   await until(()=>run(chat,'window.shatootconnectChatReady===true'));
   await run(host,"api.appearance('light')");await until(()=>run(chat,"document.documentElement.dataset.theme==='light'"));
@@ -27,10 +37,10 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
     await run(host,`api.appearance('${theme}')`);
     const red=notices.toast(host,'Message color fixture',{kind:'message'});await until(()=>[...notices.entries.values()].some(r=>r.data.message==='Message color fixture'));
     const item=[...notices.entries.values()].find(r=>r.data.message==='Message color fixture');await until(()=>run(item.win,`document.documentElement.dataset.theme==='${theme}'&&document.body.dataset.ready==='true'`));
-    if(!await run(item.win,"getComputedStyle(document.body).backgroundColor==='rgb(139, 24, 48)'&&getComputedStyle(document.querySelector('.notice p')).color==='rgb(255, 255, 255)'"))throw Error('New message notification was not red in '+theme);
+    if(!await run(item.win,"getComputedStyle(document.body).backgroundColor!=='rgb(139, 24, 48)'"))throw Error('Message notification retained the red background in '+theme);
     item.finish(0);await red;
   }
-  log('Open chat theme updates live; message notifications are red in light and dark themes');
+  log('Open chat theme updates live; message notifications retain the app palette in light and dark themes');
   if(!chat.isContentProtected())throw Error('Chat is not excluded from remote screen capture');
   await run(host,"document.querySelector('#show-chat-in-remote').checked=true;document.querySelector('#show-chat-in-remote').dispatchEvent(new Event('change'));true");
   await until(()=>!chat.isContentProtected());
@@ -101,9 +111,9 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await until(()=>owner.chatStore.history({conversation:'g:'+forwardGroup}).some(m=>m.forwardedFrom?.id===receiptMessage));await until(()=>run(chat,"!document.querySelector('#chat-forward-dialog')"));
   log('Live profile status propagated; default avatars, last-message date/time, reply quotes and forwarded text survived real private RTC');
   await run(chat,"document.querySelector('#chat-text').value='abCD';document.querySelector('#chat-text').setSelectionRange(2,2);document.querySelector('#chat-emoji').click();true");
-  await until(()=>run(chat,"document.querySelector('#chat-emoji-dialog')?.open&&document.querySelectorAll('.emoji-choice').length>20"));
+  await until(()=>run(chat,"document.querySelector('#chat-emoji-dialog')?.open&&document.querySelectorAll('.emoji-category').length===10"));
   fs.writeFileSync(path.join(artifacts,'chat-emoji-picker.png'),(await chat.webContents.capturePage()).toPNG());
-  await run(chat,"document.querySelector('.emoji-choice').click();true");await until(()=>run(chat,"document.querySelector('#chat-text').value==='ab😀CD'&&!document.querySelector('#chat-emoji-dialog').open"));
+  await run(chat,"(()=>{const search=document.querySelector('#chat-emoji-dialog input[type=search]');search.value='😀';search.dispatchEvent(new Event('input'));[...document.querySelectorAll('.emoji-choice')].find(b=>b.textContent==='😀').click();return true})()");await until(()=>run(chat,"document.querySelector('#chat-text').value==='ab😀CD'&&!document.querySelector('#chat-emoji-dialog').open"));
   await run(chat,"document.querySelector('#chat-text').value='Scheduled UI fixture';document.querySelector('#chat-schedule').click();true");await until(()=>run(chat,"document.querySelector('#chat-schedule-dialog')?.open"));
   if(!await run(chat,"(()=>{const date=new Date(document.querySelector('#scheduled-time').value),expected=new Date();expected.setDate(expected.getDate()+1);expected.setHours(8,0,0,0);return date.getTime()===expected.getTime()})()"))throw Error('Default scheduled time did not use the local calendar/time');
   if(!await run(chat,"![...document.querySelectorAll('#chat-schedule-dialog button')].some(b=>b.textContent.includes('Tomorrow'))"))throw Error('Removed scheduling preset is still visible');
@@ -117,11 +127,11 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   const due=owner.chatStore.schedule({conversation,text:'Scheduled automatic delivery',sendAt:Date.now()+1000});
   await until(()=>peer.chatStore.history({conversation:`p:${owner.identity.deviceId}`}).some(m=>m.id===due.id));if(owner.chatStore.scheduled(conversation).length)throw Error('Due schedule was not atomically removed');
   await run(chat,`document.querySelector('[data-message-id="${receiptMessage}"] .sentiment_satisfied').closest('button').click();true`);await until(()=>run(chat,"document.querySelector('#chat-emoji-dialog')?.open"));
-  await run(chat,"document.querySelector('.emoji-choice').click();true");await until(()=>peer.chatStore.history({conversation:`p:${owner.identity.deviceId}`}).find(m=>m.id===receiptMessage)?.reactions?.[owner.identity.deviceId]?.emoji==='😀');
+  await run(chat,"(()=>{const search=document.querySelector('#chat-emoji-dialog input[type=search]');search.value='😀';search.dispatchEvent(new Event('input'));[...document.querySelectorAll('.emoji-choice')].find(b=>b.textContent==='😀').click();return true})()");await until(()=>peer.chatStore.history({conversation:`p:${owner.identity.deviceId}`}).find(m=>m.id===receiptMessage)?.reactions?.[owner.identity.deviceId]?.emoji==='😀');
   await until(()=>run(chat,`document.querySelector('[data-message-id="${receiptMessage}"] .reaction-chip')?.textContent==='😀 1'`));
   await run(chat,`document.querySelector('[data-message-id="${receiptMessage}"] .reaction-chip').click();true`);await until(()=>peer.chatStore.history({conversation:`p:${owner.identity.deviceId}`}).find(m=>m.id===receiptMessage)?.reactions?.[owner.identity.deviceId]?.emoji==='');
   log('Emoji insertion at caret, local tomorrow 08:00, schedule edit/cancel/automatic send and reaction add/remove round-trip passed');
-  const click=async selector=>{chat.show();chat.focus();const point=await run(chat,`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);chat.webContents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});await pause(250);chat.webContents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});};
+  const click=async selector=>{chat.show();chat.focus();await run(chat,`(()=>{const target=document.querySelector(${JSON.stringify(selector)});if(target?.closest('.chat-message-actions'))target.closest('.chat-message').querySelector('p').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:200,clientY:200}));return true})()`);const point=await run(chat,`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);chat.webContents.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});await pause(250);chat.webContents.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});};
   const alternate=await run(chat,"collaboration.createGroup('Pointer switching fixture',[]).then(g=>g.id)");await until(()=>run(chat,`!!document.querySelector('[data-conversation="g:${alternate}"]')`));
   const originalConversationState=owner.chatStore.conversationState,selectionCalls=[];owner.chatStore.conversationState=function(id,value){if(value?.selected)selectionCalls.push(id);return originalConversationState.call(this,id,value);};
   await click(`[data-conversation="g:${alternate}"] .chat-conversation`);await until(()=>run(chat,`window.chatSelected==='g:${alternate}'`));
@@ -254,7 +264,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"document.querySelector('#message-edit-text').value='Edited across RTC';document.querySelector('#message-edit-form').requestSubmit();true");
   await until(()=>peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId&&m.text==='Edited across RTC'));
   await until(()=>run(chat,"[...document.querySelectorAll('.chat-message p')].some(e=>e.textContent==='Edited across RTC')"));
-  if(!await run(chat,"(()=>{const row=[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC'),date=row.querySelector('small').getBoundingClientRect(),copy=row.querySelector('.content_copy').getBoundingClientRect();return copy.left>date.right&&Math.abs((copy.top+copy.bottom-date.top-date.bottom)/2)<3})()"))throw Error('Copy is not opposite the message timestamp');
+  if(!await run(chat,"(()=>{const row=[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC'),date=row.querySelector('small').getBoundingClientRect(),copy=row.querySelector('.content_copy').getBoundingClientRect();return !!row.querySelector('.chat-message-actions')&&getComputedStyle(row.querySelector('.chat-message-actions')).display==='none'})()"))throw Error('Message operations were not moved into the menu');
   await run(chat,"[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC').querySelector('.content_copy').parentElement.click();true");
   await until(()=>owner.copiedText==='Edited across RTC');
   await run(chat,"[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC').querySelector('.delete').parentElement.click();true");
@@ -326,6 +336,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   clear();viewer.show();viewer.focus();await until(()=>!chat.isFocused());
   await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Muted incoming text').then(()=>true)`);await send('muted-incoming-file.txt');await pause(300);
   if([...notices.entries.values()].some(r=>r.owner===host)||!owner.chatStore.unread()[conversation])throw Error('Muted chat notified or lost its unread badge');
+  if(owner.chatStore.notificationUnread()[conversation])throw Error('Muted conversation leaked into the notification total');await until(()=>run(chat,"!!document.querySelector('.unread-badge.muted-unread')"));
   chat.show();chat.focus();await run(chat,"document.querySelector('#chat-mute').click();true");await until(()=>!owner.chatStore.isMuted(conversation));await until(()=>run(chat,"!document.querySelector('.conversation-muted')"));
   log('Mute icon and preference suppress background text/file notifications while preserving received Downloads bytes, history and unread counts');
   clear();chat.show();chat.focus();await run(chat,"document.querySelector('#chat-search').value='non-matching search';document.querySelector('#chat-text').focus();true");await until(()=>chat.isFocused()&&owner.chatViews?.get(chat.webContents.id)?.active);
@@ -379,5 +390,11 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   log('Private nicknames preserve the remote published name; cached desktop preview/avatar remain offline; narrow English/Persian chat layout and content-sized notices passed');
   if(owner.captureAllowed||owner.control)throw new Error('Chat file handling granted desktop control');
   log('Different selected chat still notifies; passive notice fades; per-chat settings work in the separate English/Persian chat window');
+  await run(owner.chatWindow,"document.querySelector('#chat-block').click();true");await until(()=>owner.chatStore.isBlocked(peer.identity.deviceId));
+  await until(()=>run(host,`!collaboration.peer('${peer.identity.deviceId}')`));
+  await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Blocked message fixture').then(()=>true)`);await pause(1000);
+  if(owner.chatStore.history({conversation}).some(m=>m.text==='Blocked message fixture'))throw Error('Blocked sender wrote to receiver history');
+  await run(owner.chatWindow,"document.querySelector('#chat-block').click();true");await until(()=>!owner.chatStore.isBlocked(peer.identity.deviceId));
+  log('Muted unread badges are gray and excluded from total; blocked contact closes its channel and cannot append messages');
   console.log('SHATOOTCONNECT_CHAT_NOTIFICATION_SMOKE passed');app.quit();
 };

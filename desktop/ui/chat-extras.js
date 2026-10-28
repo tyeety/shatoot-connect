@@ -1,6 +1,6 @@
 'use strict';
 window.installChatExtras=({api,engine,self,field,selected,button,run,tr,error,reload})=>{
-  const categories=[['Smileys','😀 😃 😄 😁 😆 😅 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😋 😎 🤔 🤨 😐 🙄 😴 😔 😢 😭 😤 😡 🤯 😱 🥳 🤗 🤭 🫡 🫠'],['Gestures','👍 👎 👏 🙌 🤝 🙏 💪 👌 ✌️ 🤞 👋 🫶 🤟 ☝️ ✋ 👀 🧠'],['Hearts and symbols','❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💔 ❤️‍🔥 💯 ✅ ❌ ❓ ❗ 💬 🔥 ⭐ ✨ 🎉 🎊 🎁 🏆 🚀 💡 📌 📅 ⏰'],['Objects and nature','🐱 🐶 🐼 🦊 🦋 🌸 🌹 🌻 🌳 🌍 ☀️ 🌙 🌈 ⚡ ❄️ ☕ 🍕 🍰 🍎 🍇 🍓 💻 📱 📷 🎵 🎮 ⚽ 🏠 🚗 ✈️']];
+  const emojiData=window.shatootEmojiData,categories=[{name:'Most used',symbol:'⭐',items:[]},...emojiData.groups.map((g,i)=>({...g,symbol:['😀','🧑','🐻','🍔','🚗','⚽','💡','🔣','🏳️'][i]}))];let emojiGroup=0,emojiLimit=160;
   let picker,scheduler,scheduleConversation='',editingId='',draft='',listKey='',pickerTarget=null;
   const emojiButton=button('Emoji',()=>openPicker(null),'sentiment_satisfied');emojiButton.id='chat-emoji';
   const scheduleButton=button('Schedule message',()=>openSchedule(),'schedule_send');scheduleButton.id='chat-schedule';
@@ -11,14 +11,16 @@ window.installChatExtras=({api,engine,self,field,selected,button,run,tr,error,re
   function openPicker(row){
     if(!selected())return;pickerTarget=row?{conversation:row.conversation,id:row.id,emoji:row.reactions?.[self.deviceId]?.emoji||''}:null;
     if(!picker){picker=dialog('chat-emoji-dialog','Emoji');const tabs=document.createElement('div');tabs.className='emoji-tabs';const grid=document.createElement('div');grid.className='emoji-grid';grid.setAttribute('role','group');
-      for(const [name,emojis]of categories)tabs.append(button(name,()=>{for(const control of tabs.children)control.setAttribute('aria-pressed',String(control.textContent===tr(name)));grid.replaceChildren(...emojis.split(' ').map(emoji=>{const b=document.createElement('button');b.type='button';b.className='emoji-choice';b.textContent=emoji;b.setAttribute('aria-label',emoji);b.onclick=run(()=>chooseEmoji(emoji));return b;}));}));picker.append(tabs,grid);
+      const search=document.createElement('input');search.type='search';search.placeholder=tr('Search emoji');search.dir='auto';search.oninput=()=>{emojiLimit=160;renderEmoji();};picker.append(search);picker.emojiSearch=search;picker.emojiGrid=grid;picker.emojiTabs=tabs;
+      for(const [index,category]of categories.entries()){const control=button(category.name,()=>{emojiGroup=index;emojiLimit=160;renderEmoji();});control.className='emoji-category';control.textContent=category.symbol;control.setAttribute('role','tab');tabs.append(control);}picker.append(tabs,grid);
     }
-    picker.querySelector('h2').textContent=tr(row?'React to message':'Emoji');picker.showModal();picker.querySelector('.emoji-tabs button').click();
+    picker.querySelector('h2').textContent=tr(row?'React to message':'Emoji');picker.showModal();emojiGroup=0;emojiLimit=160;picker.emojiSearch.value='';renderEmoji();
   }
+  function renderEmoji(){const search=picker.emojiSearch.value.trim().toLowerCase(),used=engine.catalog.emojiUsage||{},all=categories.slice(1).flatMap(g=>g.items);const frequent=Object.entries(used).sort((a,b)=>b[1]-a[1]).map(([emoji])=>all.find(e=>e[0]===emoji)).filter(Boolean);let items=search?all.filter(([emoji,name])=>name.includes(search)||emoji.includes(search)):emojiGroup?categories[emojiGroup].items:frequent.length?frequent:all.filter(([emoji])=>['😀','👍','❤️','😂','🙏','🎉'].includes(emoji));picker.emojiGrid.replaceChildren(...items.slice(0,emojiLimit).map(([emoji,name])=>{const b=document.createElement('button');b.type='button';b.className='emoji-choice';b.textContent=emoji;b.title=name;b.setAttribute('aria-label',name);b.onclick=run(()=>chooseEmoji(emoji));return b;}));for(const [i,b]of [...picker.emojiTabs.children].entries())b.setAttribute('aria-selected',String(i===emojiGroup));if(items.length>emojiLimit){const more=button('Load more',()=>{emojiLimit+=160;renderEmoji();});more.className='emoji-more';picker.emojiGrid.append(more);}}
   async function chooseEmoji(emoji){
     if(pickerTarget){await engine.react(pickerTarget.conversation,pickerTarget.id,pickerTarget.emoji===emoji?'':emoji);await reload();}
     else {if(field.disabled)return;const start=field.selectionStart,end=field.selectionEnd;if(field.value.length-end+start+emoji.length>field.maxLength)return;picker.close();field.focus();field.setSelectionRange(start,end);document.execCommand('insertText',false,emoji);}
-    picker.close();field.focus();
+    try{engine.catalog.emojiUsage=await api.collaboration('emoji-usage',{emoji});}catch{}picker.close();field.focus();
   }
   function setEditor(item){editingId=item?.id||'';scheduler.querySelector('textarea').value=item?.text||draft;scheduler.querySelector('[type=datetime-local]').value=localTime(item?.sendAt||tomorrow());scheduler.querySelector('[type=submit]').textContent=tr(item?'Save changes':'Schedule message');scheduler.querySelector('.schedule-error').textContent='';}
   function openSchedule(){

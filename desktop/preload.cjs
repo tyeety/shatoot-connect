@@ -1,5 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('shatootconnect', {
+  workspace:(operation,value)=>ipcRenderer.invoke('workspace',operation,value),
+  onWorkspace:callback=>ipcRenderer.on('workspace',(_event,value)=>callback(value)),
   computerCard:(operation,value)=>ipcRenderer.invoke('computer-card',operation,value),
   desktopViewing:value=>ipcRenderer.send('desktop-viewing',value),
   onComputerCards:callback=>ipcRenderer.on('computer-cards-changed',()=>callback()),

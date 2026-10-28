@@ -73,11 +73,10 @@ async function main() {
         const ack=JSON.parse(fs.readFileSync(path.join(profile,'updates',updateToken+'.ready.json'),'utf8'));
         const launcher=JSON.parse(fs.readFileSync(path.join(profile,'launcher/launcher.json'),'utf8'));
         if(ack.token!==updateToken||ack.version!==version||path.resolve(ack.executable)!==executable||launcher.target!==executable||launcher.version!==version||!fs.existsSync(path.join(profile,'launcher/launcher.ico')))throw new Error('Packaged update-readiness acknowledgement/stable launcher did not match the final executable.');
-        let chatTarget;await until(async()=>{const pages=await fetch(`http://127.0.0.1:${port}/json/list`).then(r=>r.json());chatTarget=pages.find(p=>p.url.includes('/ui/index.html?chat=1'));return !!chatTarget;});
-        const chatSocket=new WebSocket(chatTarget.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{chatSocket.once('open',resolve);chatSocket.once('error',reject);});
-        try{let id=0;const chatReady=()=>new Promise((resolve,reject)=>{chatSocket.once('message',data=>{const reply=JSON.parse(data);if(reply.error||reply.result?.exceptionDetails)reject(Error('Packaged chat renderer failed'));else resolve(reply.result?.result?.value===true);});chatSocket.send(JSON.stringify({id:++id,method:'Runtime.evaluate',params:{expression:'window.shatootconnectChatReady===true',returnByValue:true}}));});await until(chatReady);}
-        finally{chatSocket.close();}
-        console.log('Final portable confirmed update readiness, registered its stable launcher/icon and opened chat from the taskbar launch command.');
+        await until(()=>evaluate("!!window.workspace&&document.querySelector('#messenger-dialog').open&&document.body.dataset.workspace==='chat'"));
+        const chatPages=await fetch(`http://127.0.0.1:${port}/json/list`).then(r=>r.json());if(chatPages.some(p=>p.url.includes('?chat=1')))throw Error('Packaged chat created a second native window.');
+        await evaluate("workspace.show('home')");
+        console.log('Final portable confirmed readiness and opened the messages tab in its single window.');
         for (const language of ['en', 'fa']) {
           const errors = await evaluate(`(async()=>{
             window.i18n.setLanguage('${language}'); document.body.classList.add('viewing'); document.querySelector('#session-panel').hidden=false;
@@ -106,7 +105,7 @@ async function main() {
         await until(()=>{if(closer.launchError)throw closer.launchError;return child.exitCode!==null;},30000);
         await until(()=>closer.exitCode!==null,30000);
         if(closer.exitCode!==0)throw Error('Packaged upgrade-close command failed');
-        console.log('Visible main, chat and connecting remote windows shut down through the installer upgrade command.');
+        console.log('Main window and remote tabs shut down through the installer upgrade command.');
         if (child.exitCode !== 0) throw new Error('Packaged app did not exit cleanly.');
       } finally { socket.close(); }
     }

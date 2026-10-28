@@ -10,7 +10,3 @@ body{height:auto}.notice{height:auto;max-height:calc(100vh - 2px);overflow:auto;
 body{border-color:#76518b99;border-radius:9px;background:#24192ef5}.notice{padding:10px 12px;gap:5px;min-width:min(240px,calc(100vw - 2px))}.notice header{gap:7px}.notice header img{width:19px;height:19px}.notice header b{font-size:11px;color:#cbb9d5}.notice h2{font-size:13px;font-weight:600;line-height:1.5}.notice p{font-size:12px;line-height:1.45}#notice-actions{gap:5px}.notice button{font-size:11px;padding:3px 8px;min-height:25px}
 
 .notice h2{font-size:13px!important}.notice button{font-size:11px!important}.notice header b{font-weight:500}
-
-html[data-theme] body[data-kind=message]:has(>.notice){background:#8b1830;border-color:#ec7087;color:#fff}
-html[data-theme] body[data-kind=message] .notice :is(h2,p,header b){color:#fff}
-html[data-theme] body[data-kind=message] .notice button{background:#681124;border-color:#ee8b9d;color:#fff}

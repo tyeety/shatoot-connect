@@ -8,7 +8,7 @@
       api.onChatReceipts?.(()=>this.sendReceipts());
     }
     async ensurePeer(id,background=false) {
-      const current=this.peer(id);if(current)return current;
+      if(this.catalog.blocked?.[id])throw new Error('Contact is blocked.');const current=this.peer(id);if(current)return current;
       const nearby=this.nearby?.find(p=>p.deviceId===id),saved=this.catalog.contacts.find(p=>p.deviceId===id);
       const route=nearby?.endpoints?.length?{type:'lan',address:nearby.endpoints[0]}:saved?.route;
       if(!route)throw new Error('This contact is offline.');
@@ -17,7 +17,7 @@
     async reconnectKnown(){
       if(this.reconnecting)return;this.reconnecting=true;this.retries||=new Map();
       try{await this.ready;for(const peer of this.catalog.contacts){
-        if(this.peer(peer.deviceId)||this.sessions.size>=14||this.connectAttempts.size>=2)continue;
+        if(this.catalog.blocked?.[peer.deviceId]||this.peer(peer.deviceId)||this.sessions.size>=14||this.connectAttempts.size>=2)continue;
         const nearby=this.nearby?.some(p=>p.deviceId===peer.deviceId);
         if((!nearby&&!peer.route)||(nearby&&this.self.deviceId>peer.deviceId)||Date.now()<(this.retries.get(peer.deviceId)||0))continue;
         if(!nearby&&peer.route?.type==='id'&&!this.internet().registered)continue;
@@ -67,7 +67,7 @@
           if(s.closed||attempt.cancelled)return;let message; try { message = JSON.parse(event.data); } catch { return; }
           if (message.type === 'ready') {
             if (!message.features?.includes('collaboration-v1') || !message.direct) { this.close(s, 'Update Shatoot Connect on the other computer.'); return; }
-            route.send({ type: 'collab-request', session: id, target: 'direct', ...this.self });
+            route.send({ type: 'collab-request', session: id, target: 'direct', deviceId:this.self.deviceId,name:this.self.name,avatar:this.self.avatar,status:this.self.status });
           } else if (message.type?.startsWith('collab-')) this.receive(message, route);
         };
         return attempt.wait(s.promise);
@@ -85,6 +85,7 @@
     receive(message, route) {
       if (!message || !UUID.test(message.session)) return;
       if (message.type === 'collab-invite') {
+        if(this.catalog.blocked?.[message.peer?.deviceId]){route.send({type:'collab-reject',session:message.session});return;}
         if (this.sessions.has(message.session) || !UUID.test(message.peer?.deviceId) || message.peer.deviceId === this.self.deviceId) return;
         if (this.peer(message.peer.deviceId) || this.sessions.size >= 16) { route.send({ type: 'collab-reject', session: message.session }); return; }
         const outgoing=[...this.sessions.values()].find(s=>s.outgoingAttempt&&s.peer?.deviceId===message.peer.deviceId&&!s.closed);
@@ -164,7 +165,7 @@
     }
     normalize(s, message) {
       if (!message || !UUID.test(message.sender) || !UUID.test(message.id) || typeof message.conversation !== 'string') throw new Error('Invalid chat message.');
-      const result = { id: message.id, conversation: message.conversation, sender: message.sender, name: '', replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,kind: message.kind, text: message.deleted?'Message deleted':message.text, at: message.at };
+      const result = { id: message.id, conversation: message.conversation, sender: message.sender, name: '', ageMs:message.ageMs,replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,kind: message.kind, text: message.deleted?'Message deleted':message.text, at: message.at };
       if (message.conversation === `p:${this.self.deviceId}` && message.sender === s.peer.deviceId) { result.conversation = `p:${s.peer.deviceId}`; result.name = s.peer.name; return result; }
       const group = this.group(message.conversation.slice(2));
       if (!message.conversation.startsWith('g:') || !group || !group.members.some(m => m.deviceId === message.sender) || (group.owner !== s.peer.deviceId && (group.owner !== this.self.deviceId || message.sender !== s.peer.deviceId))) throw new Error('Invalid group message.');
@@ -177,9 +178,11 @@
       if(op==='system-info')return this.api.collaboration('system-info',{session:s.id});
       if (op === 'profile') {
         if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
-        Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status,appVersion:typeof value.appVersion==='string'&&value.appVersion.length<=32&&/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.appVersion)?value.appVersion:'' });
-        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['computer-info-v1','message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1','message-reactions-v1']};
+        Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status,bio:value.bio,photos:value.photos,appVersion:typeof value.appVersion==='string'&&value.appVersion.length<=32&&/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.appVersion)?value.appVersion:'' });
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['computer-info-v1','message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1','message-reactions-v1','stories-v1','message-age-v1']};
       }
+      if(op==='story-delete'){if(value?.sender!==s.peer.deviceId)throw new Error('Invalid story author.');await this.api.collaboration('delete-story',{session:s.id,id:value.id});await this.refresh();return true;}
+      if(op==='story'){await this.api.collaboration('story',{session:s.id,story:value});await this.refresh();return true;}
       if(op==='desktop-card-preview'){if(value?.kind==='wallpaper'){await this.api.collaboration('peer-preview',{session:s.id,preview:value.preview,previewKind:'wallpaper'});await this.refresh();}return true;}
       if(op==='message-receipt'){
         const receipt={...value,conversation:value?.conversation===`p:${this.self.deviceId}`?`p:${s.peer.deviceId}`:value?.conversation};
@@ -268,6 +271,7 @@
         for(const group of this.catalog.groups)if(group.owner===this.self.deviceId&&group.members.some(m=>m.deviceId===s.peer.deviceId))await this.announceGroup(s,group);
         do {
         s.flushAgain = false;
+        if(s.features?.includes('stories-v1')){s.sentStoryDeletes||=new Set();for(const deletion of this.catalog.storyDeletes||[])if(deletion.sender===this.self.deviceId&&!s.sentStoryDeletes.has(deletion.id)){await this.rpc(s,'story-delete',deletion);s.sentStoryDeletes.add(deletion.id);}s.sentStories||=new Set();for(const story of this.catalog.stories||[])if(story.sender===this.self.deviceId&&!s.sentStories.has(story.id)){await this.rpc(s,'story',{...story,ageMs:Math.max(0,Date.now()-story.at)});s.sentStories.add(story.id);}}
         const messages = await this.api.collaboration('pending', { peer: s.peer.deviceId });
         for (const message of messages) {
           if (message.kind !== 'text') continue;
@@ -287,7 +291,7 @@
         } while (s.flushAgain && !s.closed);
       } finally { s.flushing = false; }
     }
-    wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind, text: message.deleted?'Message deleted':message.text,replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,at: message.at }; }
+    wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind,ageMs:message.ageReceivedAt!==undefined?Math.max(0,(message.originAgeMs||0)+Date.now()-message.ageReceivedAt):Math.max(0,Date.now()-message.at), text: message.deleted?'Message deleted':message.text,replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,at: message.at }; }
     async createGroup(name, members, existingId,details={}) {
       if (typeof name !== 'string' || !name.trim() || name.length > 60) throw new Error('Enter a group name of up to 60 characters.');
       if(!Array.isArray(members))throw new Error('Invalid group membership.');

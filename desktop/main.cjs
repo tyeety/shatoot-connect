@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell, Tray, Menu, powerMonitor, nativeTheme } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, desktopCapturer, session, screen, dialog, globalShortcut, clipboard, safeStorage, shell, Tray, Menu, powerMonitor, nativeTheme } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
@@ -44,6 +44,7 @@ function publishInputControl(){
 setInterval(()=>{inputControl.tick();publishInputControl();},150).unref();
 let localServer, tray, quitting = false;
 let settingsCache;
+const compactProfile=()=>{const {photos,...value}=profile();return value;};
 const profile = () => ({ ...require('../shared/profile.cjs').profile(settings().profile),appVersion:app.getVersion(), name: settings().profile?.name || require('node:os').hostname() });
 const sessionPreviews=new (require('./session-preview.cjs').SessionPreviews)({file:path.join(app.getPath('userData'),'session-previews.json'),encrypt:text=>safeStorage.encryptString(text),decrypt:bytes=>safeStorage.decryptString(bytes)});
 const update = new (require('./updater.cjs').Updater)({ version: app.getVersion(), directory: path.join(app.getPath('userData'), 'updates'), portable: !!process.env.PORTABLE_EXECUTABLE_FILE, request: require('./updater.cjs').electronResponse,
@@ -132,7 +133,7 @@ function release(s) {
 }
 function syncCursorExclusions(s) {
   if (!s.helper?.stdin.writable) return;
-  const handles = [...[...states.values()].flatMap(other=>[other.overlay,other.guestCursor,...(settings().showChatInRemote?[]:[other.chatWindow])]),...[...notices.entries.values()].map(record=>record.win)].filter(win=>win && !win.isDestroyed()).map(win=>{const h=win.getNativeWindowHandle();return (h.length===8?h.readBigUInt64LE():BigInt(h.readUInt32LE())).toString(16);});
+  const handles = [...(typeof workspaceRoot!=='undefined'&&workspaceRoot?.workspaceActive==='chat'&&!settings().showChatInRemote?[workspaceRoot]:[]),...[...states.values()].flatMap(other=>[other.overlay,other.guestCursor,...(settings().showChatInRemote?[]:[other.chatWindow])]),...[...notices.entries.values()].map(record=>record.win)].filter(win=>win && !win.isDestroyed()).map(win=>{const h=win.getNativeWindowHandle();return (h.length===8?h.readBigUInt64LE():BigInt(h.readUInt32LE())).toString(16);});
   s.helper.stdin.write(JSON.stringify({type:'exclude-windows',handles})+'\n');
 }
 function hideGuestCursor(s) {
@@ -218,7 +219,7 @@ function chatFilesReceived(s,record,files){
     win.webContents.send('chat-files-received',{conversation:record.conversation,id:record.id});
   }
   publishUnread(s);
-  if(!reading&&!s.chatStore?.isMuted(record.conversation)){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{kind:'message',detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
+  if(!reading&&!s.chatStore?.isMuted(record.conversation)&&!s.chatStore?.isBlocked(record.sender)){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{kind:'message',detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
 }
 const systemInfo=require('./system-info.cjs').createSystemInfo({app,screen});
 const collaborationHost = require('./collaboration-host.cjs').installCollaboration({systemInfo, ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, previewImage:file=>readProfilePhoto(file,true),catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
@@ -232,7 +233,7 @@ function unreadIcon(total){
   const scale=3,left=Math.floor((32-(label.length*4-1)*scale)/2);for(let n=0;n<label.length;n++)for(let y=0;y<5;y++)for(let x=0;x<3;x++)if(digits[Number(label[n])][y*3+x]==='1')for(let dy=0;dy<scale;dy++)for(let dx=0;dx<scale;dx++){const i=((8+y*scale+dy)*32+left+(n*4+x)*scale+dx)*4;pixels.fill(255,i,i+4);}
   return require('electron').nativeImage.createFromBitmap(pixels,{width:32,height:32});
 }
-function publishUnread(s){const unread=s.chatStore?.unread()||{},total=Object.values(unread).reduce((a,b)=>a+b,0);for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed()){win.webContents.send('chat-unread',{unread,total});if(process.platform==='win32')win.setOverlayIcon(total?unreadIcon(total):null,total?`${total} unread messages`:'');}}
+function publishUnread(s){const unread=s.chatStore?.unread()||{},total=Object.values(s.chatStore?.notificationUnread()||{}).reduce((a,b)=>a+b,0);for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed()){win.webContents.send('chat-unread',{unread,total,unseenReactions:{...s.chatStore?.load().unseenReactions}});if(process.platform==='win32')win.setOverlayIcon(total?unreadIcon(total):null,total?`${total} unread messages`:'');}}
 ipcMain.handle('chat-view',(e,value)=>{const s=state(e);if(!value||typeof value.active!=='boolean'||typeof value.conversation!=='string'||(value.conversation&&!/^[pg]:[a-f0-9-]{36}$/i.test(value.conversation)))throw new Error('Invalid chat view.');s.chatViews||=new Map();if(value.atBottom!==undefined&&typeof value.atBottom!=='boolean'||value.readThrough!==undefined&&(!Number.isSafeInteger(value.readThrough)||value.readThrough<0))throw new Error('Invalid chat position.');s.chatViews.set(e.sender.id,{conversation:value.conversation,active:value.active,atBottom:value.atBottom});const viewWindow=BrowserWindow.fromWebContents(e.sender);if(value.active&&value.readThrough>0&&s.chatStore&&viewWindow?.isFocused()&&viewWindow.isVisible()&&!viewWindow.isMinimized()){s.chatStore.conversationState(value.conversation,{read:true,readThrough:value.readThrough});s.chatStore.seenMessages(value.conversation,value.seen||[]);if(!s.win.isDestroyed())s.win.webContents.send('chat-receipts');}publishUnread(s);});
 ipcMain.handle('notify',(e,message)=>{const s=state(e);if(typeof message!=='string'||message.length>1000)throw new Error('Invalid notification.');if(smoke)return;notices.toast(s.win,message,{onActivate:()=>showMain(s)});});
 function configureStartup(enabled){
@@ -241,9 +242,9 @@ function configureStartup(enabled){
 }
 function refreshTray(s){s=s?.viewerOwner||s;if(!tray||!s)return;const fa=s.language==='fa';tray.setContextMenu(Menu.buildFromTemplate([{label:'Shatoot Connect',click:()=>showMain(s)},{label:fa?'چت و فایل‌ها':'Chats and files',click:()=>openChat(s)},{label:fa?'نمایش پنل اتصال‌ها':'Show connection panels',click:()=>{for(const state of states.values())if(state.captureAllowed){state.overlayHidden=false;showHostOverlay(state);}}},{type:'separator'},{label:fa?'خروج کامل':'Quit completely',click:()=>{quitting=true;app.quit();}}]));}
 ipcMain.handle('lifecycle',(e,operation,value)=>{const s=state(e);if(operation==='startup'){if(typeof value!=='boolean')throw new Error('Invalid startup setting.');return configureStartup(value);}if(operation==='quit'){quitting=true;setTimeout(()=>app.quit(),50);return;}if(operation==='panels'){for(const state of states.values())if(state.captureAllowed){state.overlayHidden=false;showHostOverlay(state);}return;}throw new Error('Invalid application setting.');});
-ipcMain.handle('remote-window-closed',e=>{const s=state(e);if(e.sender!==s.win.webContents)throw new Error('Invalid remote window.');s.outgoingDesktop=false;if(s.viewerOwner)s.win.destroy();else s.win.hide();});
+ipcMain.handle('remote-window-closed',e=>{const s=state(e,false);if(!s)return;if(e.sender!==s.win.webContents)throw new Error('Invalid remote window.');s.outgoingDesktop=false;if(s.win.workspaceTab){s.win.destroy();return;}if(s.viewerOwner)s.win.destroy();else s.win.hide();});
 ipcMain.handle('fit-video',(e,size)=>{
-  const s=state(e);if(s.owner)return;
+  const s=state(e,false);if(!s||s.owner||s.win.workspaceTab)return;
   if(!size){if(s.videoSizing&&!s.win.isMaximized()&&!s.win.isFullScreen())saveSettings({remoteWindowSize:{width:s.win.getContentBounds().width,height:s.win.getContentBounds().height}});s.videoSizing=null;s.win.setAspectRatio(0);if(s.normalBounds){s.win.setMinimumSize(Math.min(1000,s.normalBounds.width),Math.min(720,s.normalBounds.height));s.win.setBounds(s.normalBounds);s.normalBounds=null;if(s.normalMaximized)s.win.maximize();s.normalMaximized=false;}return;}
   if(!Number.isFinite(size.width)||!Number.isFinite(size.height)||size.width<1||size.height<1||size.width>32768||size.height>32768)return;
   if(s.videoSizing?.sourceWidth!==size.width||s.videoSizing?.sourceHeight!==size.height)diagnostic('viewer-video',{width:size.width,height:size.height});
@@ -295,6 +296,7 @@ ipcMain.handle('app-ready',e=>{
 function showMain(s) { if (s.win.isDestroyed()) return; s.win.show(); if (s.win.isMinimized()) s.win.restore(); s.win.focus(); }
 function chatWindowTitle(s){return s.language==='fa'?'گفتگوها · Shatoot Connect':'Chats · Shatoot Connect';}
 function openChat(s,target) {
+  if(workspaceRoot&&s.win===workspaceRoot){if(target)s.chatTarget=target;workspaceSelect('chat');showMain(s);s.win.webContents.send('workspace',{section:'chat',target});return;}
   if(target){s.chatTarget=target;s.win.webContents.send('chat-target',target);}
   if (s.chatWindow && !s.chatWindow.isDestroyed()) { s.chatWindow.show();if(s.chatWindow.isMinimized())s.chatWindow.restore();s.chatWindow.focus();if(target)s.chatWindow.webContents.send('chat-target',target);return; }
   const win = new BrowserWindow({ width: 1000, height: 720, minWidth: 720, minHeight: 540, backgroundColor:settings().theme==='light'?'#faf6ff':'#160d20', title:chatWindowTitle(s), icon:path.join(__dirname,'ui/assets/chat-icon.png'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
@@ -306,7 +308,7 @@ function openChat(s,target) {
   const chatContentsId=win.webContents.id;win.on('closed', () => { s.chatViews?.delete(chatContentsId);s.voicePermissions?.delete(chatContentsId);s.chatWindow = null;for(const host of states.values())syncCursorExclusions(host); });
   win.loadFile(path.join(__dirname, 'ui/index.html'), { query: { chat: '1' } });
 }
-ipcMain.handle('chat-target',e=>{const s=state(e);if(s.chatWindow?.webContents!==e.sender)throw new Error('Invalid chat target request.');const target=s.chatTarget;s.chatTarget=null;return target;});
+ipcMain.handle('chat-target',e=>{const s=state(e);if(s.chatWindow?.webContents!==e.sender&&!(workspaceRoot===s.win&&s.win.webContents===e.sender))throw new Error('Invalid chat target request.');const target=s.chatTarget;s.chatTarget=null;return target;});
 function openUpdateSettings(s){showMain(s);s.win.webContents.send('settings-open','updates');}
 ipcMain.handle('chat-open', (e,deviceId) => {const s=state(e),owner=s.viewerOwner||s;if(deviceId!==undefined){if(!require('./discovery.cjs').UUID.test(deviceId)||!owner.chatStore?.load().contacts[deviceId])throw Error('Invalid computer.');return openChat(owner,{conversation:'p:'+deviceId});}return openChat(owner);});
 ipcMain.handle('remote-open',(e,value)=>{
@@ -357,10 +359,10 @@ let firewallCheck,firewallCheckedAt=0;
 ipcMain.handle('firewall-status',async(e,force=false)=>{const s=state(e);if(smoke)return s.firewallStatus||{needsRepair:false};if(!firewallCheck||force===true||Date.now()-firewallCheckedAt>30000){firewallCheckedAt=Date.now();firewallCheck=require('./firewall.cjs').firewallStatus(app.getPath('exe'));}return firewallCheck;});
 ipcMain.handle('firewall-repair',async e=>{const s=state(e);if(smoke){s.firewallStatus={needsRepair:false};return true;}try{return await require('./firewall.cjs').repairFirewall(app.getPath('exe'));}finally{firewallCheck=null;}});
 ipcMain.handle('chat-preferences', (e, value) => { state(e); if (!value || typeof value.autoAcceptFiles !== 'boolean' || typeof value.requireChatApproval !== 'boolean') throw new Error('Invalid chat settings.'); saveSettings({ autoAcceptFiles: value.autoAcceptFiles, requireChatApproval: value.requireChatApproval }); return value; });
-ipcMain.handle('chat-remote-visible',(e,value)=>{state(e);if(typeof value!=='boolean')throw new Error('Invalid chat settings.');saveSettings({showChatInRemote:value});for(const s of states.values()){if(s.chatWindow&&!s.chatWindow.isDestroyed())s.chatWindow.setContentProtection(!value);syncCursorExclusions(s);}return value;});
-function announceProfile(next){for(const s of states.values()){if(!s.owner&&!s.win.isDestroyed())s.win.webContents.send('profile-changed',next);if(s.discovery){s.discovery.name=next.name;s.discovery.status=next.status;s.discovery.refresh();}if(s.directSocket?.readyState===1)s.directSocket.send(JSON.stringify({type:'profile',...next}));}}
+ipcMain.handle('chat-remote-visible',(e,value)=>{state(e);if(typeof value!=='boolean')throw new Error('Invalid chat settings.');if(workspaceRoot?.workspaceActive==='chat')workspaceRoot.setContentProtection(!value);saveSettings({showChatInRemote:value});for(const s of states.values()){if(s.chatWindow&&!s.chatWindow.isDestroyed())s.chatWindow.setContentProtection(!value);syncCursorExclusions(s);}return value;});
+function announceProfile(next){for(const s of states.values()){if(!s.owner&&!s.win.isDestroyed())s.win.webContents.send('profile-changed',next);if(s.discovery){s.discovery.name=next.name;s.discovery.status=next.status;s.discovery.refresh();}if(s.directSocket?.readyState===1)s.directSocket.send(JSON.stringify({type:'profile',name:next.name,avatar:next.avatar,status:next.status}));}}
 ipcMain.handle('profile-status',(e,status)=>{state(e);if(!require('../shared/profile.cjs').STATUSES.includes(status))throw Error('Invalid profile status.');const next={...profile(),status};saveSettings({profile:next});announceProfile(next);return next;});
-ipcMain.handle('profile-save', (e, value) => { const s = state(e); if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !require('../shared/profile.cjs').STATUSES.includes(value.status)) throw new Error('Enter a profile name and status.'); const next = { ...profile(), name: value.name.trim(), status: value.status }; saveSettings({ profile: next }); if (s.discovery) { s.discovery.name = next.name; s.discovery.status = next.status; s.discovery.refresh(); } if(s.directSocket?.readyState===1)s.directSocket.send(JSON.stringify({type:'profile',...next})); return next; });
+ipcMain.handle('profile-save', (e, value) => { const s = state(e); if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 60 || !require('../shared/profile.cjs').STATUSES.includes(value.status)) throw new Error('Enter a profile name and status.'); const next = { ...profile(), name: value.name.trim(), status: value.status,bio:typeof value.bio==='string'?value.bio.slice(0,500):profile().bio||'' }; saveSettings({ profile: next }); if (s.discovery) { s.discovery.name = next.name; s.discovery.status = next.status; s.discovery.refresh(); } if(s.directSocket?.readyState===1)s.directSocket.send(JSON.stringify({type:'profile',name:next.name,avatar:next.avatar,status:next.status})); return next; });
 async function readProfilePhoto(file,background=false) {
   const mime={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'}[path.extname(file).toLowerCase()];
   if(!mime)throw new Error('This photo could not be opened.');
@@ -380,7 +382,7 @@ async function readProfilePhoto(file,background=false) {
         const image=await createImageBitmap(new Blob([bytes],{type:${JSON.stringify(mime)}}));
         try{
           const background=${JSON.stringify(background)},side=Math.min(image.width,image.height),canvas=document.createElement('canvas');
-          if(background){canvas.width=960;canvas.height=Math.max(1,Math.round(image.height*960/image.width));if(canvas.height>540){canvas.width=Math.max(1,Math.round(image.width*540/image.height));canvas.height=540;}canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);const data=canvas.toDataURL('image/jpeg',.8);if(data.length>300000)throw new Error('Choose a smaller background.');return data;}
+          if(background){canvas.width=background==='portrait'?384:960;canvas.height=Math.max(1,Math.round(image.height*canvas.width/image.width));if(canvas.height>540){canvas.width=Math.max(1,Math.round(image.width*540/image.height));canvas.height=540;}canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);let data=canvas.toDataURL('image/jpeg',.8);if(background==='portrait'&&data.length>100000)data=canvas.toDataURL('image/jpeg',.55);if(data.length>(background==='portrait'?100000:300000))throw new Error('Choose a smaller background.');return data;}
           for(const size of [64,48]){
             canvas.width=canvas.height=size;const context=canvas.getContext('2d');context.imageSmoothingQuality='high';
             context.drawImage(image,(image.width-side)/2,(image.height-side)/2,side,side,0,0,size,size);
@@ -395,12 +397,12 @@ async function readProfilePhoto(file,background=false) {
 }
 ipcMain.handle('group-photo',async(e,id,background=false)=>{const s=state(e);if(id&&s.chatStore?.load().groups[id]?.owner!==s.identity.deviceId)throw new Error('Only the group owner can edit the group.');const chosen=await dialog.showOpenDialog(s.chatWindow||s.win,{properties:['openFile'],filters:[{name:'Images',extensions:['png','jpg','jpeg','webp','gif','avif']}]});return chosen.canceled?undefined:readProfilePhoto(chosen.filePaths[0],background===true);});
 ipcMain.handle('profile-photo', async (e, remove) => {
-  const s=state(e);let avatar='';
+  const s=state(e);let avatar='',photo='';
   if(!remove){
     const chosen=await dialog.showOpenDialog(s.win,{filters:[{name:'Profile photo',extensions:['png','jpg','jpeg','avif','webp','gif']}],properties:['openFile']});
-    if(chosen.canceled)return profile();avatar=await readProfilePhoto(chosen.filePaths[0]);
+    if(chosen.canceled)return profile();avatar=await readProfilePhoto(chosen.filePaths[0]);photo=await readProfilePhoto(chosen.filePaths[0],'portrait');
   }
-  const next={...profile(),avatar};saveSettings({profile:next});announceProfile(next);return next;
+  const previous=profile(),photos=remove?[]:[photo||avatar,...(previous.photos||[previous.avatar]).filter(Boolean)].filter((p,i,a)=>a.indexOf(p)===i).slice(0,4);const next={...previous,avatar,photos};saveSettings({profile:next});announceProfile(next);return next;
 });
 ipcMain.handle('lan-open', (event, id, endpoint) => {
   const s = state(event);
@@ -419,9 +421,15 @@ ipcMain.handle('lan-open', (event, id, endpoint) => {
 ipcMain.on('lan-send', (event, id, value) => { const ws = state(event,false)?.lanSockets?.get(id); if (ws?.readyState === 1 && typeof value === 'string' && Buffer.byteLength(value) <= 110000) ws.send(value); });
 ipcMain.on('lan-close', (event, id) => state(event,false)?.lanSockets?.get(id)?.close());
 ipcMain.handle('discovery', event => { const s = state(event); s.discovery?.refresh(); return decorateDiscovery(s.discovery?.snapshot() || { peers: [], interfaces: [], errors: ['LAN listener is not ready.'] }); });
+let workspaceRoot;const workspaceTabs=new Map();
+function workspacePublish(){if(workspaceRoot&&!workspaceRoot.isDestroyed())workspaceRoot.webContents.send('workspace',{tabs:[...workspaceTabs.values()].map(t=>({id:t.id,title:t.title})),active:workspaceRoot.workspaceActive||'home'});}
+function workspaceSelect(id){if(!workspaceRoot||workspaceRoot.isDestroyed())return;for(const tab of workspaceTabs.values()){const active=tab.id===id;tab.view.setVisible(active);if(!active)tab.win.emit('blur');}workspaceRoot.workspaceActive=id;workspaceRoot.setContentProtection(id==='chat'&&settings().showChatInRemote!==true);for(const s of states.values())syncCursorExclusions(s);workspacePublish();}
+function workspaceBounds(){if(!workspaceRoot||workspaceRoot.isDestroyed())return;const [width,height]=workspaceRoot.getContentSize();for(const tab of workspaceTabs.values())tab.view.setBounds({x:0,y:48,width,height:Math.max(1,height-48)});}
+ipcMain.handle('workspace',(e,operation,value={})=>{const current=state(e);if(!workspaceRoot||current.owner)throw new Error('Workspace unavailable.');if(operation==='select'){if(!['home','chat','settings'].includes(value.id)&&!workspaceTabs.has(value.id))throw new Error('Unknown tab.');workspaceSelect(value.id);workspaceRoot.setContentProtection(value.id==='chat'&&settings().showChatInRemote!==true);return;}if(operation==='close'){const tab=workspaceTabs.get(value.id);if(!tab)throw new Error('Unknown tab.');tab.win.close();return;}if(operation==='open'){if(current.win!==workspaceRoot)throw new Error('Open connections from the main tab.');if(workspaceTabs.size>=12)throw new Error('Connection tab limit reached.');if(typeof value.address!=='string'||value.address.length>300||typeof value.password!=='string'||value.password.length>128)throw new Error('Invalid connection.');const win=createWindow({viewerOwner:current,target:value});return win.id;}throw new Error('Invalid workspace operation.');});
+function createRemoteTab(connection){const parent=workspaceRoot;if(!parent||parent.isDestroyed())throw new Error('Workspace unavailable.');const view=new WebContentsView({webPreferences:{preload:path.join(__dirname,'preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});const id=crypto.randomUUID();const win=new(require('./tab-workspace.cjs').RemoteTab)({parent,view,id,select:workspaceSelect,remove:id=>{if(!parent.isDestroyed())parent.contentView.removeChildView(view);workspaceTabs.delete(id);workspaceSelect('home');}});workspaceTabs.set(id,{id,title:connection.name||connection.address,view,win});parent.contentView.addChildView(view);workspaceBounds();workspaceSelect(id);return win;}
 function createWindow({viewerOwner,target}={}) {
   const work = screen.getPrimaryDisplay().workArea;
-  const win = new BrowserWindow({ width: Math.min(1100, work.width - 16), height: Math.min(720, work.height - 16), minWidth: Math.min(1000, work.width - 16), minHeight: Math.min(720, work.height - 16),
+  const win = viewerOwner&&workspaceRoot?createRemoteTab(target):new BrowserWindow({ width: Math.min(1100, work.width - 16), height: Math.min(720, work.height - 16), minWidth: Math.min(1000, work.width - 16), minHeight: Math.min(720, work.height - 16),
     backgroundColor: settings().theme==='light'?'#faf6ff':'#160d20', title: 'Shatoot Connect', icon:path.join(__dirname,'ui/assets/app-icon.png'), show:!viewerOwner&&(smoke || !process.argv.includes('--start-in-tray')), autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
   const s = { win,viewerOwner,remoteTarget:target,identity:viewerOwner?.identity, source: null, control: false, helper: null, captureAllowed: false, language: 'en' };
@@ -444,6 +452,7 @@ function createWindow({viewerOwner,target}={}) {
   win.on('hide',()=>diagnostic('window-hidden',{type:s.outgoingDesktop?'viewer':'main'}));
   win.on('unresponsive',()=>diagnostic('window-unresponsive',{type:s.outgoingDesktop?'viewer':'main'}));
   win.on('closed', () => { for (const child of states.values()) {if (child.owner === s) closeExtraHost(child);else if(child.viewerOwner===s)child.win.destroy();} s.chatWindow?.destroy(); collaborationHost.close(s); s.discovery?.close(); for (const ws of s.lanSockets?.values() || []) ws.terminate(); hideHostOverlay(s); release(s); s.keyboardMonitor?.stdin.end(); s.helper?.stdin.end(); s.directSocket?.close(); s.directService?.close(); states.delete(contentsId); });
+  if(!viewerOwner&&!workspaceRoot&&(!smoke||process.argv.includes('--workspace-smoke'))){workspaceRoot=win;win.workspaceActive='home';win.on('resize',workspaceBounds);win.on('closed',()=>{for(const tab of [...workspaceTabs.values()])tab.win.destroy();workspaceRoot=null;});}
   win.loadFile(path.join(__dirname, 'ui/index.html'),viewerOwner?{query:{viewer:'1'}}:{});
   return win;
 }
@@ -460,7 +469,7 @@ ipcMain.handle('config', e => {
   s.sharedCursor = saved.inputModeVersion===1?saved.sharedCursor!==false:true; s.showGuestCursor = saved.showGuestCursor !== false;
   if(saved.inputModeVersion!==1)saveSettings({inputModeVersion:1,sharedCursor:true});
   const pendingFavorite = s.viewerOwner?null:launchFavorite;if(!s.viewerOwner)launchFavorite=null;
-  return { viewerWindow:!!s.viewerOwner,remoteTarget:s.remoteTarget,remotePreview:s.remoteTarget?(sessionPreviews.get(preferences.destination(s.remoteTarget),s.remoteTarget.deviceId)||{image:s.remoteTarget.preview||'',kind:'wallpaper'}):null,autoQuality:saved.autoQuality!==false,allowPrivacyScreen:saved.allowPrivacyScreen===true,privacyScreenSupported:privacySupported(),showChatInRemote:saved.showChatInRemote===true,theme:saved.theme==='light'?'light':'dark',rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles !== false, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
+  return {workspace:!!workspaceRoot,viewerWindow:!!s.viewerOwner,remoteTarget:s.remoteTarget,remotePreview:s.remoteTarget?(sessionPreviews.get(preferences.destination(s.remoteTarget),s.remoteTarget.deviceId)||{image:s.remoteTarget.preview||'',kind:'wallpaper'}):null,autoQuality:saved.autoQuality!==false,allowPrivacyScreen:saved.allowPrivacyScreen===true,privacyScreenSupported:privacySupported(),showChatInRemote:saved.showChatInRemote===true,theme:saved.theme==='light'?'light':'dark',rememberPasswords: saved.rememberPasswords !== false, startupEnabled: saved.startupEnabled !== false, smoke, endpoint, serverKey, fixedPassword: preferences.fixedPassword(), unattended: preferences.unattended(), internetEnabled: saved.internetEnabled !== false, showGuestCursor: saved.showGuestCursor !== false, showHostCursor: saved.showHostCursor !== false, autoAcceptFiles: saved.autoAcceptFiles !== false, requireChatApproval: saved.requireChatApproval === true, qualityProfile: PROFILES[saved.qualityProfile] ? saved.qualityProfile : 'speed', favorites: preferences.list(), pendingFavorite, sharedCursor: s.sharedCursor, language: s.language, ...s.identity, ...profile(), profiles: PROFILES, version: app.getVersion() };
 });
 ipcMain.handle('internet-enabled', (e,value)=>{state(e);if(typeof value!=='boolean')throw new Error('Invalid connection mode.');saveSettings({internetEnabled:value});return value;});
 ipcMain.handle('show-guest-cursor', (e,value)=>{const s=state(e);if(typeof value!=='boolean')throw new Error('Invalid cursor setting.');saveSettings({showGuestCursor:value});s.showGuestCursor=value;if(!value)hideGuestCursor(s);return value;});
@@ -482,7 +491,7 @@ ipcMain.handle('unattended', (e, enabled) => { const s = state(e); if (s.capture
 ipcMain.handle('fixed-password', (e, value) => {
   const s = state(e); if (s.captureAllowed) throw new Error('End the current session before changing the password.');
   const password = preferences.setFixedPassword(value);
-  if (s.directSocket?.readyState === 1) s.directSocket.send(JSON.stringify({ type: 'register', hostToken: s.directHostToken, ...s.identity, ...profile(), multiDesktop: true, password }));
+  if (s.directSocket?.readyState === 1) s.directSocket.send(JSON.stringify({ type: 'register', hostToken: s.directHostToken, ...s.identity, ...compactProfile(), multiDesktop: true, password }));
   return password;
 });
 ipcMain.handle('favorite-save', (e, value) => { state(e); preferences.save(value);computerChanged(); return preferences.list(); });
@@ -556,7 +565,7 @@ ipcMain.handle('direct-listener', async e => {
     const hostToken = crypto.randomBytes(32).toString('hex');
     s.directHostToken = hostToken;
     const presence = () => ({ service: 'ShatootConnect', version: 1,appVersion:app.getVersion(),kind: 'presence', deviceId: s.identity.deviceId, name: profile().name, status: profile().status, port: service.server.address()?.port, capabilities: ['desktop', 'chat', 'files', 'groups'] });
-    const service = createSignalingServer({ port: smoke ? 0 : 8788, directHostToken: hostToken, presence, deviceProfile: async () => ({ ...profile(), deviceId: s.identity.deviceId,preview:await wallpaperPreview().catch(()=>''),previewKind:'wallpaper' }) });
+    const service = createSignalingServer({ port: smoke ? 0 : 8788, directHostToken: hostToken, presence, deviceProfile: async () => ({ ...compactProfile(), deviceId: s.identity.deviceId,preview:await wallpaperPreview().catch(()=>''),previewKind:'wallpaper' }) });
     try {
       await service.listen(); s.directService = service;
       const port = service.server.address().port;
@@ -568,7 +577,7 @@ ipcMain.handle('direct-listener', async e => {
         ws.on('message', raw => {
           const message = JSON.parse(raw);
           smokeLog(`direct host received ${message.type}`);
-          if (message.type === 'ready') ws.send(JSON.stringify({ type: 'register', hostToken, deviceId: s.identity.deviceId, deviceSecret: s.identity.deviceSecret, ...profile(), multiDesktop: true, password: preferences.fixedPassword() }));
+          if (message.type === 'ready') ws.send(JSON.stringify({ type: 'register', hostToken, deviceId: s.identity.deviceId, deviceSecret: s.identity.deviceSecret, ...compactProfile(), multiDesktop: true, password: preferences.fixedPassword() }));
           else if (message.type === 'registered') { clearTimeout(timer); if (s.directInfo) { s.directInfo.password = message.password; s.directInfo.fixedPassword = message.fixedPassword; if (!s.win.isDestroyed()) s.win.webContents.send('direct-info', s.directInfo); } resolve(message); }
           else if (!s.win.isDestroyed()) s.win.webContents.send('direct-message', message);
         });
@@ -664,8 +673,8 @@ ipcMain.handle('capture-approved', async e => {
   await s.win.webContents.executeJavaScript('window.shatootconnectCapture()', true);
   showHostOverlay(s);
 });
-ipcMain.handle('revoke', e => { const s = state(e);notices.cancelFor(s.win,'critical'); release(s); s.source = null; s.captureAllowed = false; hideHostOverlay(s); if (s.win.isFullScreen()) s.win.setFullScreen(false); });
-ipcMain.handle('revoke-control', e => release(state(e)));
+ipcMain.handle('revoke', e => { const s = state(e,false);if(!s)return;notices.cancelFor(s.win,'critical'); release(s); s.source = null; s.captureAllowed = false; hideHostOverlay(s); if (s.win.isFullScreen()) s.win.setFullScreen(false); });
+ipcMain.handle('revoke-control',e=>{const s=state(e,false);if(s)release(s);});
 ipcMain.handle('release-keys', e => {
   const s = state(e);if(s.hostInput)inputControl.drop(s);else if (s.helper?.stdin.writable) s.helper.stdin.write('{"type":"release"}\n');
 });
@@ -798,7 +807,7 @@ app.whenReady().then(async () => {
   if (!smoke) for (const record of preferences.list()) if (record.shortcut && fs.existsSync(path.join(app.getPath('desktop'), preferences.shortcutName(record.id)))) { try { createFavoriteShortcut(record.id); } catch {} }
   if (smoke) {
     setTimeout(() => { smokeLog('Watchdog timeout');try{console.error(fs.readFileSync(path.join(__dirname,'../artifacts/smoke.log'),'utf8').split('\n').slice(-25).join('\n'));}catch{}app.exit(1); }, 240000).unref();
-    const run=process.argv.includes('--media-smoke')?host=>require('../tests/media-smoke.cjs')({host,createWindow,states,privacy:displayPrivacy,app,log:smokeLog}):process.argv.includes('--ice-smoke')?host=>require('../tests/ice-smoke.cjs')({host,app,log:smokeLog}):process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,dialog,update,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
+    const run=process.argv.includes('--workspace-smoke')?host=>require('../tests/workspace-smoke.cjs')({host,states,app,log:smokeLog}):process.argv.includes('--media-smoke')?host=>require('../tests/media-smoke.cjs')({host,createWindow,states,privacy:displayPrivacy,app,log:smokeLog}):process.argv.includes('--ice-smoke')?host=>require('../tests/ice-smoke.cjs')({host,app,log:smokeLog}):process.argv.includes('--connection-ui-smoke')?host=>require('../tests/connection-ui-smoke.cjs')({host,createWindow,states,app,dialog,update,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):process.argv.includes('--chat-notification-smoke')?host=>require('../tests/chat-notification-smoke.cjs')({host,createWindow,states,notices,screen,app,log:smokeLog,artifacts:path.join(__dirname,'../artifacts')}):runSmoke;
     run(win).catch(error => { smokeLog(error.stack); console.error(error); app.exit(1); });
   }
 });
