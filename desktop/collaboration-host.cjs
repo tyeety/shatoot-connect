@@ -18,6 +18,7 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
     if(op==='system-info'){const g=grant(s,value.session);if(g.infoAt&&Date.now()-g.infoAt<1000)throw Error('Please wait before refreshing system details.');g.infoAt=Date.now();return systemInfo(s.identity.deviceId);}
     if(op==='system-info-result'){const g=grant(s,value.session);if(value.data?.deviceId!==g.peer.deviceId)throw Error('The computer identity changed.');return require('../shared/system-info.cjs').normalize(value.data);}
     if(op==='block'){const result=history.block(value.peer,value.blocked);catalogChanged(s);return result;}
+    if(op==='collection')return history.collection(value.conversation,value.name);
     if(op==='emoji-usage')return history.emojiUsage(value.emoji);
     if(op==='list'){const list=history.list();catalogChanged(s);return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
     if(op==='story-seen')return history.storySeen(value.id);
@@ -87,6 +88,8 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
       const bytes=await fs.promises.readFile(files[0]);if(bytes.length<4||bytes.length>10*1024**2||bytes.readUInt32BE(0)!==0x1a45dfa3)throw new Error('Invalid voice message.');
       return bytes.toString('base64');
     }
+    if(op==='inline-media-info'){const files=history.files(value.token);if(!Number.isInteger(value.index)||value.index<0||value.index>=files.length)throw Error('Invalid media.');const file=files[value.index],mime=require('./attachment-protocol.cjs').mime(file);if(!mime)throw Error('Unsupported media.');return {name:path.basename(file),mime};}
+    if(op==='composer-pick'){const picked=await dialog.showOpenDialog(s.chatWindow||s.win,{properties:['openFile','multiSelections'],filters:[{name:'Media',extensions:['png','jpg','jpeg','gif','webp','avif','mp4','webm','mp3','m4a','ogg','wav']}]});if(picked.canceled)return [];if(picked.filePaths.length>24)throw Error('Choose up to 24 media files.');return picked.filePaths.map(file=>{if(!require('./attachment-protocol.cjs').mime(file))throw Error('Unsupported media.');return {path:file,name:path.basename(file)};});}
     if(op==='attachment-preview'){
       const files=history.files(value.token),result=[];s.attachmentPreviews||=new Map();
       for(let index=0;index<Math.min(8,files.length);index++){const file=files[index];let stat;try{stat=await fs.promises.lstat(file);}catch{continue;}if(stat.isSymbolicLink()||(!stat.isFile()&&!stat.isDirectory()))continue;const extension=path.extname(file).slice(1).toUpperCase();let image='';

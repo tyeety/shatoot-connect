@@ -24,3 +24,6 @@ chat-*.dat*
 .vs/
 /desktop/ui/assets/mediabunny.min.js
 /desktop/ui/assets/mediabunny.LICENSE.txt
+
+/desktop/ui/assets/markdown-it.min.js
+/desktop/ui/assets/markdown-it.LICENSE.txt

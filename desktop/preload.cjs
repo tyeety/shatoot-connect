@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('shatootconnect', {
   workspace:(operation,value)=>ipcRenderer.invoke('workspace',operation,value),
+  onViewerActivity:callback=>ipcRenderer.on('viewer-activity',(_event,value)=>callback(value)),
   onWorkspace:callback=>ipcRenderer.on('workspace',(_event,value)=>callback(value)),
   computerCard:(operation,value)=>ipcRenderer.invoke('computer-card',operation,value),
   desktopViewing:value=>ipcRenderer.send('desktop-viewing',value),
@@ -33,6 +34,7 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   saveRemotePreview: value=>ipcRenderer.invoke('remote-preview',value),
   editProfile:()=>ipcRenderer.invoke('profile-edit'),
   onEditProfile:callback=>ipcRenderer.on('profile-edit',callback),
+  openLink:value=>ipcRenderer.invoke('open-link',value),
   showMain: () => ipcRenderer.invoke('show-main'),
   closeChat: () => ipcRenderer.invoke('chat-close'),
   chatCall: (operation, args) => ipcRenderer.invoke('chat-call', operation, args),
@@ -83,7 +85,7 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   onDirect: callback => ipcRenderer.on('direct-message', (_event, message) => callback(message)),
   sources: () => ipcRenderer.invoke('sources'),
   selectSource: id => ipcRenderer.invoke('select-source', id),
-  approve:(name,fixedPassword,peer)=>ipcRenderer.invoke('approve',name,fixedPassword,peer),
+  approve:(name,fixedPassword,peer,lanPassword)=>ipcRenderer.invoke('approve',name,fixedPassword,peer,lanPassword),
   revoke: () => ipcRenderer.invoke('revoke'),
   revokeControl: () => ipcRenderer.invoke('revoke-control'),
   releaseKeys: () => ipcRenderer.invoke('release-keys'),

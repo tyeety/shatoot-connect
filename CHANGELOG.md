@@ -13,6 +13,28 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.33.0 — 2026-10-31
+
+### Added
+
+- Message formatting toolbar for bold, underline, links, text/media spoilers, bullet lists and tables, with a rendered preview. Formatting is stored as bounded Markdown; raw HTML and remote-image loading are disabled. Photos, video and music can appear between text blocks in one file message, using the existing encrypted transfer rather than external hosting.
+- Local attachment streaming with validated history tokens, file-type checks and HTTP-style range support for video/audio seeking. Spoiler media is not loaded until revealed; the cover uses a static snow texture to avoid continuous repainting.
+- Local contact/computer collections with assignment from the rename/save forms and filters for all collections, a named collection or ungrouped items. Aliases, pin order and credentials are retained.
+- Reproducible real RTC checks for rich-message rendering, inline editing/direction, local image/audio/video playback, deferred reverse clipboard file paste and tab navigation.
+
+### Changed
+
+- Balanced, quality and LAN use a 30 fps ceiling, speed uses 45 fps, economy uses 24 fps; automatic 360p/540p/720p rungs use 30 fps and survival uses 15 fps. Bitrate ceilings are preserved so desktop detail gets more bits per frame. Most profiles retain resolution while congestion control lowers frame rate; automatic pressure handling still changes capture dimensions when necessary.
+- Updated viewers request 3 fps from inactive/minimized remote tabs and restore the selected profile when foregrounded. Background senders freeze automatic adaptation instead of treating their intentional low frame rate as a network bottleneck. Chat/emoji/story/editor modules load only in the main/chat renderer, rather than every remote tab.
+- Edit reuses the message composer, supports automatic text direction and keeps formatting. Peer version labels and the address-field label are removed from chat; protocol capability/version exchange remains available internally.
+- A direct LAN connection may omit the password and ask the host for approval. A supplied incorrect password is rejected; a verified LAN password permits direct access without an additional host prompt. Internet-ID unattended access retains its existing opt-in setting. Update the LAN host for this behavior.
+
+### Fixed
+
+- Clipboard synchronization separates observed changes from successfully sent changes, retries temporary failures and marks incoming native clipboard contents to prevent cross-session echoes. Explicit remote Paste publishes its captured local clipboard as user intent; automatic background synchronization still respects a newer local copy. Only the selected remote tab participates in the viewer clipboard; copied files remain metadata-only until Paste.
+- Main window on a disconnected remote tab now selects Home instead of only focusing the unchanged native window.
+- Filtering collections preserves global pin order; reordering a visible subset retains hidden pinned items.
+
 ## 0.32.0 — 2026-10-31
 
 ### Added

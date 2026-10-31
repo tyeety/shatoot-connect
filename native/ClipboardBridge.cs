@@ -58,7 +58,7 @@ static class ClipboardBridge {
                             var names = Encoding.Unicode.GetBytes(string.Join('\0', files) + "\0\0");
                             bytes = new byte[20 + names.Length]; BitConverter.GetBytes(20).CopyTo(bytes, 0); BitConverter.GetBytes(1).CopyTo(bytes, 16); names.CopyTo(bytes, 20); format = 15;
                         } else { var text = m.GetProperty("text").GetString() ?? ""; if (text.Length > 1000000) throw new IOException("Clipboard text is too large."); bytes = Encoding.Unicode.GetBytes(text + '\0'); format = 13; }
-                        if (!EmptyClipboard()) throw new IOException("Clipboard clear failed."); Put(format, bytes);
+                        if (!EmptyClipboard()) throw new IOException("Clipboard clear failed."); Put(format, bytes);if(m.TryGetProperty("remote",out var origin)&&origin.ValueKind==JsonValueKind.True)Put(RegisterClipboardFormat("ShatootConnect.RemoteClipboard"),new byte[]{1});
                         if(format==15)Put(RegisterClipboardFormat("Preferred DropEffect"),BitConverter.GetBytes(1));
                         CloseClipboard(); opened = false;
                         Console.WriteLine(JsonSerializer.Serialize(new { id, seq = GetClipboardSequenceNumber() }));
@@ -70,7 +70,7 @@ static class ClipboardBridge {
                         }
                         string text = ""; var handle = GetClipboardData(13);
                         if (files.Count == 0 && handle != IntPtr.Zero && GlobalSize(handle).ToUInt64() <= 2000002) { var data = GlobalLock(handle); if (data != IntPtr.Zero) { try { text = Marshal.PtrToStringUni(data) ?? ""; } finally { GlobalUnlock(handle); } } }
-                        Console.WriteLine(JsonSerializer.Serialize(new { id, seq = GetClipboardSequenceNumber(), text, files, remote=VirtualClipboard.IsCurrent,supported = VirtualClipboard.IsCurrent || files.Count > 0 || (handle != IntPtr.Zero && GlobalSize(handle).ToUInt64() <= 2000002) }));
+                        Console.WriteLine(JsonSerializer.Serialize(new { id, seq = GetClipboardSequenceNumber(), text, files, remote=VirtualClipboard.IsCurrent||GetClipboardData(RegisterClipboardFormat("ShatootConnect.RemoteClipboard"))!=IntPtr.Zero,supported = VirtualClipboard.IsCurrent || files.Count > 0 || (handle != IntPtr.Zero && GlobalSize(handle).ToUInt64() <= 2000002) }));
                     } else throw new IOException("Invalid clipboard operation.");
                 } catch (Exception e) { Console.WriteLine(JsonSerializer.Serialize(new { id, error = e.Message })); }
                 finally { if (opened) CloseClipboard(); }

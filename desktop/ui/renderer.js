@@ -2,6 +2,9 @@
 const $ = id => document.getElementById(id);
 const api = window.shatootconnect;
 const tr = value => window.i18n.translate(value);
+let viewerActive=true;
+const viewerActivity=()=>{if(role==='viewer'&&controlChannel?.readyState==='open')controlChannel.send(JSON.stringify({type:'viewer-state',active:viewerActive}));};
+api.onViewerActivity?.(value=>{viewerActive=value.active===true;viewerActivity();});
 let config, socket, connectPromise, role = 'idle', stream, pc, sender, controlChannel, pointerChannel;
 let iceServers = [], candidates = [], peerGeneration = 0, allowedControl = false, statsTimer, joinTimer, previousStats;
 let profileName = 'speed', pointerFrame = 0, latestPointer, toastTimer, currentStats = {}, peerMediaFeedback=false;
@@ -160,7 +163,7 @@ async function onMessage(m) {
     const serial = ++requestSerial;
     status(window.i18n.language === 'fa' ? `${m.name} منتظر تأیید شماست.` : `${m.name} is waiting for your approval.`);
     // Do not block the message queue with a native consent dialog; a guest can leave meanwhile.
-    (async () => { await api.selectSource($('screen-select').value); return api.approve(m.name,m.fixedPassword===true,m.peer); })().then(async result => {
+    (async () => { await api.selectSource($('screen-select').value); return api.approve(m.name,m.fixedPassword===true,m.peer,sessionRoute==='lan-host'&&m.lanPassword===true); })().then(async result => {
       if (!requestPending || role !== 'idle' || generation !== peerGeneration || serial !== requestSerial) { await api.revoke(); return; }
       if (result.accepted) {
         await api.capture();
@@ -266,7 +269,7 @@ function bindChannel(channel) {
     if(channel.label==='control'&&role==='host')channel.send(JSON.stringify(hostInputState));
     if (role === 'viewer' && channel.label === 'control') {
       channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, mediaFeedback:true, privacyScreen:hostPrivacyAllowed }));
-      channel.send(JSON.stringify({ type: 'profile', name: config.qualityProfile, auto:config.autoQuality!==false }));
+      viewerActivity();channel.send(JSON.stringify({ type: 'profile', name: config.qualityProfile, auto:config.autoQuality!==false }));
       if (allowedControl) { api.exchange('viewer-start').catch(e => status(e.message, true)); api.watchKeyboard(true).catch(e => status(e.message, true));  }
     }
   };
@@ -281,6 +284,7 @@ function bindChannel(channel) {
     if(channel.label==='control'&&data.type==='privacy-screen-state'&&role==='viewer'){setRemotePrivacy(data);return;}
     if(channel.label==='control'&&data.type==='privacy-screen'&&role==='host'&&typeof data.active==='boolean'){api.privacyScreen(data.active).then(value=>channel.readyState==='open'&&channel.send(JSON.stringify({type:'privacy-screen-state',...value}))).catch(e=>{if(channel.readyState==='open')channel.send(JSON.stringify({type:'privacy-screen-state',active:false,allowed:false,error:e.message}));});return;}
     if(role==='viewer'&&channel.label==='control'&&data.type==='input-state'){setRemoteInputState(data);return;}
+    if(role==='host'&&channel.label==='control'&&data.type==='viewer-state'&&typeof data.active==='boolean'){videoQuality?.setActive(data.active);return;}
     if(role==='host'&&channel.label==='control'&&data.type==='media-feedback'){videoQuality?.feedback(data);return;}
     if (data.type === 'features' && channel.label === 'control') {
       if (role === 'host' && data.keyboardSync === true) channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, mediaFeedback:true, privacyScreen:hostPrivacyAllowed }));
@@ -409,7 +413,7 @@ function installRemoteLoading(){
  const card=document.querySelector('.join-card');card.hidden=true;content.append(spinner,title,message,caption,actions,card);box.append(image,shade,content);document.body.append(box);loadingScreen={box,image,message,caption,card,spinner,cancel,retry};
 }
 function showRemoteLoading(message,manual=false){if(!config?.viewerWindow||!loadingScreen)return;loadingScreen.box.hidden=false;document.body.classList.add('remote-connecting');loadingScreen.message.textContent=tr(message);loadingScreen.card.hidden=!manual;loadingScreen.spinner.hidden=manual;loadingScreen.cancel.hidden=manual;loadingScreen.retry.hidden=!manual&&remoteRetry?.state!=='waiting';}
-function captureRemotePreview(){if(!config?.viewerWindow||role!=='viewer'||!loadingScreen)return;const video=$('remote-video');if(!video.videoWidth||video.readyState<2)return;try{const canvas=document.createElement('canvas'),scale=Math.min(640/video.videoWidth,360/video.videoHeight,1);canvas.width=Math.max(1,Math.round(video.videoWidth*scale));canvas.height=Math.max(1,Math.round(video.videoHeight*scale));canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);const image=canvas.toDataURL('image/jpeg',.45);loadingScreen.image.src=image;loadingScreen.image.hidden=false;loadingScreen.caption.textContent=tr('Last session preview');api.saveRemotePreview({image,deviceId:remoteComputer.deviceId}).catch(()=>{});}catch{}}
+function captureRemotePreview(){if(!config?.viewerWindow||!viewerActive||role!=='viewer'||!loadingScreen)return;const video=$('remote-video');if(!video.videoWidth||video.readyState<2)return;try{const canvas=document.createElement('canvas'),scale=Math.min(640/video.videoWidth,360/video.videoHeight,1);canvas.width=Math.max(1,Math.round(video.videoWidth*scale));canvas.height=Math.max(1,Math.round(video.videoHeight*scale));canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);const image=canvas.toDataURL('image/jpeg',.45);loadingScreen.image.src=image;loadingScreen.image.hidden=false;loadingScreen.caption.textContent=tr('Last session preview');api.saveRemotePreview({image,deviceId:remoteComputer.deviceId}).catch(()=>{});}catch{}}
 function remoteFrameReady(){if(!config?.viewerWindow||!loadingScreen)return;loadingScreen.box.hidden=true;document.body.classList.remove('remote-connecting');remoteRetry?.connected();captureRemotePreview();clearInterval(framePreviewTimer);framePreviewTimer=setInterval(captureRemotePreview,15000);}
 function interruptSession(message,minimum=0){const recover=!!remoteRetry?.wanted&&remoteRetry.established;stopSession(true,'transport-failed');if(recover){remoteRetry.interrupted(minimum);showRemoteLoading(message);}else showRemoteLoading(message,true);status(message,true);}
 function startStats() {
@@ -479,7 +483,7 @@ function input(data, pointer = false) {
 const stage = $('video-stage');
 const activeGuestPointers = new Set(); let guestCursorPosition;
 function sendGuestCursor(position) { if (role === 'viewer' && pointerChannel?.readyState === 'open' && pointerChannel.bufferedAmount < 4096) pointerChannel.send(JSON.stringify({type:'guest-cursor', ...position, visible:position.visible&&remoteInputReason==='ready'})); }
-setInterval(()=>{ if (guestCursorPosition && role === 'viewer') sendGuestCursor(guestCursorPosition); },1000);
+setInterval(()=>{ if (viewerActive&&guestCursorPosition && role === 'viewer') sendGuestCursor(guestCursorPosition); },1000);
 stage.addEventListener('pointerleave',()=>{guestPointerPoint=null;renderPointerPause();guestCursorPosition=null;latestPointer=null;sendGuestCursor({visible:false});});
 stage.addEventListener('pointermove', event => {
   const p = position(event),bounds=stage.getBoundingClientRect();guestPointerPoint=p?{x:event.clientX-bounds.left,y:event.clientY-bounds.top}:null;renderPointerPause();
@@ -648,16 +652,17 @@ async function joinTarget(record,retrying=false) {
 $('cancel-connection').onclick=()=>{if(!outgoingAttempt)return;stopSession(true);status('Connection cancelled.');};
 $('join').onclick = guarded(joinTarget);
 let computersRevision=0;
-window.installPinnedReorder($('favorites-list'),async order=>{await api.computerCard('reorder-pins',{order});});
+window.installPinnedReorder($('favorites-list'),async order=>{const records=await api.connections('computers');await api.computerCard('reorder-pins',{order:window.mergeVisiblePins(order,records.filter(c=>c.pinned).map(c=>c.pinKey))});});
 $('favorites-list').addEventListener('pinned-reorder-end',()=>renderComputers());
 function renderFavorites(records){config.favorites=records;return renderComputers();}
 async function renderComputers(){
   if($('favorites-list').dataset.reordering==='true')return;
   const revision=++computersRevision,records=await api.connections('computers');if(revision!==computersRevision)return;
   if($('favorites-list').dataset.reordering==='true')return;
+  window.computerCollectionFilter||=window.installCollectionFilter($('favorites-list'),()=>renderComputers());window.computerCollectionFilter.sync(records);
   const list=$('favorites-list');list.replaceChildren();$('favorites-empty').hidden=records.length>0;
   window.closeComputerMenu?.();
-  for(const record of records){
+  for(const record of records.filter(record=>!window.computerCollectionFilter||window.computerCollectionFilter.accept(record))){
     const row=document.createElement('div');row.className=record.saved?'favorite-row':'history-row';row.dataset.address=record.address;row.dataset.saved=String(record.saved);row.dataset.connectedAt=String(record.at||0);applyComputerPreview(row,record);
     row.draggable=record.pinned;row.classList.toggle('pinned-draggable',record.pinned);row.dataset.pinKey=record.pinKey;row.title=tr('App version')+': '+(record.appVersion||tr('Version unknown'));
     const connectButton=document.createElement('button');connectButton.className=record.saved?'favorite-connect':'history-connect';connectButton.title=tr('Connect to a computer');
@@ -693,7 +698,7 @@ async function connectRecord(record) {
   if(!config.viewerWindow&&!config.smoke)return api.openRemote({password:'',...record});
   if(role!=='idle')throw new Error('End the current session first.');
   $('remote-id').value=record.address;$('remote-password').value=record.password||'';
-  if(record.password)return joinTarget(record);
+  if(record.password||!record.endpoint)return joinTarget(record);
   if(record.endpoint){
     if(config.internetEnabled===false){config.internetEnabled=await api.internetEnabled(true);$('internet-enabled').checked=true;}
     if(record.endpoint!==$('server-url').value||record.serverKey!==$('server-key').value){
@@ -708,11 +713,12 @@ async function saveComputer(value){
   let modal=$('save-computer-dialog');
   if(!modal){modal=document.createElement('dialog');modal.id='save-computer-dialog';modal.innerHTML='<form id="save-computer-form"><h2>Save computer</h2><label for="saved-computer-name">Computer nickname</label><input id="saved-computer-name" maxlength="60" required autocomplete="off"><p id="save-computer-error" class="status-line error"></p><div class="inline-setting"><button type="submit" class="small-button">Save</button><button type="button" id="cancel-save-computer" class="small-button">Cancel</button></div></form>';document.body.append(modal);}
   if(modal.open)return;
+  if(!$('saved-computer-category')){const label=document.createElement('label');label.textContent=tr('Collection');const input=document.createElement('input');input.id='saved-computer-category';input.maxLength=60;label.append(input);$('saved-computer-name').after(label);}$('saved-computer-category').value=value.category||'';
   $('saved-computer-name').value=value.name||config.favorites?.find(r=>r.address===value.address)?.name||value.address||'';$('save-computer-error').textContent='';
   modal.showModal();$('saved-computer-name').focus();$('saved-computer-name').select();
   return new Promise(resolve=>{
     modal.onclose=()=>resolve(false);$('cancel-save-computer').onclick=()=>modal.close();
-    $('save-computer-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter||event.target.querySelector('button[type="submit"]');button.disabled=true;try{renderFavorites(await api.favoriteSave({...value,name:$('saved-computer-name').value}));modal.close();toast('Connection saved securely.');resolve(true);}catch(error){$('save-computer-error').textContent=(error.message||String(error)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'');}finally{button.disabled=false;}};
+    $('save-computer-form').onsubmit=async event=>{event.preventDefault();const button=event.submitter||event.target.querySelector('button[type="submit"]');button.disabled=true;try{renderFavorites(await api.favoriteSave({...value,name:$('saved-computer-name').value,category:$('saved-computer-category').value}));modal.close();toast('Connection saved securely.');resolve(true);}catch(error){$('save-computer-error').textContent=(error.message||String(error)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'');}finally{button.disabled=false;}};
   });
 }
 $('quick-save').onclick=guarded(()=>saveComputer({address:$('remote-id').value,password:$('remote-password').value,endpoint:$('server-url').value,serverKey:$('server-key').value}));
@@ -823,7 +829,7 @@ window.shatootconnectCapture = async () => {
 };
 $('language').onchange = guarded(async () => { window.i18n.setLanguage(await api.language($('language').value)); renderFavorites(config.favorites || []); });
 (async () => {
-  config = await api.config(); registrationWanted = config.internetEnabled !== false; $('internet-enabled').checked = registrationWanted; $('show-guest-cursor').checked = config.showGuestCursor; $('quality').value = config.autoQuality!==false?'auto':config.qualityProfile;profileName=config.autoQuality!==false?'balanced':config.qualityProfile;$('allow-privacy-screen').checked=config.allowPrivacyScreen===true;$('allow-privacy-screen').disabled=!config.privacyScreenSupported; window.i18n.setLanguage(config.language); $('language').value = config.language;
+  config = await api.config();viewerActive=config.viewerActive!==false; registrationWanted = config.internetEnabled !== false; $('internet-enabled').checked = registrationWanted; $('show-guest-cursor').checked = config.showGuestCursor; $('quality').value = config.autoQuality!==false?'auto':config.qualityProfile;profileName=config.autoQuality!==false?'balanced':config.qualityProfile;$('allow-privacy-screen').checked=config.allowPrivacyScreen===true;$('allow-privacy-screen').disabled=!config.privacyScreenSupported; window.i18n.setLanguage(config.language); $('language').value = config.language;
   if(config.viewerWindow){
     registrationWanted=false;incomingEnabled=false;document.body.classList.add('remote-window');if(config.workspace)document.body.classList.add('connection-tab');
     $('server-url').value=config.remoteTarget.endpoint||config.endpoint;$('server-key').value=config.remoteTarget.serverKey||'';$('app-version').textContent='Shatoot Connect '+config.version;

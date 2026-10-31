@@ -11,7 +11,7 @@ function desktopSessions({ rooms, send, ice, direct }) {
     if (!room.host.multiDesktop || [...sessions.values()].filter(s => s.host === room.host).length >= 7 || sessions.size >= 500) { send(ws, { type: 'error', message: 'The remote computer is busy.',retryable:true,reasonCode:'host-busy' }); return; }
     const id = crypto.randomUUID(), s = { host: room.host, guest: ws, approved: false };
     s.timer = setTimeout(() => end(id, 'Screen invitation timed out.'), 60000); s.timer.unref(); sessions.set(id,s); ws.desktopSession = id;
-    send(ws, { type: 'waiting' }); send(s.host, { type: 'desktop-invite', session: id, peer:{deviceId:ws.deviceId||m.deviceId},fixedPassword: room.fixedPassword === true, name: typeof m.name === 'string' ? m.name.slice(0,60) : 'Guest' });
+    send(ws, { type: 'waiting' }); send(s.host, { type: 'desktop-invite', session: id, peer:{deviceId:ws.deviceId||m.deviceId},lanPassword:direct&&m.lanPassword===true,fixedPassword:(!direct||m.lanPassword===true)&&room.fixedPassword === true, name: typeof m.name === 'string' ? m.name.slice(0,60) : 'Guest' });
   }
   async function handle(ws,m) {
     if (ws.desktopSession && ['signal','end-session','leave','unregister'].includes(m.type)) {

@@ -29,7 +29,7 @@ class ClientPreferences {
     const favorite=(this.read().favorites||[]).find(f=>{try{return f.name!==f.address&&keys.has(this.destination(f).key);}catch{return false;}});
     let preview='';try{if(card.preview&&card.previewKind==='wallpaper'){this.previewCache||=new Map();if(!this.previewCache.has(card.preview)){this.previewCache.set(card.preview,this.decrypt(card.preview));if(this.previewCache.size>200)this.previewCache.delete(this.previewCache.keys().next().value);}preview=this.previewCache.get(card.preview);}}catch{}
     const knownRoute=card.routes?.at(-1);
-    return {...value,appVersion:typeof value.appVersion==='string'?require('../shared/profile.cjs').profile(value).appVersion:card.appVersion||'',pinned:card.pinned===true,pinKey:card._key||'',pinRank:card.pinRank||0,deviceId:value.deviceId||card.deviceId,route:value.route||(knownRoute?{type:knownRoute.endpoint?'id':'lan',address:knownRoute.address,endpoint:knownRoute.endpoint}:null),displayName:card.alias||favorite?.name||card.name||value.name||value.address||'',avatar:card.avatar!==undefined?card.avatar:value.avatar||'',preview,previewAt:card.previewAt};
+    return {...value,appVersion:typeof value.appVersion==='string'?require('../shared/profile.cjs').profile(value).appVersion:card.appVersion||'',category:card.category||'',pinned:card.pinned===true,pinKey:card._key||'',pinRank:card.pinRank||0,deviceId:value.deviceId||card.deviceId,route:value.route||(knownRoute?{type:knownRoute.endpoint?'id':'lan',address:knownRoute.address,endpoint:knownRoute.endpoint}:null),displayName:card.alias||favorite?.name||card.name||value.name||value.address||'',avatar:card.avatar!==undefined?card.avatar:value.avatar||'',preview,previewAt:card.previewAt};
   }
   pinComputer(value,pinned) {
     if(typeof pinned!=='boolean')throw new Error('Invalid pin setting.');
@@ -41,10 +41,11 @@ class ClientPreferences {
     if(!Array.isArray(order)||order.length!==pinned.length||new Set(order).size!==order.length||order.some(key=>!pinned.includes(key)))throw new Error('Pinned list changed. Try again.');
     const cards={...(this.read().computerCards||{})};order.forEach((key,index)=>{cards[key]={...cards[key],pinRank:index};});this.write({computerCards:cards});
   }
-  renameComputer(value,name) {
+  renameComputer(value,name,category) {
+    if(category!==undefined&&(typeof category!=='string'||category.trim().length>60))throw Error('Invalid collection name.');
     if(typeof name!=='string'||name.trim().length>60)throw new Error('Enter a valid computer name.');
     const previous=this.card(value);this.rememberComputer({...value,name:previous?.name||value.name,preview:undefined});const old=this.card(value);if(!old)throw new Error('Computer not found.');
-    const cards={...(this.read().computerCards||{})},key=old._key;cards[key]={...old,alias:name.trim()};delete cards[key]._key;
+    const cards={...(this.read().computerCards||{})},key=old._key;cards[key]={...old,alias:name.trim(),...(category!==undefined?{category:category.trim()}: {})};delete cards[key]._key;
     const keys=new Set((old.routes||[]).map(r=>r.key));const favorites=(this.read().favorites||[]).map(f=>{try{return keys.has(this.destination(f).key)?{...f,name:name.trim()||f.address}:f;}catch{return f;}});
     this.write({computerCards:cards,favorites});return this.decorate(value);
   }
@@ -63,7 +64,7 @@ class ClientPreferences {
   get(id) {
     const record = (this.read().favorites || []).find(record => record.id === id);
     if (!record) throw new Error('Saved connection not found.');
-    return { ...record, password: record.password ? this.decrypt(record.password) : '', serverKey: record.serverKey ? this.decrypt(record.serverKey) : '' };
+    return { ...this.decorate(record), password: record.password ? this.decrypt(record.password) : '', serverKey: record.serverKey ? this.decrypt(record.serverKey) : '' };
   }
   destination(value) {
     if (typeof value?.address !== 'string' || !value.address.trim()) throw new Error('Enter a remote ID or LAN IP first.');
@@ -110,7 +111,7 @@ class ClientPreferences {
     const direct=!endpoint;
     if (!existing && favorites.length >= 100) throw new Error('You can save up to 100 connections.');
     const record = { id: existing?.id || crypto.randomUUID(), name, address: target, endpoint, password: password ? this.encrypt(password) : existing?.password || null, serverKey: !direct && serverKey ? this.encrypt(serverKey) : existing?.serverKey || null, shortcut: existing?.shortcut || false, shortcutFile: existing?.shortcutFile || null };
-    this.write({ favorites: [...favorites.filter(item => item.id !== record.id), record] });const card=this.card(record);if(card&&value.name?.trim())this.renameComputer(record,name);return record.id;
+    this.write({ favorites: [...favorites.filter(item => item.id !== record.id), record] });const card=this.card(record);if(card&&value.name?.trim())this.renameComputer(record,name);if(value.category!==undefined)this.renameComputer(record,name,value.category);return record.id;
   }
   remove(id) { this.get(id); this.write({ favorites: (this.read().favorites || []).filter(record => record.id !== id) }); }
   markShortcut(id) { const filename = this.shortcutName(id); this.write({ favorites: (this.read().favorites || []).map(record => record.id === id ? { ...record, shortcut: true, shortcutFile: filename } : record) }); }

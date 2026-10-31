@@ -2,7 +2,7 @@
 // A separate reliable channel keeps file acknowledgements off the input channel.
 window.SessionExchange = class {
   constructor(channel, report) {
-    this.channel = channel; this.report = report; this.pending = new Map(); this.next = 0; this.frameId = 0; this.revision = 0; this.queue = Promise.resolve(); this.lastSeq = null;
+    this.channel = channel; this.report = report; this.pending = new Map(); this.next = 0; this.frameId = 0; this.revision = 0; this.queue = Promise.resolve(); this.lastSeq = null;this.sentSeq=null;
     this.removePaste=window.shatootconnect.onExchangePaste?.(async value=>{if(this.closed||value.token!==this.remoteOffer)return;try{await this.rpc('fetch-files',{token:value.token});await window.shatootconnect.exchange('clipboard-materialized',{token:value.token});}catch(error){await window.shatootconnect.exchange('clipboard-materialized',{token:value.token,error:error.message}).catch(()=>{});this.report(error.message,true);}});
     channel.onmessage = event => {
       if (typeof event.data !== 'string' || event.data.length > 60000) return;
@@ -25,13 +25,13 @@ window.SessionExchange = class {
         if (this.closed) return;
         try {
           let result;
-          if (message.op === 'text') { this.revision++; result = await window.shatootconnect.exchange('clipboard-write', {text:message.value,expectedSeq:this.lastSeq}); if(!result.skipped)this.lastSeq = result.seq; }
-          else if(message.op==='offer-files'){this.revision++;result=await window.shatootconnect.exchange('clipboard-offer',{...message.value,expectedSeq:this.lastSeq});if(!result.skipped){this.remoteOffer=message.value.token;this.lastSeq=result.seq;}}
+          if (message.op === 'text') { this.revision++; result = await window.shatootconnect.exchange('clipboard-write', {text:message.value,remote:true,expectedSeq:message.force===true?undefined:this.lastSeq}); if(result.inactive)this.lastSeq=this.sentSeq=null;else if(!result.skipped)this.lastSeq=this.sentSeq=result.seq; }
+          else if(message.op==='offer-files'){this.revision++;result=await window.shatootconnect.exchange('clipboard-offer',{...message.value,expectedSeq:message.force===true?undefined:this.lastSeq});if(result.inactive)this.lastSeq=this.sentSeq=null;else if(!result.skipped){this.remoteOffer=message.value.token;this.lastSeq=this.sentSeq=result.seq;}}
           else if(message.op==='fetch-files'){if(message.value?.token!==this.localOffer?.token)throw new Error('Clipboard offer expired.');result=await this.sendFiles('offered',this.localOffer);}
           else if (['begin','write','end-file','finish','cancel'].includes(message.op)) {
             result = await window.shatootconnect.exchange(message.op, message.value);
             if (message.op === 'begin') this.receiving = true;
-            if (message.op === 'finish'&&!result.clipboardVirtual) { this.revision++; if(result.clipboardReady!==false)this.lastSeq=result.seq; this.clipboardSent=result.clipboardReady!==false; this.receiving=false; this.report(result.clipboardReady===false?'Files received in Downloads. Clipboard is unavailable.':'Files received in Downloads. Ready to paste.',false,{received:true,...result}); }
+            if (message.op === 'finish'&&!result.clipboardVirtual) { this.revision++; if(result.clipboardReady!==false)this.lastSeq=this.sentSeq=result.seq; this.clipboardSent=result.clipboardReady!==false; this.receiving=false; this.report(result.clipboardReady===false?'Files received in Downloads. Clipboard is unavailable.':'Files received in Downloads. Ready to paste.',false,{received:true,...result}); }
             if(message.op==='finish'&&result.clipboardVirtual)this.receiving=false;
             if (message.op === 'cancel') this.receiving = false;
           } else throw new Error('Unknown exchange request.');
@@ -50,43 +50,45 @@ window.SessionExchange = class {
     const frame = ++this.frameId, total = Math.ceil(data.length / 8192);
     for (let index = 0; index < total; index++) this.channel.send(JSON.stringify({ frame, index, total, chunk: data.slice(index * 8192, (index + 1) * 8192) }));
   }
-  rpc(op, value) {
+  rpc(op, value,options={}) {
     if (this.closed || this.channel.readyState !== 'open') return Promise.reject(new Error('File channel is closed.'));
     const id = ++this.next;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('File exchange timed out.')); }, op==='fetch-files'?600000:op === 'begin' ? 120000 : 30000);
       this.pending.set(id, { resolve, reject, timer });
-      try { this.send({ id, op, value }); } catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
+      try { this.send({ id, op, value,...(options.force?{force:true}:{}) }); } catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
   }
   async poll() {
-    if (this.polling || this.busy || this.receiving || this.closed) return;
-    this.polling = true; const revision = this.revision; let data;
-    try {
-      data = await window.shatootconnect.exchange('clipboard-read');
-      if (this.closed || this.receiving || revision !== this.revision || data.seq === this.lastSeq) return;
-      // Opening a session does not send the previous contents of the clipboard.
-      if (data.supported === false) { this.lastSeq = data.seq; return; }
-      if (this.lastSeq === null) { this.lastSeq = data.seq; return; }
-      if(data.remote){this.lastSeq=data.seq;return;}
-      if (data.files) await this.offerFiles();
-      else await this.rpc('text', data.text);
-      this.lastSeq = data.seq; this.clipboardSent = true;
-    } catch (error) { if (data) { this.lastSeq = data.seq; this.clipboardSent = false; } if (!this.closed) this.report(error.message, true); }
-    finally { this.polling = false; }
+    if(this.polling||this.busy||this.receiving||this.closed)return;
+    this.polling=true;const revision=this.revision;let data;
+    try{
+      data=await window.shatootconnect.exchange('clipboard-read');
+      if(this.closed||this.receiving||revision!==this.revision)return;
+      if(data.inactive){this.lastSeq=this.sentSeq=null;return;}
+      if(data.supported===false||this.lastSeq===null||data.remote){this.lastSeq=this.sentSeq=data.seq;return;}
+      if(data.seq===this.sentSeq)return;
+      // Observed and successfully sent sequences are separate: a transient IPC
+      // failure or rejected compare-and-swap must not lose this local copy.
+      this.lastSeq=data.seq;
+      const result=data.files?await this.offerFiles():await this.rpc('text',data.text);
+      if(result?.skipped)throw Error('Clipboard changed while synchronizing.');
+      if(revision===this.revision)this.sentSeq=data.seq;this.clipboardSent=true;
+    }catch(error){if(data)this.clipboardSent=false;if(!this.closed)this.report(error.message,true);}
+    finally{this.polling=false;}
   }
   async flushClipboard() {
-    if (this.busy) await this.sending;
-    while (this.polling && !this.closed) await new Promise(resolve => setTimeout(resolve, 20));
-    if (this.closed) throw new Error('Session ended.');
-    const data = await window.shatootconnect.exchange('clipboard-read');
-    if (data.supported === false) throw new Error('Copy text or files to paste.');
-    if(data.remote)return;
-    if (data.files) { if (data.seq !== this.lastSeq || !this.clipboardSent) await this.offerFiles(); }
-    else await this.rpc('text', data.text);
-    this.clipboardSent = true; this.lastSeq = data.seq;
+    if(this.busy)await this.sending;
+    while(this.polling&&!this.closed)await new Promise(resolve=>setTimeout(resolve,20));
+    if(this.closed)throw Error('Session ended.');
+    const revision=this.revision,data=await window.shatootconnect.exchange('clipboard-read');
+    if(data.supported===false)throw Error('Copy text or files to paste.');if(data.remote)return;
+    // Explicit remote Paste is user intent, unlike background synchronization.
+    const result=data.files?await this.offerFiles(true):await this.rpc('text',data.text,{force:true});
+    if(result?.skipped)throw Error('Clipboard changed while synchronizing.');
+    if(revision===this.revision)this.lastSeq=this.sentSeq=data.seq;this.clipboardSent=true;
   }
-  async offerFiles(){const entries=await window.shatootconnect.exchange('clipboard-sources');const token=globalThis.crypto.randomUUID();this.localOffer={token,entries};await this.rpc('offer-files',{token,entries});}
+  async offerFiles(force=false){const entries=await window.shatootconnect.exchange('clipboard-sources');const token=globalThis.crypto.randomUUID();this.localOffer={token,entries};return this.rpc('offer-files',{token,entries},{force});}
   async sendFiles(operation, value) {
     if (this.busy) throw new Error('A file transfer is already in progress.');
     this.busy = true;

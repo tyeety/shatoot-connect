@@ -58,10 +58,10 @@ test('pipelined hardware encode duration alone does not halve capture frame rate
  assert.equal(policy.name,'balanced');
 });
 
-test('automatic high detail prioritizes motion; manual high detail retains resolution',async()=>{
+test('desktop quality preserves detail with a lower frame budget in automatic and manual modes',async()=>{
  const values=[],track={readyState:'live',async applyConstraints(){}},sender={getParameters:()=>({encodings:[{}]}),async setParameters(p){values.push(p.degradationPreference);}};
  const quality=new StreamQuality({profiles:PROFILES,peer:{},stream:{getVideoTracks:()=>[track]},sender});
- await quality.apply('quality',PROFILES.quality.bitrate);assert.equal(track.contentHint,'motion');assert.equal(values.at(-1),'maintain-framerate');
+ await quality.apply('quality',PROFILES.quality.bitrate);assert.equal(track.contentHint,'detail');assert.equal(values.at(-1),'maintain-resolution');
  await quality.setMode(false,'quality');assert.equal(track.contentHint,'detail');assert.equal(values.at(-1),'maintain-resolution');quality.stop();
 });
 test('missing optional WebRTC estimates do not force an idle downgrade',()=>{
@@ -112,8 +112,8 @@ test('fast LAN skips warmup while recovered internet climbs without oscillation'
 test('automatic low-bandwidth rungs do not change saved manual presets',async()=>{
  const sizes=[],params=[],track={readyState:'live',async applyConstraints(c){sizes.push(c);}},sender={getParameters:()=>({encodings:[{}]}),async setParameters(p){params.push(p);}};
  const quality=new StreamQuality({profiles:PROFILES,peer:{},stream:{getVideoTracks:()=>[track]},sender});
- await quality.apply('survival',250000);assert.equal(sizes.at(-1).height.max,270);assert.equal(params.at(-1).encodings[0].maxFramerate,30);
- await quality.setMode(false,'economy');assert.equal(sizes.at(-1).height.max,720);assert.equal(params.at(-1).encodings[0].maxFramerate,30);assert.equal(params.at(-1).encodings[0].maxBitrate,2500000);
+ await quality.apply('survival',250000);assert.equal(sizes.at(-1).height.max,270);assert.equal(params.at(-1).encodings[0].maxFramerate,15);
+ await quality.setMode(false,'economy');assert.equal(sizes.at(-1).height.max,720);assert.equal(params.at(-1).encodings[0].maxFramerate,24);assert.equal(params.at(-1).encodings[0].maxBitrate,2500000);
  quality.stop();
 });
 
@@ -144,4 +144,7 @@ test('an ICE path change resets the latency baseline instead of treating a new V
   const report=stats({capacity:5000000,sent:n*40,rtt:n<3?.01:.2});report.get('pair').id=n<3?'lan':'vpn';policy.sample(report,n*500);
  }
  assert.equal(policy.name,'balanced');assert.equal(policy.baseRtt,.2);
+});
+test('inactive viewers retain resolution while limiting encode/decode work and restore the foreground frame budget',async()=>{
+ const constraints=[],params=[],track={readyState:'live',async applyConstraints(c){constraints.push(c);}},sender={getParameters:()=>({encodings:[{}]}),async setParameters(p){params.push(p);}};const q=new StreamQuality({profiles:PROFILES,peer:{},stream:{getVideoTracks:()=>[track]},sender});await q.apply('balanced',12000000);await q.setActive(false);assert.equal(constraints.at(-1).frameRate.max,3);assert.equal(constraints.at(-1).height.max,1080);assert.equal(params.at(-1).encodings[0].maxFramerate,3);await q.setActive(true);assert.equal(params.at(-1).encodings[0].maxFramerate,30);q.stop();
 });

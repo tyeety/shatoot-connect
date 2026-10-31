@@ -114,13 +114,14 @@ function createSignalingServer({ port = 8787, host = '0.0.0.0', iceServers = [],
         if (++a.count > 5) return fail('تلاش زیاد؛ یک دقیقه صبر کنید.',{retryable:true,retryAfter:60000});
         const room = directHostToken && m.id === 'direct' ? [...rooms.values()][0] : rooms.get(String(m.id));
         const hash = crypto.createHash('sha256').update(typeof m.password === 'string' ? m.password.slice(0, 128) : '').digest();
-        if (!room || !crypto.timingSafeEqual(room.hash, hash)) return fail('شناسه یا رمز اتصال درست نیست.',{retryable:true,reasonCode:'credentials-or-offline'});
+        const lanPassword=!!directHostToken&&typeof m.password==='string'&&m.password.length>0;const passwordlessLan=!!directHostToken&&!m.password;
+        if (!room || (!passwordlessLan&&!crypto.timingSafeEqual(room.hash, hash))) return fail('شناسه یا رمز اتصال درست نیست.',{retryable:true,reasonCode:'credentials-or-offline'});
         if (room.host === ws) return fail('این میزبان در حال اتصال است.',{retryable:true,reasonCode:'host-busy'});
-        if (room.guest || room.host.desktopBusy || (room.host.registrationId && room.host.roomId)) { if (!room.host.multiDesktop) return fail('این میزبان در حال اتصال است.',{retryable:true,reasonCode:'host-busy'}); await desktops.join(ws,m,room); return; }
+        if (room.guest || room.host.desktopBusy || (room.host.registrationId && room.host.roomId)) { if (!room.host.multiDesktop) return fail('این میزبان در حال اتصال است.',{retryable:true,reasonCode:'host-busy'}); await desktops.join(ws,{...m,lanPassword},room); return; }
         room.guest = ws; ws.roomId = room.id;
         if (room.host.registrationId) room.host.roomId = room.id;
         send(ws, { type: 'waiting' });
-        send(room.host, { type: 'join-request', fixedPassword: room.fixedPassword === true, peer:{deviceId:ws.deviceId||m.deviceId},name: typeof m.name === 'string' ? m.name.slice(0, 60) : 'دستگاه مهمان' });
+        send(room.host, { type: 'join-request', lanPassword, fixedPassword: !passwordlessLan&&room.fixedPassword === true, peer:{deviceId:ws.deviceId||m.deviceId},name: typeof m.name === 'string' ? m.name.slice(0, 60) : 'دستگاه مهمان' });
       } else if (m.type === 'accept' || m.type === 'reject') {
         const room = rooms.get(ws.registrationId || ws.roomId);
         if (room?.host !== ws || !room.guest || room.approved) return;

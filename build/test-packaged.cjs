@@ -47,6 +47,7 @@ async function main() {
     const source = path.join(root, 'release/win-unpacked/resources/app.asar');
     if(fs.existsSync(source)){
       const archive=require('@electron/asar');
+      if(archive.extractFile(source,path.join('desktop','ui','assets','markdown-it.min.js')).length<50000||!archive.extractFile(source,path.join('desktop','ui','assets','markdown-it.LICENSE.txt')).length)throw Error('Packaged message formatter is missing.');
       const bundle=archive.extractFile(source,path.join('desktop','ui','assets','mediabunny.min.js'));
       const license=archive.extractFile(source,path.join('desktop','ui','assets','mediabunny.LICENSE.txt')).toString();
       if(bundle.length<700000||!license.includes('mediabunny-1.65.0.tgz')||!license.includes('Mozilla Public License'))throw Error('Packaged media editor bundle or corresponding-source license is missing.');

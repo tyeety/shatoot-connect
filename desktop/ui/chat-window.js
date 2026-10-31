@@ -21,7 +21,7 @@
     schedule(conversation,text,sendAt,id){return api.chatCall('schedule',[conversation,text,sendAt,id]);}
     cancelScheduled(id){return api.chatCall('cancelScheduled',[id]);}
     react(conversation,message,emoji){return api.chatCall('react',[conversation,message,emoji]);}
-    sendFiles(conversation, operation, value) { return operation === 'drop' ? api.chatDrop(conversation, value) : api.chatCall('sendFiles', [conversation, operation, value]); }
+    sendFiles(conversation, operation, value,options) { return operation === 'drop' ? api.chatDrop(conversation, value) : api.chatCall('sendFiles', [conversation, operation, value,options]); }
     close(session) { return api.chatCall('close', [session?.peer.deviceId]); }
     createGroup(name,members,id,details){return api.chatCall('createGroup',[name,members,id,details]);}
     changeMessage(conversation,id,text,removed){return api.chatCall('changeMessage',[conversation,id,text,removed]);}

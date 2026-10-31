@@ -329,7 +329,7 @@
       const targets = ids.map(id => this.peer(id)); if (targets.some(s => !s)) throw new Error('All file recipients must be connected. Connect them and try again.');
       const first = targets[0]; if (!first) throw new Error('Connect to a contact first.');
       const entries = selection === 'drop' ? await this.api.collaborationDrop(first.id, value) : await this.api.collaborationFiles(first.id, selection, value); if (!entries.length) return;
-      const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'file', text: entries.slice(0, 12).map(e => e.name).join('\n').slice(0, 7800) + (entries.length > 12 ? `\n+ ${entries.length - 12}` : ''), replyTo:options.replyTo,forwardedFrom:options.forwardedFrom,at: Date.now(), pending: ids };
+      const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'file', text: options.text!==undefined?options.text:entries.slice(0, 12).map(e => e.name).join('\n').slice(0, 7800) + (entries.length > 12 ? `\n+ ${entries.length - 12}` : ''), replyTo:options.replyTo,forwardedFrom:options.forwardedFrom,at: Date.now(), pending: ids };
       await this.api.collaboration('append', { message, outgoing: true });
       await this.api.collaborationFiles(first.id,'attach-sources',{id:message.id,conversation});await this.refresh();
       for (const s of targets) {

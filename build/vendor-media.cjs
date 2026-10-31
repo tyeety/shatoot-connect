@@ -12,3 +12,8 @@ fs.writeFileSync(path.join(destination, 'mediabunny.LICENSE.txt'),
   `Mediabunny ${version}, unmodified browser bundle. Copyright Vanilagy and contributors.\n` +
   `Corresponding source: https://registry.npmjs.org/mediabunny/-/mediabunny-${version}.tgz\n\n` +
   fs.readFileSync(path.join(source, 'LICENSE'), 'utf8'));
+
+const markdown=path.join(root,'node_modules/markdown-it');
+if(JSON.parse(fs.readFileSync(path.join(markdown,'package.json'),'utf8')).version!=='15.0.3')throw Error('Review the Markdown vendor version.');
+fs.copyFileSync(path.join(markdown,'dist/browser/markdown-it.umd.min.js'),path.join(destination,'markdown-it.min.js'));
+fs.copyFileSync(path.join(markdown,'LICENSE'),path.join(destination,'markdown-it.LICENSE.txt'));
