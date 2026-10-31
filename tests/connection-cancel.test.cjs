@@ -24,3 +24,14 @@ test('new story layouts and audio containers have a valid legacy fallback withou
  const modern=engine.storyWire({features:['story-design-v1']},story);assert.equal(modern.media.mime,'audio/webm');assert.equal(modern.design.layers[0].text,'Overlay text');
  assert.ok(engine.storyWire({features:[]},{...story,design:undefined}).text.trim());
 });
+
+
+test('overlapping catalogue refreshes serialize reads and retain changes arriving during the first read',async()=>{
+ const {engine}=client();await engine.ready;let reads=0,active=0,maxActive=0;const pending=[];
+ engine.api.collaboration=async op=>{assert.equal(op,'list');reads++;active++;maxActive=Math.max(maxActive,active);const value=await new Promise(resolve=>pending.push(resolve));active--;return value;};
+ const first=engine.refresh(),second=engine.refresh(),third=engine.refresh();assert.equal(reads,1);
+ pending.shift()({contacts:[],groups:[],conversations:[],generation:1});await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,2);
+ pending.shift()({contacts:[],groups:[],conversations:[],generation:2});await Promise.all([first,second,third]);assert.equal(maxActive,1);assert.equal(engine.catalog.generation,2);
+ engine.api.collaboration=async()=>{throw Error('temporary failure');};await assert.rejects(engine.refresh(),/temporary failure/);
+ engine.api.collaboration=async()=>({contacts:[],groups:[],conversations:[],generation:3});await engine.refresh();assert.equal(engine.catalog.generation,3);
+});

@@ -30,7 +30,14 @@
         this.retries.set(key,Date.now()+30000);this.connect({type:'id',address:card.address,endpoint:card.endpoint,deviceId:card.deviceId,name:card.name,background:true}).catch(()=>{});
       }}finally{this.reconnecting=false;}
     }
-    async refresh() { this.catalog = await this.api.collaboration('list'); this.notify(); this.sendReceipts(); this.sendStoryEvents(); }
+    refresh() {
+      if(this.refreshFlight){
+        if(!this.refreshQueued)this.refreshQueued=this.refreshFlight.catch(()=>{}).then(()=>{this.refreshQueued=null;return this.refresh();});
+        return this.refreshQueued;
+      }
+      this.refreshFlight=(async()=>{this.catalog=await this.api.collaboration('list');this.notify();this.sendReceipts();this.sendStoryEvents();})().finally(()=>{this.refreshFlight=null;});
+      return this.refreshFlight;
+    }
     sendStoryEvents(){for(const s of this.sessions.values())if(!s.closed&&s.channel?.readyState==='open'&&s.features?.includes('story-events-v1'))this.flushStoryEvents(s).catch(()=>{});}
     async flushStoryEvents(s){
       if(s.storyEventsBusy){s.storyEventsAgain=true;return;}s.storyEventsBusy=true;

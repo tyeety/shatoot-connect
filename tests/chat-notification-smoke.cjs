@@ -99,10 +99,14 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(viewer,`messenger.open();messenger.select('p:${owner.identity.deviceId}').then(()=>true)`);viewer.show();viewer.focus();
   await run(viewer,"document.querySelector('#chat-text').focus();true");
   await until(()=>receiptIcon('seen'));if(receiptStatus()!=='seen')throw Error('Focused visible message did not emit a seen receipt');
+  await run(viewer,"document.body.tabIndex=-1;document.body.focus();true");
+  await run(host,`collaboration.send('${conversation}','Header focus fixture').then(()=>true)`);
+  await until(()=>run(viewer,"[...document.querySelectorAll('.message-body')].some(e=>e.textContent.includes('Header focus fixture'))"));
+  if([...notices.entries.values()].some(entry=>entry.data.detail==='Header focus fixture'))throw Error('Visible focused chat notified merely because the composer was not focused');
   await run(viewer,"document.querySelector('#messenger-dialog').close();true");chat.show();chat.focus();
   await run(chat,"document.querySelector('#chat-own-status').value='busy';document.querySelector('#chat-own-status').dispatchEvent(new Event('change'));true");
   await until(()=>peer.chatStore.load().contacts[owner.identity.deviceId]?.status==='busy');
-  if(!await run(chat,"document.querySelector('#chat-own-profile .avatar-wrap .presence-busy')&&document.querySelector('.chat-conversation .avatar-wrap img')&&document.querySelector('.chat-last-time').dateTime&&[...document.querySelectorAll('.chat-last-message')].some(e=>e.textContent.includes('Receipt lifecycle fixture'))"))throw Error('Status avatar, default picture or last-message date/time missing');
+  if(!await run(chat,"document.querySelector('#chat-own-profile .avatar-wrap .presence-busy')&&document.querySelector('.chat-conversation .avatar-wrap img')&&document.querySelector('.chat-last-time').dateTime&&[...document.querySelectorAll('.chat-last-message')].some(e=>e.textContent.includes('Header focus fixture'))"))throw Error('Status avatar, default picture or last-message date/time missing');
   await run(chat,"document.querySelector('#chat-own-status').value='available';document.querySelector('#chat-own-status').dispatchEvent(new Event('change'));true");
   await until(()=>peer.chatStore.load().contacts[owner.identity.deviceId]?.status==='available');
   await run(chat,`document.querySelector('[data-message-id="${receiptMessage}"] .reply').parentElement.click();document.querySelector('#chat-text').value='Reply UI fixture';document.querySelector('#chat-compose').requestSubmit();true`);
@@ -271,7 +275,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"document.querySelector('#chat-text').value='Edited across RTC';document.querySelector('#chat-text').dispatchEvent(new Event('input'));document.querySelector('#chat-compose').requestSubmit();true");
   await until(()=>peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId&&m.text==='Edited across RTC'));
   await until(()=>run(chat,"[...document.querySelectorAll('.chat-message p')].some(e=>e.textContent==='Edited across RTC')"));
-  if(!await run(chat,"(()=>{const row=[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC'),date=row.querySelector('small').getBoundingClientRect(),copy=row.querySelector('.content_copy').getBoundingClientRect();return !!row.querySelector('.chat-message-actions')&&getComputedStyle(row.querySelector('.chat-message-actions')).display==='none'})()"))throw Error('Message operations were not moved into the menu');
+  if(!await run(chat,"(()=>{const row=[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC'),date=row.querySelector('small').getBoundingClientRect(),copy=row.querySelector('.content_copy').getBoundingClientRect();return !!row.querySelector('.message-quick-actions .sentiment_satisfied')&&copy.width>0&&copy.left>date.right&&Math.abs(copy.top-date.top)<30&&getComputedStyle(row.querySelector('.chat-message-actions')).display==='none'})()"))throw Error('Quick copy/reaction layout or secondary message menu regressed');
   await run(chat,"[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC').querySelector('.content_copy').parentElement.click();true");
   await until(()=>owner.copiedText==='Edited across RTC');
   await run(chat,"[...document.querySelectorAll('.chat-message')].find(e=>e.querySelector('p')?.textContent==='Edited across RTC').querySelector('.delete').parentElement.click();true");

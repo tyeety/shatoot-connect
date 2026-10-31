@@ -13,6 +13,15 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.33.1 — 2026-10-31
+
+### Fixed
+
+- Copy and React are always visible below each message, opposite its timestamp. Additional operations remain in the message menu; file Copy retains native Explorer paste behavior.
+- Chat catalogue reads are serialized and coalesced, preventing older responses from replacing newer contacts/messages. History reads no longer invalidate one another during refresh bursts, and continuous updates cannot indefinitely postpone timeline refresh.
+- Conversation selection loads history alongside selection persistence. Late notification navigation cannot replace another conversation's messages; notification navigation clears collection filters so its contact is visible.
+- Read/view events and unchanged unread/taskbar updates are deduplicated. A focused, visible chat counts as active even when focus is on navigation rather than the message input. Rebuilding conversation summaries now makes one pass through history instead of rescanning it for every contact.
+
 ## 0.33.0 — 2026-10-31
 
 ### Added

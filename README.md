@@ -8,6 +8,8 @@ The app uses one native window: **Home**, **Messages**, **Settings**, then a sep
 
 **Settings > Application > Start with Windows in the tray** is on by default. Windows sign-in starts the app in the system tray without opening its main window. Turn it off to disable automatic startup; your choice is preserved across restarts and updates.
 
+Copy and React appear below messages opposite the time; other actions remain in the message menu. Chat catalogue/history refreshes are coalesced, and opening a notification reveals its conversation even when a collection filter was active.
+
 ## Version 0.28.0
 
 Mute a conversation to keep its unread count in a gray badge on that contact while excluding it from total/taskbar counts and notifications. Block a contact to stop its messages/files and close its active chat channel; unblock from the same conversation header. Chat-list avatars align to the top and system/version data stays in the explicit details tool.

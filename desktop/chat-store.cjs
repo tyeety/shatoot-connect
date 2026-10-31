@@ -35,7 +35,7 @@ class ChatStore {
   }
   change(fn) {
     const previous = structuredClone(this.load());
-    try { const result = fn(this.data); this.save(); return result; } catch (error) { this.data = previous; throw error; }
+    try { const result = fn(this.data); this.save(); this.revision=(this.revision||0)+1; return result; } catch (error) { this.data = previous; throw error; }
   }
   contact(peer, route) {
     if (!peer || !UUID.test(peer.deviceId) || typeof peer.name !== 'string' || peer.name.length > 60 || peer.deviceId === this.self) throw new Error('Invalid chat contact.');
@@ -147,7 +147,7 @@ class ChatStore {
   deliveredStoryEvent(id,peer){return this.change(d=>{const event=d.storyEvents?.find(e=>e.id===id);if(event)event.pending=event.pending.filter(id=>id!==peer);});}
   deleteStory(id,sender=this.self){if(!UUID.test(id)||!UUID.test(sender)||this.load().stories?.some(s=>s.id===id&&s.sender!==sender))throw new Error('Only the author can delete this story.');return this.change(d=>{d.stories=(d.stories||[]).filter(s=>s.id!==id);d.storyEvents=(d.storyEvents||[]).filter(e=>e.story!==id);d.storyDeletes=(d.storyDeletes||[]).filter(s=>s.at>Date.now()-86400000&&s.id!==id);d.storyDeletes.push({id,sender,at:Date.now()});});}
   list() {
-    const data = this.load(); return {collections:{...data.collections},storyEvents:(data.storyEvents||[]).filter(e=>data.stories?.some(s=>s.id===e.story&&s.expiresAt>Date.now())).map(e=>({...e,pending:undefined})),storySeen:{...data.storySeen},blocked:{...data.blocked},emojiUsage:{...data.emojiUsage},storyDeletes:(data.storyDeletes||[]).filter(s=>s.at>Date.now()-86400000),stories:(data.stories||[]).filter(s=>s.expiresAt>Date.now()&&!this.isBlocked(s.sender)),messagePins:{...data.messagePins},unseenReactions:{...data.unseenReactions},scheduled:[...(data.scheduled||[])],filePolicies: {...data.filePolicies}, muted:{...data.muted}, pins:{...data.pins},pinOrder:[...(data.pinOrder||[])],lastSelected:data.lastSelected||'', unread:this.unread(), contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...new Set(data.messages.map(m => m.conversation))].map(id => ({ id, last: data.messages.filter(m => !m.deleted && m.conversation === id).at(-1) })) };
+    const data = this.load(),conversations=new Map();for(const message of data.messages){if(!conversations.has(message.conversation))conversations.set(message.conversation,{id:message.conversation});if(!message.deleted)conversations.get(message.conversation).last=message;}return {collections:{...data.collections},storyEvents:(data.storyEvents||[]).filter(e=>data.stories?.some(s=>s.id===e.story&&s.expiresAt>Date.now())).map(e=>({...e,pending:undefined})),storySeen:{...data.storySeen},blocked:{...data.blocked},emojiUsage:{...data.emojiUsage},storyDeletes:(data.storyDeletes||[]).filter(s=>s.at>Date.now()-86400000),stories:(data.stories||[]).filter(s=>s.expiresAt>Date.now()&&!this.isBlocked(s.sender)),messagePins:{...data.messagePins},unseenReactions:{...data.unseenReactions},scheduled:[...(data.scheduled||[])],filePolicies: {...data.filePolicies}, muted:{...data.muted}, pins:{...data.pins},pinOrder:[...(data.pinOrder||[])],lastSelected:data.lastSelected||'', unread:this.unread(), contacts: Object.values(data.contacts), groups: Object.values(data.groups), conversations: [...conversations.values()] };
   }
   reorderPins(order) {
     const pins=Object.keys(this.load().pins||{});
