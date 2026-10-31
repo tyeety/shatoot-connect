@@ -15,3 +15,18 @@ test('local media supports seeking and bounded streams, rejects unsupported file
  const head=await response(file,new Request('https://local.invalid',{method:'HEAD'}));assert.equal(head.headers.get('content-length'),'10');assert.equal(await head.text(),'');
  const exe=path.join(root,'unsafe.exe');await fs.writeFile(exe,'bad');assert.equal((await response(exe,new Request('https://local.invalid'))).status,404);
 });
+
+
+test('CommonMark and GFM blocks render headings, ordered/task lists, quotes, code, rules and strike',()=>{
+ const html=md.render('# Heading\n\n1. first\n2. second\n\n- [x] done\n- [ ] pending\n\n> quote\n\n```js\nconst x = 1;\n```\n\n---\n\n~~removed~~ *emphasis* `inline`');
+ for(const value of ['<h1>','<ol>','task-list-item-checkbox','checked=','<blockquote>','language-js','<hr>','<s>','<em>','<code>inline</code>'])assert.ok(html.includes(value),value);
+});
+
+
+test('draft media deleted from Markdown is not sent; remaining local indices are compacted without including code examples',()=>{
+ const {prepareMedia}=require('../desktop/ui/rich-message.js');const files=['removed.png','kept.wav','last.webm'];
+ const result=prepareMedia(md,'||![audio](attachment:1)|| ![movie](attachment:2) ![again](attachment:1)\n\n```md\n![not a real attachment](attachment:0)\n```',files);
+ assert.deepEqual(result.files,['kept.wav','last.webm']);assert.ok(result.text.includes('![audio](attachment:0)'));assert.ok(result.text.includes('![movie](attachment:1)'));
+ assert.deepEqual(prepareMedia(md,'No media left',files).files,[]);
+ const code=prepareMedia(md,'`attachment:2)` ![audio](attachment:2)\n\n```md\n![example](attachment:2)\n```',files);assert.ok(code.text.includes('`attachment:2)`'));assert.ok(code.text.includes('![example](attachment:2)'));assert.ok(code.text.includes('![audio](attachment:0)'));
+});

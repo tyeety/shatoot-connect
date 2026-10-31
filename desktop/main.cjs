@@ -781,7 +781,7 @@ ipcMain.handle('exchange', async (e, operation, value) => {
 });
 
 app.whenReady().then(async () => {
-  protocol.handle('shatoot-media',async request=>{try{const url=new URL(request.url),token=url.hostname,index=Number(url.pathname.slice(1));if(!require('./discovery.cjs').UUID.test(token)||!Number.isInteger(index)||index<0)return new Response(null,{status:404});for(const state of states.values()){try{const files=state.chatStore?.files(token);if(files?.[index])return await require('./attachment-protocol.cjs').response(files[index],request);}catch{}}}catch{}return new Response(null,{status:404});});
+  protocol.handle('shatoot-media',async request=>{try{const url=new URL(request.url),token=url.hostname,index=Number(url.pathname.slice(1));if(!require('./discovery.cjs').UUID.test(token)||!Number.isInteger(index)||index<0)return new Response(null,{status:404});for(const state of states.values()){try{const files=state.composerMedia?.get(token)||state.chatStore?.files(token);if(files?.[index])return await require('./attachment-protocol.cjs').response(files[index],request);}catch{}}}catch{}return new Response(null,{status:404});});
   displayPrivacy=new(require('./display-privacy.cjs').DisplayPrivacy)({BrowserWindow,screen,supported:privacySupported,escapeAvailable:()=>globalShortcut.isRegistered('CommandOrControl+Shift+F12'),changed:(s,reason)=>{if(!['active','released'].includes(reason))s.privacyPermitted=false;publishPrivacy(s);}});
   smokeLog('app ready');
   if(crashProbe){await require('../tests/crash-recorder-smoke.cjs')({app,BrowserWindow,crashReporter:require('electron').crashReporter});return;}

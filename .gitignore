@@ -27,3 +27,6 @@ chat-*.dat*
 
 /desktop/ui/assets/markdown-it.min.js
 /desktop/ui/assets/markdown-it.LICENSE.txt
+
+/desktop/ui/assets/message-editor.min.js
+/desktop/ui/assets/message-editor.LICENSE.txt

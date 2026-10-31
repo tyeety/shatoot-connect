@@ -15,5 +15,13 @@ fs.writeFileSync(path.join(destination, 'mediabunny.LICENSE.txt'),
 
 const markdown=path.join(root,'node_modules/markdown-it');
 if(JSON.parse(fs.readFileSync(path.join(markdown,'package.json'),'utf8')).version!=='15.0.3')throw Error('Review the Markdown vendor version.');
-fs.copyFileSync(path.join(markdown,'dist/browser/markdown-it.umd.min.js'),path.join(destination,'markdown-it.min.js'));
+const markdownBuild=require('esbuild').buildSync({stdin:{contents:"module.exports=require('markdown-it');module.exports.taskLists=require('markdown-it-task-lists');",resolveDir:root},bundle:true,format:'iife',globalName:'markdownit',minify:true,metafile:true,legalComments:'eof',outfile:path.join(destination,'markdown-it.min.js')});
 fs.copyFileSync(path.join(markdown,'LICENSE'),path.join(destination,'markdown-it.LICENSE.txt'));
+
+// The visual editor and Markdown mode share one ProseMirror document model.
+const editorBuild=require('esbuild').buildSync({metafile:true,entryPoints:[path.join(root,'desktop/ui/message-editor.js')],bundle:true,format:'iife',globalName:'ShatootMarkdownEditor',minify:true,legalComments:'eof',outfile:path.join(destination,'message-editor.min.js')});
+const bundledPackages=new Set();
+for(const input of [...Object.keys(editorBuild.metafile.inputs),...Object.keys(markdownBuild.metafile.inputs)]){
+ if(!input.includes('node_modules'))continue;let directory=path.dirname(path.resolve(root,input));while(directory!==root&&!fs.existsSync(path.join(directory,'package.json')))directory=path.dirname(directory);if(directory!==root)bundledPackages.add(directory);
+}
+fs.writeFileSync(path.join(destination,'message-editor.LICENSE.txt'),[...bundledPackages].sort().map(directory=>{const info=require(path.join(directory,'package.json')),license=['LICENSE.md','LICENSE','LICENSE.txt','LICENSE-MIT.txt','license'].map(name=>path.join(directory,name)).find(file=>fs.existsSync(file));if(!license)throw Error('Missing bundled dependency license: '+info.name);return info.name+' '+info.version+'\n'+fs.readFileSync(license,'utf8');}).join('\n\n'));

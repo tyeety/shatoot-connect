@@ -8,6 +8,8 @@ The app uses one native window: **Home**, **Messages**, **Settings**, then a sep
 
 **Settings > Application > Start with Windows in the tray** is on by default. Windows sign-in starts the app in the system tray without opening its main window. Turn it off to disable automatic startup; your choice is preserved across restarts and updates.
 
+Messages use a visual Markdown editor with a `Markdown` source toggle. Compose or edit real tables (including adding/removing rows and columns), headings, bold/italic/underline/strike, links, spoilers, quotes, ordered/bullet/task lists, code and dividers. Local pictures, videos and music preview in the draft and retain the existing encrypted attachment transport. Enter sends ordinary paragraphs; Shift+Enter inserts a line break, list/table/code blocks keep normal editing keys, and Ctrl+Enter sends from those blocks. Markdown is stored instead of HTML; received raw HTML and automatic remote-image loading remain disabled.
+
 Copy and React appear below messages opposite the time; other actions remain in the message menu. Chat catalogue/history refreshes are coalesced, and opening a notification reveals its conversation even when a collection filter was active.
 
 ## Version 0.28.0

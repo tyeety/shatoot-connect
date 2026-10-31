@@ -13,6 +13,22 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.34.0 — 2026-10-31
+
+### Added
+
+- Visual Markdown composition and inline message editing backed by Tiptap/ProseMirror, with a synchronized Markdown source mode. Tables have directly editable cells and row/column controls; headings 1–6, bold/italic/underline/strike, links, spoilers, quotes, ordered/bullet/task lists, fenced/inline code and dividers retain Markdown semantics.
+- Media removed from a draft is excluded from transfer; remaining attachment references are compacted without rewriting code examples.
+- Local image/video/audio previews while composing and editing, using bounded user-selected draft grants and the existing validated streaming protocol. Messages remain Markdown plus encrypted file attachments, not stored HTML. Raw HTML and remote-image autoloading remain disabled in received messages.
+- GFM task-list rendering in received messages and bundled editor/dependency license verification in packaged builds. The editor bundle is omitted from remote-session renderers.
+
+### Fixed
+
+- Focus rings are drawn inside buttons, inputs, selects, textareas and keyboard-focusable elements, including compact compound buttons and collection/datalist fields, rather than extending into adjacent controls or outside clipped parents.
+- Long conversation/group names no longer compress or hide unread counts, mute indicators or unseen reactions. Names ellipsize independently and unread summaries remain visually emphasized.
+- Emoji insertion, native paste, undo/redo, automatic paragraph direction, draft switching and send/record controls remain connected to the visual document and Markdown source.
+- Electron updated to 44.10.1, including the certificate-trust security fix.
+
 ## 0.33.1 — 2026-10-31
 
 ### Fixed

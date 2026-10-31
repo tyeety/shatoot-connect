@@ -29,7 +29,7 @@ window.installChatExtras=({api,engine,self,field,selected,button,run,tr,error,re
   async function chooseEmoji(emoji){
     const sticker=pickerTarget?.choose;if(sticker)await sticker(emoji);
     else if(pickerTarget){await engine.react(pickerTarget.conversation,pickerTarget.id,pickerTarget.emoji===emoji?'':emoji);await reload();}
-    else {if(field.disabled)return;const start=field.selectionStart,end=field.selectionEnd;if(field.value.length-end+start+emoji.length>field.maxLength)return;picker.close();field.focus();field.setSelectionRange(start,end);document.execCommand('insertText',false,emoji);}
+    else {if(field.disabled)return;const start=field.selectionStart,end=field.selectionEnd;if(field.value.length-end+start+emoji.length>field.maxLength)return;picker.close();if(field.insertMessageText)field.insertMessageText(emoji);else{field.focus();field.setSelectionRange(start,end);document.execCommand('insertText',false,emoji);}}
     try{engine.catalog.emojiUsage=await api.collaboration('emoji-usage',{emoji});}catch{}picker.close();if(!sticker)field.focus();
   }
   function setEditor(item){editingId=item?.id||'';scheduler.querySelector('textarea').value=item?.text||draft;scheduler.querySelector('[type=datetime-local]').value=localTime(item?.sendAt||tomorrow());scheduler.querySelector('[type=submit]').textContent=tr(item?'Save changes':'Schedule message');scheduler.querySelector('.schedule-error').textContent='';}

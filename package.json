@@ -1,6 +1,6 @@
 {
   "name": "shatoot-connect",
-  "version": "0.33.1",
+  "version": "0.34.0",
   "description": "Windows remote desktop, LAN discovery, peer-to-peer chat, groups and file transfer",
   "main": "desktop/main.cjs",
   "private": true,
@@ -44,9 +44,18 @@
     "ws": "8.22.0"
   },
   "devDependencies": {
-    "electron": "44.9.0",
+    "@tiptap/core": "3.32.2",
+    "@tiptap/extension-paragraph": "3.32.2",
+    "@tiptap/extension-table": "3.32.2",
+    "@tiptap/extension-task-item": "3.32.2",
+    "@tiptap/extension-task-list": "3.32.2",
+    "@tiptap/markdown": "3.32.2",
+    "@tiptap/starter-kit": "3.32.2",
+    "electron": "44.10.1",
     "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
     "markdown-it": "15.0.3",
+    "markdown-it-task-lists": "2.1.1",
     "mediabunny": "1.65.0"
   },
   "build": {
