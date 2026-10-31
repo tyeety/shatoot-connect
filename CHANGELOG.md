@@ -13,6 +13,23 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.31.0 — 2026-10-31
+
+### Changed
+
+- Desktop video uses a 30 ms playout-wait budget in the pinned Electron runtime instead of accumulating a smooth but delayed replay. Network transit, lost-frame recovery and capture/processing time still add latency; this is not a 30 ms end-to-end guarantee.
+- Automatic video adaptation samples every 500 ms, skips redundant bitrate-only tiers and responds directly to sub-megabit congestion with 540p/360p/270p capture targets. Weak connections trade detail for responsive motion; clean high-capacity paths restore higher quality with hysteresis. Manual quality presets and the default-enabled Automatic setting are preserved.
+- Updated viewers report bounded decode/drop measurements over the existing encrypted control channel. Each host sender independently adapts to an overloaded receiver; this capability is negotiated so older peers retain their existing protocol.
+
+### Fixed
+
+- Loss calculations account for the RTCP report interval instead of dividing delayed losses by only the latest half-second of sent packets. Idle desktops and constant VPN latency no longer act as evidence of congestion.
+- Capture upgrades request the desired dimensions as well as maximum dimensions, allowing capture detail to recover after a bandwidth drop.
+
+### Added
+
+- Reproducible local media benchmarks with an optional real, rate-limited UDP/TURN path, bounded queues, injected latency and recovery. These tests use isolated profiles and do not modify system networking or require a production relay.
+
 ## 0.30.0 — 2026-10-28
 
 ### Added

@@ -9,12 +9,13 @@ function stats({capacity=100000000,rtt=.02,sent=100,lost=0,limitation='none'}={}
 test('automatic quality drops under actual sustained bandwidth pressure with a stable ceiling',()=>{
  const policy=new QualityPolicy(PROFILES);policy.sample(stats({capacity:2000000,sent:100,limitation:'bandwidth'}),0);
  const plan=policy.sample(stats({capacity:2000000,sent:200,limitation:'bandwidth'}),2000);
- assert.equal(plan.name,'speed');assert.equal(plan.bitrate,PROFILES.speed.bitrate);
+ const settled=policy.sample(stats({capacity:2000000,sent:300,limitation:'bandwidth'}),2500);
+ assert.equal(settled.name,'economy');assert.equal(settled.bitrate,policy.profiles.economy.bitrate);
 });
 test('high capacity upgrades slowly, while a low-traffic desktop does not masquerade as a speed test',()=>{
  const idle=new QualityPolicy(PROFILES);for(let n=0;n<30;n++)idle.sample(stats({sent:100}),n*2000);assert.equal(idle.name,'balanced');
- const active=new QualityPolicy(PROFILES);for(let n=0;n<6;n++)active.sample(stats({sent:n*100}),n*2000);assert.equal(active.name,'quality');
- active.sample(stats({sent:700}),12000);assert.equal(active.name,'quality');
+ const active=new QualityPolicy(PROFILES);for(let n=0;n<6;n++)active.sample(stats({sent:n*100,rtt:.1,capacity:20000000}),n*1000);assert.equal(active.name,'quality');
+ active.sample(stats({sent:700,rtt:.1,capacity:20000000}),6000);assert.equal(active.name,'quality');
 });
 test('loss/added latency/cpu pressure cause backoff even when nominal capacity is high',()=>{
  for(const bad of [{rtt:.9},{lost:30},{limitation:'cpu'}]){
@@ -34,8 +35,8 @@ test('startup estimates and a constant VPN latency do not throttle a healthy str
 
 test('a capped estimate cannot ratchet the ceiling down and recovered traffic can probe up',()=>{
  const policy=new QualityPolicy(PROFILES);policy.reset('economy');
- for(let n=0;n<11;n++)policy.sample(stats({capacity:PROFILES.economy.bitrate,sent:n*100}),n*2000);
- assert.equal(policy.name,'speed');
+ for(let n=0;n<11;n++)policy.sample(stats({capacity:policy.profiles.economy.bitrate,sent:n*100}),n*1000);
+ assert.equal(policy.name,'balanced');
 });
 
 test('packet queue deltas lower quality without mistaking cumulative counters for current pressure',()=>{
@@ -73,4 +74,74 @@ test('fixed quality overrides pending automatic work, survives polls, and serial
  const old=quality.apply('quality',40000000),manual=quality.setMode(false,'economy');await Promise.all([old,manual]);
  await quality.poll();assert.equal(quality.name,'economy');assert.equal(applied.at(-1),2500000);assert.equal(quality.automatic,false);
  quality.stop();await quality.apply('lan',100000000);assert.equal(applied.at(-1),2500000);
+});
+
+test('sub-megabit pressure jumps directly to a usable capture size within one second',()=>{
+ for(const [capacity,name] of [[100000,'survival'],[256000,'narrow'],[700000,'mobile']]){
+  const policy=new QualityPolicy(PROFILES);
+  for(let n=0;n<=3;n++)policy.sample(stats({capacity,sent:n*30,limitation:'bandwidth'}),n*500);
+  assert.equal(policy.name,name);
+  assert.ok(policy.profiles[name].height<=540);
+ }
+});
+
+test('idle low estimates never collapse resolution, and prolonged pressure has a floor',()=>{
+ const idle=new QualityPolicy(PROFILES);
+ for(let n=0;n<100;n++)idle.sample(stats({capacity:90000,sent:10,limitation:'bandwidth'}),n*500);
+ assert.equal(idle.name,'balanced');
+ const active=new QualityPolicy(PROFILES);
+ for(let n=0;n<100;n++)active.sample(stats({capacity:90000,sent:n*30,limitation:'bandwidth'}),n*500);
+ assert.equal(active.name,'survival');assert.equal(active.sample(stats({capacity:90000,sent:3100}),51000).bitrate,250000);
+});
+
+test('fast LAN skips warmup while recovered internet climbs without oscillation',()=>{
+ const lan=new QualityPolicy(PROFILES);
+ for(let n=0;n<=3;n++)lan.sample(stats({capacity:100000000,sent:n*30}),n*500);
+ assert.equal(lan.name,'lan');
+ const internet=new QualityPolicy(PROFILES);
+ for(let n=0;n<6;n++)internet.sample(stats({capacity:100000,sent:n*30,rtt:.2,limitation:'bandwidth'}),n*500);
+ assert.equal(internet.name,'survival');
+ const upgrades=[];let last=internet.name;
+ for(let n=6;n<=50;n++){
+  internet.sample(stats({capacity:10000000,sent:n*30,rtt:.2}),n*500);
+  if(last!==internet.name){upgrades.push(internet.name);last=internet.name;}
+ }
+ assert.deepEqual(upgrades,['narrow','mobile','economy','balanced']);
+});
+
+test('automatic low-bandwidth rungs do not change saved manual presets',async()=>{
+ const sizes=[],params=[],track={readyState:'live',async applyConstraints(c){sizes.push(c);}},sender={getParameters:()=>({encodings:[{}]}),async setParameters(p){params.push(p);}};
+ const quality=new StreamQuality({profiles:PROFILES,peer:{},stream:{getVideoTracks:()=>[track]},sender});
+ await quality.apply('survival',250000);assert.equal(sizes.at(-1).height.max,270);assert.equal(params.at(-1).encodings[0].maxFramerate,30);
+ await quality.setMode(false,'economy');assert.equal(sizes.at(-1).height.max,720);assert.equal(params.at(-1).encodings[0].maxFramerate,30);assert.equal(params.at(-1).encodings[0].maxBitrate,2500000);
+ quality.stop();
+});
+
+test('receiver decode pressure adapts capture but stale or malformed feedback cannot',()=>{
+ const policy=new QualityPolicy(PROFILES);
+ for(let n=0;n<4;n++)policy.sample(stats({capacity:5000000,sent:n*50}),n*500,{fps:12,decodeMs:50,dropRatio:.4,at:n*500});
+ assert.equal(policy.name,'economy');
+ const recovered=new QualityPolicy(PROFILES);
+ for(let n=0;n<5;n++)recovered.sample(stats({capacity:5000000,sent:n*50}),5000+n*500,{fps:12,decodeMs:50,dropRatio:.4,at:0});
+ assert.equal(recovered.name,'balanced');
+ const controller=new StreamQuality({profiles:PROFILES});
+ for(const data of [null,{}, {fps:Infinity,decodeMs:50,dropRatio:.4},{fps:20,decodeMs:-1,dropRatio:.4},{fps:20,decodeMs:50,dropRatio:2}])controller.feedback(data);
+ assert.equal(controller.receiver,undefined);controller.feedback({fps:20,decodeMs:50,dropRatio:.4});assert.equal(controller.receiver.fps,20);
+});
+
+test('delayed RTCP loss is divided by the packets sent over its own reporting interval',()=>{
+ const policy=new QualityPolicy(PROFILES);
+ for(let n=0;n<=8;n++){
+  const report=stats({capacity:5000000,sent:n*20,lost:n===8?2:0});report.get('remote').timestamp=n===8?4000:0;
+  policy.sample(report,n*500);
+ }
+ assert.equal(policy.name,'balanced');assert.equal(policy.badSince,null);
+});
+
+test('an ICE path change resets the latency baseline instead of treating a new VPN RTT as permanent congestion',()=>{
+ const policy=new QualityPolicy(PROFILES);
+ for(let n=0;n<8;n++){
+  const report=stats({capacity:5000000,sent:n*40,rtt:n<3?.01:.2});report.get('pair').id=n<3?'lan':'vpn';policy.sample(report,n*500);
+ }
+ assert.equal(policy.name,'balanced');assert.equal(policy.baseRtt,.2);
 });

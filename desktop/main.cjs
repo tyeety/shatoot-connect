@@ -11,6 +11,13 @@ const network = require('../shared/network.cjs');
 // This app loads only its bundled UI; publish usable host candidates to consented peers.
 app.commandLine.appendSwitch('disable-features',[app.commandLine.getSwitchValue('disable-features'),'WebRtcHideLocalIpsWithMdns'].filter(Boolean).join(','));
 
+// A remote desktop must prefer a fresh frame over a smooth, delayed replay.
+// jitterBufferTarget is only a minimum; cap video playout waiting as well.
+// Verified against the pinned Electron runtime by the real UDP media benchmark.
+// https://webrtc.googlesource.com/src/+/14a23a32c4419210c65cd5e4f98557c3f19ab3a0
+const videoTrials=app.commandLine.getSwitchValue('force-fieldtrials');
+if(!videoTrials.includes('WebRTC-ForcePlayoutDelay/'))app.commandLine.appendSwitch('force-fieldtrials',videoTrials+(videoTrials&&!videoTrials.endsWith('/')?'/':'')+'WebRTC-ForcePlayoutDelay/min_ms:0,max_ms:30/');
+
 const smoke = !app.isPackaged && process.argv.includes('--smoke-test');
 if(smoke&&process.argv.includes('--chat-notification-smoke'))app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 if (smoke) { app.setPath('userData', path.join(__dirname, process.argv.includes('--media-smoke')?'../artifacts/media-profile':'../artifacts/smoke-profile')); const desktop = path.join(__dirname, '../artifacts/test-desktop'); fs.mkdirSync(desktop, { recursive: true }); app.setPath('desktop', desktop); const downloads = path.join(__dirname, '../artifacts/test-downloads'); fs.mkdirSync(downloads, { recursive: true }); app.setPath('downloads', downloads); }

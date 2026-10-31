@@ -4,7 +4,7 @@ const api = window.shatootconnect;
 const tr = value => window.i18n.translate(value);
 let config, socket, connectPromise, role = 'idle', stream, pc, sender, controlChannel, pointerChannel;
 let iceServers = [], candidates = [], peerGeneration = 0, allowedControl = false, statsTimer, joinTimer, previousStats;
-let profileName = 'speed', pointerFrame = 0, latestPointer, toastTimer, currentStats = {};
+let profileName = 'speed', pointerFrame = 0, latestPointer, toastTimer, currentStats = {}, peerMediaFeedback=false;
 let requestPending = false, messageQueue = Promise.resolve();
 let outgoingAttempt=null,serverAttempt=null,remoteComputer={};
 function applyComputerPreview(element,record){element.classList.add('computer-preview');if(record.preview){const image=document.createElement('img');image.className='desktop-preview';image.src=record.preview;image.alt='';image.draggable=false;element.prepend(image);}}
@@ -223,7 +223,7 @@ function preferCodec() {
   for (const transceiver of pc.getTransceivers()) if (transceiver.receiver.track.kind === 'video') transceiver.setCodecPreferences(codecs);
 }
 function createPeer() {
-  layoutSync = new window.LayoutSync(role === 'host');motionSend.reset();motionReceive.reset();peerMotionV2=false;
+  layoutSync = new window.LayoutSync(role === 'host');motionSend.reset();motionReceive.reset();peerMotionV2=false;peerMediaFeedback=false;
   const active = new RTCPeerConnection({ iceServers, iceTransportPolicy: forceRelay ? 'relay' : 'all', bundlePolicy: 'max-bundle' }); pc = active;
   const generation = peerGeneration;
   active.onicecandidate = event => { if (event.candidate && signalReady() && pc === active) send({ type: 'signal', data: { candidate: event.candidate.toJSON() } }); };
@@ -262,10 +262,10 @@ function bindChannel(channel) {
     if (opened || generation !== peerGeneration) return; opened = true;
     if (channel.label === 'pointer' && role === 'host' && lastLocalCursor) channel.send(JSON.stringify({ ...lastLocalCursor, sequence:++cursorSequence, visible: config.showHostCursor && lastLocalCursor.visible }));
     if (channel.label === 'control') api.watchKeyboard(true).catch(e => status(e.message, true));
-    if(role==='host'&&channel.label==='control')channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,motionV2:true,privacyScreen:hostPrivacyAllowed}));
+    if(role==='host'&&channel.label==='control')channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,motionV2:true,mediaFeedback:true,privacyScreen:hostPrivacyAllowed}));
     if(channel.label==='control'&&role==='host')channel.send(JSON.stringify(hostInputState));
     if (role === 'viewer' && channel.label === 'control') {
-      channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, privacyScreen:hostPrivacyAllowed }));
+      channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, mediaFeedback:true, privacyScreen:hostPrivacyAllowed }));
       channel.send(JSON.stringify({ type: 'profile', name: config.qualityProfile, auto:config.autoQuality!==false }));
       if (allowedControl) { api.exchange('viewer-start').catch(e => status(e.message, true)); api.watchKeyboard(true).catch(e => status(e.message, true));  }
     }
@@ -281,10 +281,12 @@ function bindChannel(channel) {
     if(channel.label==='control'&&data.type==='privacy-screen-state'&&role==='viewer'){setRemotePrivacy(data);return;}
     if(channel.label==='control'&&data.type==='privacy-screen'&&role==='host'&&typeof data.active==='boolean'){api.privacyScreen(data.active).then(value=>channel.readyState==='open'&&channel.send(JSON.stringify({type:'privacy-screen-state',...value}))).catch(e=>{if(channel.readyState==='open')channel.send(JSON.stringify({type:'privacy-screen-state',active:false,allowed:false,error:e.message}));});return;}
     if(role==='viewer'&&channel.label==='control'&&data.type==='input-state'){setRemoteInputState(data);return;}
+    if(role==='host'&&channel.label==='control'&&data.type==='media-feedback'){videoQuality?.feedback(data);return;}
     if (data.type === 'features' && channel.label === 'control') {
-      if (role === 'host' && data.keyboardSync === true) channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, privacyScreen:hostPrivacyAllowed }));
+      if (role === 'host' && data.keyboardSync === true) channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, mediaFeedback:true, privacyScreen:hostPrivacyAllowed }));
       if(role==='viewer'){remotePrivacyAllowed=data.privacyScreen===true&&allowedControl;privacyButton();}
       if(role==='viewer')peerMotionV2=data.motionV2===true;
+      if(role==='viewer')peerMediaFeedback=data.mediaFeedback===true;
       if (role === 'viewer') { peerKeyboardSync = data.keyboardSync === true && data.bidirectionalLayout === true; layoutSync.ready = peerKeyboardSync; if (allowedControl) { layoutSync.observed = ''; const initial = layoutSync.observe(guestKeyboardLayout); if (initial) controlChannel.send(JSON.stringify(initial)); } } else layoutSync.ready = data.bidirectionalLayout === true;
       return;
     }
@@ -412,7 +414,7 @@ function remoteFrameReady(){if(!config?.viewerWindow||!loadingScreen)return;load
 function interruptSession(message,minimum=0){const recover=!!remoteRetry?.wanted&&remoteRetry.established;stopSession(true,'transport-failed');if(recover){remoteRetry.interrupted(minimum);showRemoteLoading(message);}else showRemoteLoading(message,true);status(message,true);}
 function startStats() {
   clearInterval(statsTimer);
-  let polling = false;
+  let polling = false, previousReceiver;
   statsTimer = setInterval(async () => {
     if (!pc || polling) return;
     polling = true;
@@ -426,6 +428,13 @@ function startStats() {
       }
       if (transport) pair = report.get(transport.selectedCandidatePairId);
       if (!video) return;
+      if(role==='viewer'&&peerMediaFeedback&&controlChannel?.readyState==='open'&&controlChannel.bufferedAmount<4096){
+        const before=previousReceiver,frames=before?video.framesDecoded-before.frames:0,dropped=before?Math.max(0,(video.framesDropped||0)-before.dropped):0;
+        if(frames>0&&video.timestamp>before.time){
+          controlChannel.send(JSON.stringify({type:'media-feedback',fps:frames*1000/(video.timestamp-before.time),decodeMs:Math.max(0,(video.totalDecodeTime||0)-before.decode)*1000/frames,dropRatio:dropped/(frames+dropped)}));
+        }
+        previousReceiver={time:video.timestamp,frames:video.framesDecoded||0,dropped:video.framesDropped||0,decode:video.totalDecodeTime||0};
+      }
       const bytes = role === 'host' ? video.bytesSent : video.bytesReceived;
       const bitrate = previousStats && video.timestamp > previousStats.timestamp ? (bytes - previousStats.bytes) * 8 / (video.timestamp - previousStats.timestamp) / 1000 : 0;
       previousStats = { bytes, timestamp: video.timestamp };

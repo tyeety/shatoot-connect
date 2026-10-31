@@ -20,15 +20,16 @@
   const motionReceive=new window.MotionSequence();
   function bind(channel) {
     channel.onopen = () => {
-      if (channel.label === 'control') {api.watchKeyboard(true);channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,motionV2:true,privacyScreen:privacyAllowed}));channel.send(JSON.stringify(hostInputState));}
+      if (channel.label === 'control') {api.watchKeyboard(true);channel.send(JSON.stringify({type:'features',keyboardSync:true,bidirectionalLayout:true,motionV2:true,mediaFeedback:true,privacyScreen:privacyAllowed}));channel.send(JSON.stringify(hostInputState));}
       if(channel.label==='pointer'&&lastCursor)channel.send(JSON.stringify({...lastCursor,sequence:++cursorSequence,visible:config.showHostCursor&&lastCursor.visible}));
     };
     channel.onmessage = event => {
       if (typeof event.data !== 'string' || event.data.length > 2048) return;
       let data; try { data = JSON.parse(event.data); } catch { return; }
       if (!data || typeof data !== 'object') return;
+      if(data.type==='media-feedback'&&channel.label==='control'){videoQuality?.feedback(data);return;}
       if (data.type === 'profile' && channel.label === 'control') { quality(data.name,data.auto===true).catch(()=>stop('transport-failed')); return; }
-      if (data.type === 'features' && channel.label === 'control') { sync.ready = data.bidirectionalLayout === true; channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, privacyScreen:privacyAllowed })); return; }
+      if (data.type === 'features' && channel.label === 'control') { sync.ready = data.bidirectionalLayout === true; channel.send(JSON.stringify({ type: 'features', keyboardSync: true, bidirectionalLayout: true,motionV2:true, mediaFeedback:true, privacyScreen:privacyAllowed })); return; }
       if (data.type === 'guest-cursor') { api.guestCursor(data); return; }
       if(channel.label==='control'&&data.type==='privacy-screen'&&typeof data.active==='boolean'){api.privacyScreen(data.active).then(value=>channel.readyState==='open'&&channel.send(JSON.stringify({type:'privacy-screen-state',...value}))).catch(e=>{if(channel.readyState==='open')channel.send(JSON.stringify({type:'privacy-screen-state',active:false,allowed:false,error:e.message}));});return;}
       if (!allowed) return;
