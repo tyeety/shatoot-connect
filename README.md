@@ -1,5 +1,7 @@
 # Shatoot Connect
 
+Saved-computer desktop shortcuts use the latest cached profile photo (or the app icon when unavailable). Icons update when a new photo is learned and remain valid across app upgrades. Disconnect/Cancel closes its remote tab; recoverable network interruptions keep their reconnect controls.
+
 Windows remote desktop, nearby-computer discovery, private/group chat and file transfer. English is the default; Persian/RTL is available in the client and Server Manager. Client Settings uses a vertical tab sidebar (left in English, right in Persian) with independently scrolling content and Up/Down, Home/End keyboard navigation. In the client, **Settings > Display and language > Theme** switches between Dark (default) and Light; the saved choice applies immediately to main/chat windows, notifications and connection panels. This repository contains the client, coordinator, Windows service manager, native input helper, tests and packaging sources.
 
 [راهنمای فارسی](README.fa.md) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/tyeety/shatoot-connect/releases) · [Issues](https://github.com/tyeety/shatoot-connect/issues)

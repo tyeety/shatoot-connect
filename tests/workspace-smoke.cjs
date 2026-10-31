@@ -63,8 +63,11 @@ module.exports=async({host,states,app,log})=>{
  if(!await run(host,`document.body.dataset.workspace==='${second.win.id}'`))throw Error('Closing an inactive remote tab changed the selected tab');
  for(let n=0;n<100&&!tab.win.isDestroyed();n++)await pause(100);if(!tab.win.isDestroyed())throw Error('Closing tab did not close the RTC renderer');
  if(!process.argv.includes('--workspace-ui-only')&&!await run(second.win,"pc?.connectionState==='connected'"))throw Error('Closing one tab disconnected another');
- await run(host,`api.workspace('close',{id:'${second.win.id}'})`);
- for(let n=0;n<100&&!second.win.isDestroyed();n++)await pause(100);
+ await run(second.win,"setTimeout(()=>document.querySelector('#disconnect').click(),0);true");
+ for(let n=0;n<100&&!second.win.isDestroyed();n++)await pause(100);if(!second.win.isDestroyed())throw Error('Intentional disconnect left its tab open');await until(host,"document.body.dataset.workspace==='home'");
+ if(!process.argv.includes('--workspace-ui-only')){
+  await run(host,`api.openRemote({address:${JSON.stringify('127.0.0.1:'+direct.port)},password:${JSON.stringify(direct.password)}})`);let ended;for(let n=0;n<100;n++){ended=[...states.values()].find(s=>s.win.workspaceTab);if(ended)break;await pause(100);}if(!ended)throw Error('Host-ended fixture tab missing');await until(ended.win,"document.querySelector('#remote-video').videoWidth>0");await run(host,"document.querySelector('#host-stop').click();true");for(let n=0;n<100&&!ended.win.isDestroyed();n++)await pause(100);if(!ended.win.isDestroyed())throw Error('Host-ended connection left its tab open');
+ }
  for(const state of states.values())if(!state.owner&&!state.viewerOwner)await run(state.win,"stopSession(true);true");
  await pause(1000);
  log('Single-window fixed tabs, exact contact navigation, message menu/pin, profile modal and real RTC tab lifecycle passed');

@@ -84,7 +84,8 @@ function validateDirect(address) {
 const preferences = new (require('./preferences.cjs').ClientPreferences)({ read: settings, write: saveSettings, validateEndpoint, validateDirect,
   encrypt: text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows credential encryption is unavailable.'); return safeStorage.encryptString(text).toString('base64'); },
   decrypt: text => safeStorage.decryptString(Buffer.from(text, 'base64')) });
-function computerChanged(){for(const s of states.values())for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed())win.webContents.send('computer-cards-changed');}
+let shortcutRefreshTimer;
+function computerChanged(){clearTimeout(shortcutRefreshTimer);shortcutRefreshTimer=setTimeout(()=>{for(const record of preferences.list())if(record.shortcut&&fs.existsSync(path.join(app.getPath('desktop'),preferences.shortcutName(record.id))))try{createFavoriteShortcut(record.id);}catch{}},500);for(const s of states.values())for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed())win.webContents.send('computer-cards-changed');}
 function rememberComputer(peer,route,preview=false){return preferences.rememberComputer({...peer,preview:preview?peer.preview:undefined},route);}
 function decorateDiscovery(value){return {...value,peers:value.peers.map(peer=>preferences.decorate(peer))};}
 const wallpaperPreview=require('./wallpaper.cjs').wallpaperReader({nativeImage:require('electron').nativeImage,executable:nativeExecutable});
@@ -108,14 +109,21 @@ function getLauncher(){
   if(!stableLauncher){stableLauncher=new(require('./launcher.cjs').Launcher)({directory:path.join(app.getPath('userData'),'launcher'),icon:path.join(process.resourcesPath,'app-icon.ico'),powershell:path.join(process.env.SystemRoot||'C:\\Windows','System32/WindowsPowerShell/v1.0/powershell.exe')});stableLauncher.register(process.env.PORTABLE_EXECUTABLE_FILE||app.getPath('exe'),app.getVersion());}
   return stableLauncher;
 }
+const favoriteShortcutState=new Map();
 function createFavoriteShortcut(id) {
   const record = preferences.get(id);
   const executable = process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe');
   const target = path.join(app.getPath('desktop'), preferences.shortcutName(id));
   const args = `${app.isPackaged ? '' : `"${path.resolve(__dirname, '..')}" `}--connect-saved=${id}`;
   const link=app.isPackaged?getLauncher().link({favorite:id}):{target:executable,cwd:path.dirname(executable),args,icon:executable,iconIndex:0};
-  if (!shell.writeShortcutLink(target, fs.existsSync(target) ? 'update' : 'create', { ...link,description: `Shatoot Connect: ${record.name}` })) throw new Error('Desktop shortcut could not be created.');
-  preferences.markShortcut(id); return target;
+  const directory=path.join(app.getPath('userData'),'shortcut-icons'),icons=require('./shortcut-icon.cjs');
+  const icon=icons.avatarIcon({directory,id,avatar:record.avatar,nativeImage:require('electron').nativeImage});
+  const details={...link,...(icon?{icon,iconIndex:0}:{}),description:`Shatoot Connect: ${record.name}`},signature=JSON.stringify(details);
+  if(!fs.existsSync(target)||favoriteShortcutState.get(id)!==signature){
+    if(!shell.writeShortcutLink(target,fs.existsSync(target)?'update':'create',details))throw Error('Desktop shortcut could not be created.');
+    favoriteShortcutState.set(id,signature);icons.pruneIcons(directory,id,icon);
+  }
+  if(!record.shortcut)preferences.markShortcut(id);return target;
 }
 function identity() {
   const saved = settings();
@@ -523,7 +531,7 @@ ipcMain.handle('favorite-delete', async (e, id) => {
   state(e); preferences.get(id);
   const shortcut = path.join(app.getPath('desktop'), preferences.shortcutName(id));
   if (fs.existsSync(shortcut)) { const link = shell.readShortcutLink(shortcut); if (link.args.includes(`--connect-saved=${id}`)||link.args.includes(`-Favorite ${id}`)) await shell.trashItem(shortcut); }
-  preferences.remove(id); return preferences.list();
+  preferences.remove(id);favoriteShortcutState.delete(id);require('./shortcut-icon.cjs').pruneIcons(path.join(app.getPath('userData'),'shortcut-icons'),id);return preferences.list();
 });
 ipcMain.handle('favorite-shortcut', (e, id) => { state(e); return createFavoriteShortcut(id); });
 function watchKeyboard(s, enabled) {

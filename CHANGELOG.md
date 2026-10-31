@@ -13,6 +13,17 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.34.1 — 2026-10-31
+
+### Added
+
+- Saved-computer desktop shortcuts use the contact's cached profile image, with 16/32/48/256-pixel PNG-backed ICO frames. Icons live in user data, survive upgrades and refresh when the learned profile changes; missing/invalid photos fall back to the application icon. Obsolete generated images are pruned after the link is updated.
+
+### Fixed
+
+- Intentional Disconnect and Cancel close the associated remote tab. A host ending an established session also closes that tab; retryable transport interruptions retain the recovery UI, and initial approval/authentication errors remain reviewable.
+- Shortcut targets and favorite IDs remain stable while profile icons change, so updates do not require recreating links.
+
 ## 0.34.0 — 2026-10-31
 
 ### Added
