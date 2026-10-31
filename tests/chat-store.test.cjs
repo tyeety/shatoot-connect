@@ -15,6 +15,24 @@ function fixture(t) {
   const store = new ChatStore(options); store.contact({ deviceId: peer, name: 'همکار' }, { type: 'lan', address: '192.168.1.10:8788' }); return { store, options, self, peer, other };
 }
 
+test('story views, likes and comments authenticate actors, persist offline and relay only through the author',t=>{
+ const {store,options,self,peer,other}=fixture(t);store.contact({deviceId:other,name:'Other'},{});
+ const receiver=new ChatStore({...options,file:options.file+'.viewer',self:peer});receiver.contact({deviceId:self,name:'Author'},{});
+ const story={id:crypto.randomUUID(),sender:self,text:'Story',image:'',design:{media:{scale:2,rotation:25},layers:[{type:'text',text:'Overlay',rotation:-40}]}};
+ store.story(story,true);receiver.story({...story,ageMs:0},false,self);assert.equal(receiver.list().stories[0].design.layers[0].rotation,-40);
+ receiver.storySeen(story.id);receiver.storySeen(story.id);const view=receiver.pendingStoryEvents(self)[0];assert.equal(receiver.pendingStoryEvents(self).length,1);store.storyEvent(view,false,peer);
+ assert.equal(store.list().storyEvents.filter(e=>e.kind==='view').length,1);assert.equal(store.pendingStoryEvents(other).length,0);
+ assert.throws(()=>store.storyEvent({...view,id:crypto.randomUUID(),sender:other},false,peer),/author/);
+ const like=receiver.storyEvent({id:crypto.randomUUID(),story:story.id,sender:peer,kind:'like',liked:true},true).event;
+ store.storyEvent(like,false,peer);assert.equal(store.pendingStoryEvents(other)[0].liked,true);assert.equal(store.storyEvent(like,false,peer).duplicate,true);
+ const comment=receiver.storyEvent({id:crypto.randomUUID(),story:story.id,sender:peer,kind:'comment',text:'Comment'},true).event;store.storyEvent(comment,false,peer);
+ const follower=new ChatStore({...options,file:options.file+'.follower',self:other});follower.contact({deviceId:self,name:'Author'},{});follower.story({...story,ageMs:0},false,self);
+ assert.throws(()=>follower.storyEvent(comment,false,peer),/author/);follower.storyEvent(comment,false,self);assert.equal(follower.list().storyEvents[0].text,'Comment');assert.throws(()=>follower.storyEvent(view,false,self),/viewer/);
+ const unlike=receiver.storyEvent({id:crypto.randomUUID(),story:story.id,sender:peer,kind:'like',liked:false},true).event;store.storyEvent(unlike,false,peer);store.storyEvent(like,false,peer);assert.equal(store.list().storyEvents.find(e=>e.kind==='like').liked,false);
+ const reopened=new ChatStore(options);assert.equal(reopened.list().storyEvents.length,3);assert.equal(reopened.pendingStoryEvents(other).length,2);reopened.deliveredStoryEvent(unlike.id,other);assert.equal(reopened.pendingStoryEvents(other).length,1);
+ store.deleteStory(story.id);assert.equal(store.list().storyEvents.length,0);assert.throws(()=>store.storyEvent(comment,false,peer),/expired/);
+});
+
 test('receiver-local message age compensates clock skew and preserves an offline queue delay across reload',t=>{
  const {store,options,self,peer}=fixture(t),conversation=`p:${peer}`,now=Date.now();
  const own=store.append({id:crypto.randomUUID(),sender:self,name:'Me',conversation,kind:'text',text:'first',at:now,pending:[peer]},true).message;

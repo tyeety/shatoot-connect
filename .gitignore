@@ -22,3 +22,5 @@ chat-*.dat*
 *.pem
 .env.*
 .vs/
+/desktop/ui/assets/mediabunny.min.js
+/desktop/ui/assets/mediabunny.LICENSE.txt

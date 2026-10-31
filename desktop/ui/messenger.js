@@ -55,6 +55,14 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   cancelConnect.onclick=run(async()=>{connectSequence++;connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;$('chat-error').textContent=tr('Connection cancelled.');await engine.cancelPending();});
   function open() { if(window.workspace){window.workspace.show('chat');return;}if (!detached && !window.shatootconnectSmoke) { api.openChat(); return; } if (!$('messenger-dialog').open) $('messenger-dialog').showModal(); render(); }
   function contact(id) { return engine.catalog.contacts.find(c => c.deviceId === id); }
+  let messageInfo;
+  function showMessageInfo(message){
+    if(!messageInfo){messageInfo=document.createElement('dialog');messageInfo.className='social-dialog message-info';const heading=document.createElement('div');heading.className='settings-heading';const title=document.createElement('h2');title.textContent=tr('Message info');heading.append(title,button('Close',()=>messageInfo.close(),'close'));messageInfo.append(heading,document.createElement('div'));document.body.append(messageInfo);}
+    messageInfo.dataset.message=message.id;const list=messageInfo.lastElementChild;list.replaceChildren();const group=engine.group(message.conversation.slice(2));
+    const ids=message.recipients||group?.members.filter(m=>m.deviceId!==message.sender).map(m=>m.deviceId)||[];
+    for(const id of ids){const peer=id===self.deviceId?self:contact(id)||group?.members.find(m=>m.deviceId===id)||{name:tr('Contact')};const row=document.createElement('div');row.className='story-person-row';const image=document.createElement('img');image.src=peer.avatar||'assets/person.svg';const label=document.createElement('span');label.textContent=peer.displayName||peer.name;const state=document.createElement('small');state.textContent=tr(message.seenBy?.includes(id)?'Seen':message.deliveredTo?.includes(id)?'Delivered':'Waiting for delivery');row.append(image,label,state);list.append(row);}
+    if(!messageInfo.open)messageInfo.showModal();
+  }
   function online(id) { return !!engine.peer(id); }
   function routeFor(id) { const nearby = discovery.peers.find(p => p.deviceId === id); if (nearby?.endpoints.length) return { type: 'lan', address: nearby.endpoints[0], deviceId: id, name: nearby.name }; const saved = contact(id); return saved?.route ? { ...saved.route, deviceId: id, name: saved.name } : null; }
   async function start(destination) {
@@ -106,6 +114,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
         if(row.attachment){actions.append(button(own?'Open sent files':'Open received files',()=>api.collaboration('open-attachment',{token:row.attachment}),'play_arrow'));actions.append(button('Open containing folder',()=>api.collaboration('reveal-attachment',{token:row.attachment}),'folder'));}
         const copy=button('Copy',()=>row.kind==='file'?api.chatClipboard('copy',row.attachment):api.copyText(selectedMessageText(text)||rows.find(m=>m.id===row.id)?.text||row.text),'content_copy');copy.disabled=row.kind==='file'&&!row.attachment;copy.addEventListener('pointerdown',event=>{if(selectedMessageText(text))event.preventDefault();});actions.append(copy);
         actions.append(button('Reply',()=>beginReply(rows.find(m=>m.id===row.id)||row),'reply'),button('Forward',()=>forwardPicker(rows.find(m=>m.id===row.id)||row),'forward'));
+        if(own&&row.conversation.startsWith('g:'))actions.append(button('Message info',()=>showMessageInfo(rows.find(m=>m.id===row.id)||row),'info'));
         actions.append(button('React to message',()=>extras.openReaction(rows.find(m=>m.id===row.id)||row),'sentiment_satisfied'));
         if(own){if(row.kind==='text')actions.append(button('Edit message',()=>editMessage(rows.find(m=>m.id===row.id)||row),'edit'));actions.append(button('Delete message',async()=>{if(!await confirmDelete(rows.find(m=>m.id===row.id)||row))return;await engine.changeMessage(row.conversation,row.id,'',true);await load(false);},'delete'));}
         actions.append(button(engine.catalog.messagePins?.[selected]===row.id?'Unpin message':'Pin message',async()=>{await api.collaboration('pin-message',{conversation:row.conversation,id:engine.catalog.messagePins?.[row.conversation]===row.id?'':row.id});await engine.refresh();},'pin'));
@@ -134,6 +143,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
       extras?.renderReactions(item,row);
       const status=row.status==='seen'?'seen':row.status==='delivered'?'delivered':row.status==='failed'?'failed':'queued',statusText=tr(({seen:'Seen',delivered:'Delivered',failed:'Send failed',queued:'Waiting for delivery'})[status]);
       const meta=item.querySelector('.message-time');meta.textContent=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{hour:'2-digit',minute:'2-digit'}).format(date);meta.title=new Intl.DateTimeFormat(window.i18n.language==='fa'?'fa-IR':'en',{dateStyle:'full',timeStyle:'short'}).format(date)+(row.sender===self.deviceId?' · '+statusText:'')+(row.editedAt?' · '+tr('Edited'):'');
+      if(messageInfo?.open&&messageInfo.dataset.message===row.id)showMessageInfo(row);
       const receipt=item.querySelector('.message-receipt');if(receipt){receipt.dataset.status=status;receipt.title=statusText;receipt.setAttribute('aria-label',statusText);receipt.className='message-receipt mi '+({seen:'done_all',delivered:'done',failed:'error_outline',queued:'schedule'})[status];}
       const index=(positions.get(day)||0)+1;positions.set(day,index);if(group.children[index]!==item)group.insertBefore(item,group.children[index]||null);
     }
@@ -202,7 +212,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   engine = new window.CollaborationClient({ api, self, internet, ensureInternet, changed: () => { render(true); publish(); }, error, progress: value => { const text = tr(value.text) + (Number.isInteger(value.percent) ? ` ${value.percent}%` : ''); progress.set(value.conversation, text); if (selected === value.conversation) $('chat-progress').textContent = text; publish(); } });
   if(!detached)api.onChatTarget(target=>navigate(target).catch(error));
   if (!detached) api.onChatCommand(async (operation, args) => { if (operation === 'snapshot') return snapshot(); if (operation === 'close') { engine.close(engine.peer(args[0])); return; } const result = await engine[operation](...args); return operation === 'connect' ? { peer: result.peer } : result; });
-  window.collaboration = engine;social=window.installSocial?.({api,engine,self,button,tr,error});window.social=social;
+  window.collaboration = engine;social=window.installSocial?.({api,engine,self,button,tr,error,pickSticker:choose=>extras.openSticker(choose)});window.social=social;
   document.addEventListener('click',event=>{if(!event.target.closest('.chat-message'))document.querySelectorAll('.chat-message-actions.menu-open').forEach(m=>m.classList.remove('menu-open'));});
   $('chat-title').onclick=()=>{const peer=contact(selected.slice(2));if(peer)social?.showProfile(peer);};
   $('open-messenger').onclick = open;

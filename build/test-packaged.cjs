@@ -45,6 +45,12 @@ async function main() {
     if (child.exitCode !== 0 || !fs.existsSync(marker)) throw new Error(`Portable launch failed (exit ${child.exitCode}): ${fs.existsSync(marker) ? fs.readFileSync(marker,'utf8') : 'Electron probe never started; check embedded ZIP/7z format.'}`);
     const probe = JSON.parse(fs.readFileSync(marker, 'utf8'));
     const source = path.join(root, 'release/win-unpacked/resources/app.asar');
+    if(fs.existsSync(source)){
+      const archive=require('@electron/asar');
+      const bundle=archive.extractFile(source,path.join('desktop','ui','assets','mediabunny.min.js'));
+      const license=archive.extractFile(source,path.join('desktop','ui','assets','mediabunny.LICENSE.txt')).toString();
+      if(bundle.length<700000||!license.includes('mediabunny-1.65.0.tgz')||!license.includes('Mozilla Public License'))throw Error('Packaged media editor bundle or corresponding-source license is missing.');
+    }
     if (fs.existsSync(source) && probe.archive !== digest(source)) throw new Error('Extracted portable payload differs from win-unpacked.');
     console.log(`Final portable extracted and executed Electron ${probe.electron}; packaged ASAR SHA-256 verified.`);
     if (ui) {

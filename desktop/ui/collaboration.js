@@ -30,7 +30,12 @@
         this.retries.set(key,Date.now()+30000);this.connect({type:'id',address:card.address,endpoint:card.endpoint,deviceId:card.deviceId,name:card.name,background:true}).catch(()=>{});
       }}finally{this.reconnecting=false;}
     }
-    async refresh() { this.catalog = await this.api.collaboration('list'); this.notify(); this.sendReceipts(); }
+    async refresh() { this.catalog = await this.api.collaboration('list'); this.notify(); this.sendReceipts(); this.sendStoryEvents(); }
+    sendStoryEvents(){for(const s of this.sessions.values())if(!s.closed&&s.channel?.readyState==='open'&&s.features?.includes('story-events-v1'))this.flushStoryEvents(s).catch(()=>{});}
+    async flushStoryEvents(s){
+      if(s.storyEventsBusy){s.storyEventsAgain=true;return;}s.storyEventsBusy=true;
+      try{do{s.storyEventsAgain=false;let events;do{events=await this.api.collaboration('pending-story-events',{peer:s.peer.deviceId});const ready=events.filter(e=>this.catalog.stories.find(story=>story.id===e.story)?.sender!==this.self.deviceId||s.sentStories?.has(e.story));for(const event of ready){await this.rpc(s,'story-event',{...event,pending:undefined});await this.api.collaboration('delivered-story-event',{id:event.id,peer:s.peer.deviceId});}if(ready.length!==events.length)break;}while(events.length===100&&!s.closed);}while(s.storyEventsAgain&&!s.closed);}finally{s.storyEventsBusy=false;}
+    }
     sendReceipts(){for(const s of this.sessions.values())if(!s.closed&&s.channel?.readyState==='open'&&s.features?.includes('message-receipts-v1'))this.flushReceipts(s).catch(()=>{});}
     async flushReceipts(s){
       if(s.receiptsBusy){s.receiptsAgain=true;return;}s.receiptsBusy=true;
@@ -179,11 +184,12 @@
       if (op === 'profile') {
         if (value?.deviceId !== s.peer.deviceId) throw new Error('Invalid profile identity.');
         Object.assign(s.peer, { name: String(value.name || s.peer.name).slice(0, 60), avatar: value.avatar, status: value.status,bio:value.bio,photos:value.photos,appVersion:typeof value.appVersion==='string'&&value.appVersion.length<=32&&/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.appVersion)?value.appVersion:'' });
-        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['computer-info-v1','message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1','message-reactions-v1','stories-v1','story-media-v1','message-age-v1']};
+        await this.api.collaboration('contact', { peer: s.peer }); await this.refresh(); return {features:['computer-info-v1','message-changes-v1','desktop-card-preview-v1','wallpaper-card-v1','message-receipts-v1','message-reactions-v1','stories-v1','story-media-v1','story-events-v1','story-design-v1','message-age-v1']};
       }
       if(op==='story-media-read')return this.api.collaboration('story-media-read',{...value,session:s.id});
       if(op==='story-delete'){if(value?.sender!==s.peer.deviceId)throw new Error('Invalid story author.');await this.api.collaboration('delete-story',{session:s.id,id:value.id});await this.refresh();return true;}
       if(op==='story'){await this.api.collaboration('story',{session:s.id,story:value});await this.refresh();return true;}
+      if(op==='story-event'){await this.api.collaboration('story-event',{session:s.id,event:value});await this.refresh();for(const other of this.sessions.values())if(other!==s&&other.channel?.readyState==='open')this.flush(other).catch(()=>{});return true;}
       if(op==='desktop-card-preview'){if(value?.kind==='wallpaper'){await this.api.collaboration('peer-preview',{session:s.id,preview:value.preview,previewKind:'wallpaper'});await this.refresh();}return true;}
       if(op==='message-receipt'){
         const receipt={...value,conversation:value?.conversation===`p:${this.self.deviceId}`?`p:${s.peer.deviceId}`:value?.conversation};
@@ -278,7 +284,8 @@
         for(const group of this.catalog.groups)if(group.owner===this.self.deviceId&&group.members.some(m=>m.deviceId===s.peer.deviceId))await this.announceGroup(s,group);
         do {
         s.flushAgain = false;
-        if(s.features?.includes('stories-v1')){s.sentStoryDeletes||=new Set();for(const deletion of this.catalog.storyDeletes||[])if(deletion.sender===this.self.deviceId&&!s.sentStoryDeletes.has(deletion.id)){await this.rpc(s,'story-delete',deletion);s.sentStoryDeletes.add(deletion.id);}s.sentStories||=new Set();for(const story of this.catalog.stories||[])if(story.sender===this.self.deviceId&&!s.sentStories.has(story.id)&&(!story.media||s.features?.includes('story-media-v1'))){await this.rpc(s,'story',{...story,ageMs:Math.max(0,Date.now()-story.at)});s.sentStories.add(story.id);}}
+        if(s.features?.includes('stories-v1')){s.sentStoryDeletes||=new Set();for(const deletion of this.catalog.storyDeletes||[])if(deletion.sender===this.self.deviceId&&!s.sentStoryDeletes.has(deletion.id)){await this.rpc(s,'story-delete',deletion);s.sentStoryDeletes.add(deletion.id);}s.sentStories||=new Set();for(const story of this.catalog.stories||[])if(story.sender===this.self.deviceId&&!s.sentStories.has(story.id)&&(!story.media||s.features?.includes('story-media-v1'))){await this.rpc(s,'story',this.storyWire(s,story));if(s.features?.includes('story-events-v1'))await this.api.collaboration('story-shared',{id:story.id,session:s.id});s.sentStories.add(story.id);}}
+        if(s.features?.includes('story-events-v1'))await this.flushStoryEvents(s);
         const messages = await this.api.collaboration('pending', { peer: s.peer.deviceId });
         for (const message of messages) {
           if (message.kind !== 'text') continue;
@@ -298,6 +305,7 @@
         } while (s.flushAgain && !s.closed);
       } finally { s.flushing = false; }
     }
+    storyWire(s,story){const modern=s.features?.includes('story-design-v1'),media=!modern&&story.media?.mime==='audio/webm'?undefined:story.media;let text=story.text;if(!modern)text=[text,...(story.design?.layers||[]).map(layer=>layer.text)].filter(Boolean).join('\n').slice(0,1000);if(!media&&!story.image&&!text.trim())text='Update the app to view this story.';return {...story,media,design:modern?story.design:undefined,text,ageMs:Math.max(0,Date.now()-story.at)};}
     wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind,ageMs:message.ageReceivedAt!==undefined?Math.max(0,(message.originAgeMs||0)+Date.now()-message.ageReceivedAt):Math.max(0,Date.now()-message.at), text: message.deleted?'Message deleted':message.text,replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,at: message.at }; }
     async createGroup(name, members, existingId,details={}) {
       if (typeof name !== 'string' || !name.trim() || name.length > 60) throw new Error('Enter a group name of up to 60 characters.');

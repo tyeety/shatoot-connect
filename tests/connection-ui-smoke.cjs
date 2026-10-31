@@ -87,7 +87,7 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
   await run("document.querySelector('#open-settings').click();document.querySelector('#tab-profile').click();true");
   for(let i=0;i<2;i++){
     await run("document.querySelector('#profile-name').value='Profile feedback test';document.querySelector('#profile-save').click();true");
-    await until(()=>run("document.querySelector('#settings-status').textContent===window.i18n.translate('Profile saved.')&&document.querySelector('#action-snackbar .snackbar-message')?.textContent===window.i18n.translate('Profile saved.')&&!document.querySelector('#action-snackbar').hidden"));
+    await until(()=>run("document.querySelector('#settings-status').textContent===window.i18n.translate('Profile saved.')&&!document.querySelector('#action-snackbar')"));
   }
   await run("document.querySelector('#settings-dialog').close();true");
   log('Actual Electron async clipboard API decoded PNG without readImage; Save Profile explicitly confirms changed and unchanged profiles');
@@ -159,10 +159,8 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
     }
     if(!await run("document.querySelector('#allow-firewall').hidden"))throw Error('Firewall shortcut visible despite allowed access');
     const owner=states.get(host.webContents.id);for(const needsRepair of [null,false,true]){owner.firewallStatus={needsRepair};await run('refreshFirewallAction().then(()=>true)');if(!await run(`document.querySelector('#allow-firewall').hidden===${needsRepair!==true}`))throw Error('Firewall shortcut visibility disagrees with policy');}
-    await run("document.querySelector('#allow-firewall').click();true");await until(()=>run("document.querySelector('#action-snackbar .snackbar-message')?.textContent===window.i18n.translate('Firewall access repaired.')&&!document.querySelector('#allow-firewall').disabled"));
+    await run("document.querySelector('#allow-firewall').click();true");await until(()=>run("document.querySelector('#settings-status').textContent===window.i18n.translate('Firewall access repaired.')&&!document.querySelector('#allow-firewall').disabled"));
     await until(()=>run("document.querySelector('#allow-firewall').hidden"));
-    if(!await run("(()=>{const b=document.querySelector('#action-snackbar .snackbar-confirm'),r=b.getBoundingClientRect();return r.width>=28&&r.height>=28&&b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()"))throw Error('Snackbar confirmation cannot receive pointer input');
-    await run("document.querySelector('#action-snackbar .snackbar-confirm').click();true");if(!await run("document.querySelector('#action-snackbar').hidden"))throw Error('Snackbar confirmation did not dismiss it');
     if(!await run("document.querySelector('#open-settings').nextElementSibling.id==='allow-firewall'"))throw Error('Firewall button is not immediately after Settings');
     const focusPeer=createWindow();await until(()=>focusPeer.webContents.executeJavaScript('window.shatootconnectReady===true'));
     try{for(let i=0;i<8;i++){focusPeer.show();focusPeer.focus();await pause(60);host.show();host.focus();await pause(60);const capture=await host.webContents.capturePage();if(capture.isEmpty())throw Error('Focus/screenshot returned an empty image');if(host.webContents.isCrashed())throw Error('Renderer crashed during focus/screenshot');}}finally{focusPeer.destroy();}
@@ -178,7 +176,7 @@ module.exports=async({host,createWindow,states,app,dialog,update,log,artifacts})
       fs.writeFileSync(path.join(artifacts,`update-${language}.png`),(await host.webContents.capturePage()).toPNG());
       await run("document.querySelector('#settings-dialog').close();true");
     }
-    update.emit({state:'error',error:'Update network interrupted'});await until(()=>run("!document.querySelector('#action-snackbar').hidden && document.querySelector('#action-snackbar').textContent.includes('Update network interrupted')"));
+    update.emit({state:'error',error:'Update network interrupted'});await until(()=>run("document.querySelector('#update-details').textContent.includes('Update network interrupted')&&!document.querySelector('#action-snackbar')"));
     update.emit({state:'current',version:'0.0.0'});
     for(const language of ['en','fa']){await run(`window.i18n.setLanguage('${language}');true`);if(!await run("(()=>{const buttons=['own-profile','open-messenger','open-settings'].map(id=>document.getElementById(id).getBoundingClientRect());return buttons.every(b=>Math.abs(b.height-38)<1&&Math.abs(b.top-buttons[0].top)<1)})()"))throw Error('Header button heights/alignment differ in '+language);}
     await run("window.i18n.setLanguage('en');window.automaticListAnimations=0;window.animationProbe=new MutationObserver(records=>{for(const r of records)if(r.target.classList.contains('data-feedback'))automaticListAnimations++});animationProbe.observe(document.body,{attributes:true,attributeFilter:['class'],subtree:true});renderFavorites(config.favorites);true");

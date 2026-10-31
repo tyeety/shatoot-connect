@@ -18,3 +18,9 @@ test('known ID addresses reuse an incoming or pending chat instead of a duplicat
  const f=client();await f.engine.ready;const peer=crypto.randomUUID(),active={id:'incoming',peer:{deviceId:peer,id:'123456789'},route:{type:'id',endpoint:'wss://example.test'},channel:{readyState:'open'}};active.promise=Promise.resolve(active);f.engine.sessions.set(active.id,active);assert.equal(await f.engine.connect({type:'id',address:'123 456 789'}),active);assert.equal(f.sent.length,0);
  f.engine.sessions.clear();f.engine.catalog.contacts=[{deviceId:peer,name:'Peer',route:{type:'id',address:'123456789',endpoint:'wss://example.test'}}];const pending={...active,id:'pending',peer:{deviceId:peer},route:{type:'incoming-lan'},channel:{readyState:'connecting'}};pending.promise=Promise.resolve(pending);f.engine.sessions.set(pending.id,pending);assert.equal(await f.engine.connect({type:'id',address:'123456789'}),pending);assert.equal(f.sent.length,0);
 });
+test('new story layouts and audio containers have a valid legacy fallback without blocking ordinary chat',async()=>{
+ const {engine}=client();await engine.ready;const story={id:crypto.randomUUID(),sender:crypto.randomUUID(),text:'',image:'',at:Date.now(),design:{layers:[{text:'Overlay text'}]},media:{mime:'audio/webm'}};
+ const old=engine.storyWire({features:['stories-v1','story-media-v1']},story);assert.equal(old.text,'Overlay text');assert.equal(old.media,undefined);assert.equal(old.design,undefined);
+ const modern=engine.storyWire({features:['story-design-v1']},story);assert.equal(modern.media.mime,'audio/webm');assert.equal(modern.design.layers[0].text,'Overlay text');
+ assert.ok(engine.storyWire({features:[]},{...story,design:undefined}).text.trim());
+});

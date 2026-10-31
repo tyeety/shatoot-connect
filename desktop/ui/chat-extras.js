@@ -1,6 +1,6 @@
 'use strict';
 window.installChatExtras=({api,engine,self,field,selected,button,run,tr,error,reload})=>{
-  const emojiData=window.shatootEmojiData,categories=[{name:'Most used',symbol:'⭐',items:[]},...emojiData.groups.map((g,i)=>({...g,symbol:['😀','🧑','🐻','🍔','🚗','⚽','💡','🔣','🏳️'][i]}))];let emojiGroup=0,emojiLimit=160;
+  const emojiData=window.shatootEmojiData,categories=[{name:'Most used',symbol:'⭐',items:[]},...emojiData.groups.map((g,i)=>({...g,symbol:['😀','🧑','🐻','🍔','🚗','⚽','💡','🔣','🏳️'][i]}))];let emojiGroup=0;
   let picker,scheduler,scheduleConversation='',editingId='',draft='',listKey='',pickerTarget=null;
   const emojiButton=button('Emoji',()=>openPicker(null),'sentiment_satisfied');emojiButton.id='chat-emoji';
   const scheduleButton=button('Schedule message',()=>openSchedule(),'schedule_send');scheduleButton.id='chat-schedule';
@@ -8,19 +8,29 @@ window.installChatExtras=({api,engine,self,field,selected,button,run,tr,error,re
   function dialog(id,title){const box=document.createElement('dialog');box.id=id;box.className='chat-extra-dialog';const heading=document.createElement('div');heading.className='settings-heading';const h=document.createElement('h2');h.textContent=tr(title);heading.append(h,button('Close',()=>box.close(),'close'));box.append(heading);document.body.append(box);return box;}
   function localTime(value){const date=new Date(value);return new Date(date-date.getTimezoneOffset()*60000).toISOString().slice(0,16);}
   function tomorrow(){const date=new Date();date.setDate(date.getDate()+1);date.setHours(8,0,0,0);return date;}
-  function openPicker(row){
-    if(!selected())return;pickerTarget=row?{conversation:row.conversation,id:row.id,emoji:row.reactions?.[self.deviceId]?.emoji||''}:null;
+  function openPicker(row,choose){
+    if(!selected()&&!choose)return;pickerTarget=choose?{choose}:row?{conversation:row.conversation,id:row.id,emoji:row.reactions?.[self.deviceId]?.emoji||''}:null;
     if(!picker){picker=dialog('chat-emoji-dialog','Emoji');const tabs=document.createElement('div');tabs.className='emoji-tabs';const grid=document.createElement('div');grid.className='emoji-grid';grid.setAttribute('role','group');
-      const search=document.createElement('input');search.type='search';search.placeholder=tr('Search emoji');search.dir='auto';search.oninput=()=>{emojiLimit=160;renderEmoji();};picker.append(search);picker.emojiSearch=search;picker.emojiGrid=grid;picker.emojiTabs=tabs;
-      for(const [index,category]of categories.entries()){const control=button(category.name,()=>{emojiGroup=index;emojiLimit=160;renderEmoji();});control.className='emoji-category';control.textContent=category.symbol;control.setAttribute('role','tab');tabs.append(control);}picker.append(tabs,grid);
+      const search=document.createElement('input');search.type='search';search.placeholder=tr('Search emoji');search.dir='auto';search.oninput=()=>renderEmoji();;picker.append(search);picker.emojiSearch=search;picker.emojiGrid=grid;picker.emojiTabs=tabs;
+      for(const [index,category]of categories.entries()){const control=button(category.name,()=>{emojiGroup=index;if(picker.emojiSearch.value){picker.emojiSearch.value='';renderEmoji();}const section=picker.emojiGrid.querySelector('[data-category="'+index+'"]');if(section)picker.emojiGrid.scrollTo({top:section.offsetTop-picker.emojiGrid.offsetTop,behavior:'smooth'});});control.className='emoji-category';control.textContent=category.symbol;control.setAttribute('role','tab');tabs.append(control);}picker.append(tabs,grid);
     }
-    picker.querySelector('h2').textContent=tr(row?'React to message':'Emoji');picker.showModal();emojiGroup=0;emojiLimit=160;picker.emojiSearch.value='';renderEmoji();
+    picker.querySelector('h2').textContent=tr(row?'React to message':'Emoji');picker.showModal();emojiGroup=0;picker.emojiSearch.value='';renderEmoji();picker.emojiGrid.scrollTop=0;
   }
-  function renderEmoji(){const search=picker.emojiSearch.value.trim().toLowerCase(),used=engine.catalog.emojiUsage||{},all=categories.slice(1).flatMap(g=>g.items);const frequent=Object.entries(used).sort((a,b)=>b[1]-a[1]).map(([emoji])=>all.find(e=>e[0]===emoji)).filter(Boolean);let items=search?all.filter(([emoji,name])=>name.includes(search)||emoji.includes(search)):emojiGroup?categories[emojiGroup].items:frequent.length?frequent:all.filter(([emoji])=>['😀','👍','❤️','😂','🙏','🎉'].includes(emoji));picker.emojiGrid.replaceChildren(...items.slice(0,emojiLimit).map(([emoji,name])=>{const b=document.createElement('button');b.type='button';b.className='emoji-choice';b.textContent=emoji;b.title=name;b.setAttribute('aria-label',name);b.onclick=run(()=>chooseEmoji(emoji));return b;}));for(const [i,b]of [...picker.emojiTabs.children].entries())b.setAttribute('aria-selected',String(i===emojiGroup));if(items.length>emojiLimit){const more=button('Load more',()=>{emojiLimit+=160;renderEmoji();});more.className='emoji-more';picker.emojiGrid.append(more);}}
+  function renderEmoji(){
+    const normalize=s=>s.normalize('NFKC').toLowerCase().replace(/[يى]/g,'ی').replace(/ك/g,'ک').replace(/[\u064B-\u065F\u200c]/g,'');
+    const search=normalize(picker.emojiSearch.value.trim()),tokens=search.split(/\s+/).filter(Boolean),used=engine.catalog.emojiUsage||{},all=categories.slice(1).flatMap(g=>g.items),lookup=new Map(all.map(item=>[item[0],item]));
+    const frequent=Object.entries(used).sort((a,b)=>b[1]-a[1]).map(([emoji])=>lookup.get(emoji)).filter(Boolean);categories[0].items=frequent.length?frequent:all.filter(([emoji])=>['😀','👍','❤️','😂','🙏','🎉'].includes(emoji));
+    const fragment=document.createDocumentFragment();for(const [index,category]of categories.entries()){
+      const items=category.items.filter(([emoji,name])=>!search||tokens.every(token=>normalize(emoji+' '+name+' '+(window.shatootEmojiKeywords?.[emoji]||'')).includes(token)));if(!items.length)continue;
+      const section=document.createElement('section');section.className='emoji-section';section.dataset.category=index;const title=document.createElement('h3');title.textContent=tr(category.name);const choices=document.createElement('div');choices.className='emoji-section-choices';section.append(title,choices);
+      for(const [emoji,name]of items){const b=document.createElement('button');b.type='button';b.className='emoji-choice';b.textContent=emoji;b.title=name;b.setAttribute('aria-label',name);b.onclick=run(()=>chooseEmoji(emoji));choices.append(b);}fragment.append(section);
+    }picker.emojiGrid.replaceChildren(fragment);picker.emojiGrid.onscroll=()=>{const top=picker.emojiGrid.getBoundingClientRect().top;const sections=[...picker.emojiGrid.children];const section=sections.find(s=>s.getBoundingClientRect().bottom>top+25);if(section)emojiGroup=Number(section.dataset.category);for(const [i,b]of [...picker.emojiTabs.children].entries())b.setAttribute('aria-selected',String(i===emojiGroup));};picker.emojiGrid.onscroll();
+  }
   async function chooseEmoji(emoji){
-    if(pickerTarget){await engine.react(pickerTarget.conversation,pickerTarget.id,pickerTarget.emoji===emoji?'':emoji);await reload();}
+    const sticker=pickerTarget?.choose;if(sticker)await sticker(emoji);
+    else if(pickerTarget){await engine.react(pickerTarget.conversation,pickerTarget.id,pickerTarget.emoji===emoji?'':emoji);await reload();}
     else {if(field.disabled)return;const start=field.selectionStart,end=field.selectionEnd;if(field.value.length-end+start+emoji.length>field.maxLength)return;picker.close();field.focus();field.setSelectionRange(start,end);document.execCommand('insertText',false,emoji);}
-    try{engine.catalog.emojiUsage=await api.collaboration('emoji-usage',{emoji});}catch{}picker.close();field.focus();
+    try{engine.catalog.emojiUsage=await api.collaboration('emoji-usage',{emoji});}catch{}picker.close();if(!sticker)field.focus();
   }
   function setEditor(item){editingId=item?.id||'';scheduler.querySelector('textarea').value=item?.text||draft;scheduler.querySelector('[type=datetime-local]').value=localTime(item?.sendAt||tomorrow());scheduler.querySelector('[type=submit]').textContent=tr(item?'Save changes':'Schedule message');scheduler.querySelector('.schedule-error').textContent='';}
   function openSchedule(){
@@ -47,5 +57,5 @@ window.installChatExtras=({api,engine,self,field,selected,button,run,tr,error,re
     for(const [emoji,ids]of grouped){const chip=document.createElement('button');chip.type='button';chip.className='reaction-chip';chip.textContent=emoji+' '+ids.length;chip.setAttribute('aria-pressed',String(ids.includes(self.deviceId)));chip.title=ids.map(id=>id===self.deviceId?self.name:engine.catalog.contacts.find(c=>c.deviceId===id)?.displayName||engine.catalog.contacts.find(c=>c.deviceId===id)?.name||engine.group(row.conversation.slice(2))?.members.find(m=>m.deviceId===id)?.name||id.slice(0,8)).join(', ');chip.onclick=run(async()=>{await engine.react(row.conversation,row.id,ids.includes(self.deviceId)?'':emoji);await reload();});container.append(chip);}
     container.hidden=!grouped.size;
   }
-  return {openReaction:openPicker,renderReactions,sync(){emojiButton.disabled=!selected();scheduleButton.disabled=!selected();const count=(engine.catalog.scheduled||[]).filter(m=>m.conversation===selected()).length;scheduleButton.title=tr('Scheduled messages')+(count?' · '+count:'');scheduleButton.dataset.count=String(count);scheduleButton.setAttribute('aria-label',scheduleButton.title);renderSchedules();}};
+  return {openSticker:choose=>openPicker(null,choose),openReaction:openPicker,renderReactions,sync(){emojiButton.disabled=!selected();scheduleButton.disabled=!selected();const count=(engine.catalog.scheduled||[]).filter(m=>m.conversation===selected()).length;scheduleButton.title=tr('Scheduled messages')+(count?' · '+count:'');scheduleButton.dataset.count=String(count);scheduleButton.setAttribute('aria-label',scheduleButton.title);renderSchedules();}};
 };

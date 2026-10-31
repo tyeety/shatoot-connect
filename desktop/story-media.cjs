@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const MAX=32*1024*1024,CHUNK=32768,TYPES={mp4:'video/mp4',webm:'video/webm',mp3:'audio/mpeg',m4a:'audio/mp4',ogg:'audio/ogg',wav:'audio/wav'};
-function metadata(value){if(!value||!/^[a-f0-9]{64}$/.test(value.hash)||!Object.values(TYPES).includes(value.mime)||!Number.isSafeInteger(value.size)||value.size<1||value.size>MAX||typeof value.name!=='string'||value.name.length>160)throw Error('Invalid story media.');return {hash:value.hash,mime:value.mime,size:value.size,name:path.basename(value.name)};}
+function metadata(value){if(!value||!/^[a-f0-9]{64}$/.test(value.hash)||![...Object.values(TYPES),'audio/webm'].includes(value.mime)||!Number.isSafeInteger(value.size)||value.size<1||value.size>MAX||typeof value.name!=='string'||value.name.length>160)throw Error('Invalid story media.');return {hash:value.hash,mime:value.mime,size:value.size,name:path.basename(value.name),...(Number.isFinite(value.duration)&&value.duration>0&&value.duration<86400?{duration:value.duration}:{})};}
 class StoryMedia{
  constructor(root){this.root=root;fs.mkdirSync(root,{recursive:true});}
  file(value,part=false){return path.join(this.root,metadata(value).hash+(part?'.part':'.media'));}

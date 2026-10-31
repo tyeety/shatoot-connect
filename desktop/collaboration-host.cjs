@@ -21,9 +21,16 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
     if(op==='emoji-usage')return history.emojiUsage(value.emoji);
     if(op==='list'){const list=history.list();catalogChanged(s);return {...list,contacts:list.contacts.map(peer=>decorateComputer(peer,peer.route)),groups:list.groups.map(g=>({...g,members:g.members.map(m=>decorateComputer(m))}))};}
     if(op==='story-seen')return history.storySeen(value.id);
+    if(op==='story-event'){const result=history.storyEvent(value.event,value.outgoing===true,value.outgoing?undefined:grant(s,value.session).peer.deviceId);catalogChanged(s);return result;}
+    if(op==='pending-story-events')return history.pendingStoryEvents(value.peer);
+    if(op==='story-shared')return history.sharedStory(value.id,grant(s,value.session).peer.deviceId);
+    if(op==='delivered-story-event')return history.deliveredStoryEvent(value.id,value.peer);
     if(op==='pin-message')return history.pinMessage(value.conversation,value.id);
     const mediaStore=()=>s.storyMedia||=(new(require('./story-media.cjs').StoryMedia)(path.join(app.getPath('userData'),'story-media')));
-    if(op==='story-media-pick'){const chosen=await dialog.showOpenDialog(s.win,{properties:['openFile'],filters:[{name:'Video and music (32 MB)',extensions:['mp4','webm','mp3','m4a','ogg','wav']}]});if(chosen.canceled)return;const media=mediaStore();media.prune(history.list().stories);return media.import(chosen.filePaths[0]);}
+    if(op==='story-media-pick'){const chosen=await dialog.showOpenDialog(s.win,{properties:['openFile'],filters:[{name:'Video and music (32 MB)',extensions:['mp4','webm','mp3','m4a','ogg','wav']}]});if(chosen.canceled)return;const media=mediaStore();media.prune(history.list().stories);s.storyDraftMedia=media.import(chosen.filePaths[0]);return s.storyDraftMedia;}
+    if(op==='story-media-draft-read'){if(!s.storyDraftMedia||value.hash!==s.storyDraftMedia.hash)throw Error('Choose media before editing.');return mediaStore().read(s.storyDraftMedia,value.offset);}
+    if(op==='story-media-draft-begin'){s.storyExportMedia=require('./story-media.cjs').metadata(value.media);return true;}
+    if(op==='story-media-draft-write'){if(!s.storyExportMedia||value.hash!==s.storyExportMedia.hash)throw Error('Invalid story export.');const complete=mediaStore().write(s.storyExportMedia,value.offset,value.bytes);return complete?s.storyExportMedia:null;}
     if(op.startsWith('story-media-')){const story=history.list().stories.find(v=>v.id===value.id);if(!story?.media)throw Error('Story expired or unavailable.');if(op==='story-media-status')return mediaStore().has(story.media);if(op==='story-media-local')return mediaStore().read(story.media,value.offset);const g=grant(s,value.session);if(op==='story-media-read'){if(story.sender!==s.identity.deviceId)throw Error('Only the author shares story media.');return mediaStore().read(story.media,value.offset);}if(op==='story-media-write'){if(story.sender!==g.peer.deviceId)throw Error('Invalid story author.');return mediaStore().write(story.media,value.offset,value.bytes);}throw Error('Invalid story media operation.');}
     if(op==='story')return history.story(value.story,value.outgoing===true,value.outgoing?undefined:grant(s,value.session).peer.deviceId);
     if(op==='delete-story')return history.deleteStory(value.id,value.session?grant(s,value.session).peer.deviceId:s.identity.deviceId);

@@ -13,6 +13,26 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.32.0 — 2026-10-31
+
+### Added
+
+- Portrait story editor with draggable text/sticker layers, pinch/wheel zoom, rotation, color, background shapes, alignment and photo/video/music previews. Up to 24 layers are validated and synchronized with the story.
+- Start/end selection for video and music. Export decodes and re-encodes only the selected interval into WebM using the pinned Mediabunny/WebCodecs pipeline, with progress, cancellation and a 32 MiB output limit. Original drafts remain local; recipients receive the exported clip.
+- Story likes, comments and an author's private viewer list. Activity persists in encrypted local history, queues through reconnects and expires with its 24-hour story. Authors relay public activity; viewer identities are never forwarded to other contacts. A focused, ready viewer reports a view; loading/hidden windows do not.
+- Message info for outgoing group messages, listing each recipient's Waiting, Delivered and Seen state.
+- English/Persian emoji keywords from Unicode CLDR, including related search terms such as camel/hump and شتر/کوهان. All 3,963 emoji appear in one continuous list; symbol category tabs scroll to sections, with persisted Most used and no Load more button.
+- Isolated real peer-to-peer story editor tests cover physical drag/pinch, bilingual layout/search, likes/comments/viewer privacy, decoded selected-range audio/video and group read receipts; Windows release checks run this test.
+
+### Changed
+
+- Removed action snackbars from buttons throughout the client. Press/busy feedback and inline status/errors remain.
+- Media conversion library is generated during npm install, loaded only for media editing and distributed with its MPL-2.0 license and exact corresponding source link.
+
+### Compatibility
+
+- Update both peers for story design, activity and new media handling. Legacy peers receive compatible story captions/media where possible; ordinary chat remains usable. Author availability is required to relay story activity; there is no central story service.
+
 ## 0.31.0 — 2026-10-31
 
 ### Changed
