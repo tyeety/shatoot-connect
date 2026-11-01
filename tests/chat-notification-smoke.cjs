@@ -287,7 +287,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,"document.querySelector('#message-delete-confirm').click();true");
   await until(()=>peer.chatStore.load().mutations.some(m=>m.message===changedId&&m.removed)&&!peer.chatStore.history({conversation:voiceConversation}).some(m=>m.id===changedId));
   await until(()=>run(chat,`!document.querySelector('[data-message-id="${changedId}"]')&&!document.querySelector('.chat-message.deleted')`));
-  for(let i=0;i<125;i++)owner.chatStore.append({id:require('node:crypto').randomUUID(),conversation,sender:peer.identity.deviceId,name:'Peer',kind:'text',text:'Timeline '+i,at:new Date(2026,9,20+Math.floor(i/45),12,i%45).getTime()});
+  for(let i=0;i<125;i++){const sent=new Date();sent.setDate(sent.getDate()-3+Math.floor(i/45));sent.setHours(12,i%45,0,0);owner.chatStore.append({id:require('node:crypto').randomUUID(),conversation,sender:peer.identity.deviceId,name:'Peer',kind:'text',text:'Timeline '+i,at:sent.getTime(),ageMs:Date.now()-sent.getTime()});}
   await run(chat,`messenger.select('${conversation}').then(()=>true)`);await until(()=>run(chat,"document.querySelectorAll('.chat-day-group').length>=3"));
   await run(chat,"(()=>{const log=document.querySelector('#chat-messages');log.scrollTop=300;log.dispatchEvent(new Event('scroll'));window.timelineAnchor=[...log.querySelectorAll('.chat-message')].find(e=>e.getBoundingClientRect().bottom>=log.getBoundingClientRect().top);window.timelineTop=timelineAnchor.getBoundingClientRect().top;window.timelineScroll=log.scrollTop;return true})()");
   await run(chat,"collaboration.refresh().then(()=>true)");await pause(250);
