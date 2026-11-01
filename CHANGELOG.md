@@ -13,6 +13,17 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.34.2 — 2026-11-01
+
+### Changed
+
+- Saved-computer desktop shortcut names start with the contact's chosen name. Existing application-owned shortcuts migrate without changing their stable launcher or profile icon; unrelated desktop links are preserved.
+
+### Fixed
+
+- Installer exit 13 now explains insufficient installation/TEMP disk space instead of showing only an exit code. The installer includes required and available MiB in its diagnostic report.
+- The updater asks the new installer to validate space and destination before closing the running app. Failed preflight keeps the app, profile and current executable intact. Disk space is checked again at installation time.
+
 ## 0.34.1 — 2026-10-31
 
 ### Added

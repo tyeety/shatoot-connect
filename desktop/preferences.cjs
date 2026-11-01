@@ -114,13 +114,13 @@ class ClientPreferences {
     this.write({ favorites: [...favorites.filter(item => item.id !== record.id), record] });const card=this.card(record);if(card&&value.name?.trim())this.renameComputer(record,name);if(value.category!==undefined)this.renameComputer(record,name,value.category);return record.id;
   }
   remove(id) { this.get(id); this.write({ favorites: (this.read().favorites || []).filter(record => record.id !== id) }); }
-  markShortcut(id) { const filename = this.shortcutName(id); this.write({ favorites: (this.read().favorites || []).map(record => record.id === id ? { ...record, shortcut: true, shortcutFile: filename } : record) }); }
-  shortcutName(id) {
+  markShortcut(id) { const filename = this.shortcutName(id,true); this.write({ favorites: (this.read().favorites || []).map(record => record.id === id ? { ...record, shortcut: true, shortcutFile: filename } : record) }); }
+  shortcutName(id, preferred=false) {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('Invalid connection ID.');
     const record = (this.read().favorites || []).find(item => item.id === id); if (!record) throw new Error('Saved connection not found.');
-    if (record.shortcutFile && !/[<>:"/\\|?*\x00-\x1f]/.test(record.shortcutFile) && record.shortcutFile.startsWith('Shatoot Connect - ') && record.shortcutFile.endsWith(`(${id.slice(0, 8)}).lnk`)) return record.shortcutFile;
-    const name = record.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '').slice(0, 60) || 'Computer';
-    return `Shatoot Connect - ${name} (${id.slice(0, 8)}).lnk`;
+    if (!preferred && record.shortcutFile && !/[<>:"/\\|?*\x00-\x1f]/.test(record.shortcutFile) && (record.shortcutFile.startsWith('Shatoot Connect - ')||record.shortcutFile.endsWith(` - Shatoot Connect (${id.slice(0,8)}).lnk`)) && record.shortcutFile.endsWith(`(${id.slice(0, 8)}).lnk`)) return record.shortcutFile;
+    const name = (this.decorate(record).displayName||record.name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '').slice(0, 60) || 'Computer';
+    return `${name} - Shatoot Connect (${id.slice(0, 8)}).lnk`;
   }
 }
 module.exports = { ClientPreferences };

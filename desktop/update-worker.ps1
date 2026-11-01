@@ -23,7 +23,17 @@ function Write-UpdateState([string]$State,[string]$ErrorText=''){
     $file=Join-Path $CacheDirectory 'last-update.json';$value=@{state=$State;error=$ErrorText;version=$Version;token=$ReadyToken;at=[DateTime]::UtcNow.ToString('o')}
     [IO.File]::WriteAllText($file+'.tmp',($value|ConvertTo-Json -Compress));Move-Item -LiteralPath ($file+'.tmp') -Destination $file -Force
 }
-$startup=$null;$backup=$null;$replaced=$false;$readyFile=$null;$workerFile=$null
+function Get-SetupFailure([int]$Code){
+    switch($Code){
+        13 {return 'Not enough free disk space for installation and temporary extraction. Free space on the installation drive and the Windows TEMP drive, then retry.'}
+        12 {return 'Setup cannot write to the installation or Windows TEMP folder. Check permissions and retry.'}
+        11 {return 'Setup rejected the installation folder. Run the latest installer manually and choose a dedicated Shatoot Connect folder.'}
+        16 {return 'A newer version is already installed. Check for updates again.'}
+        1618 {return 'Shatoot Connect is still running. Close its active windows and retry.'}
+        default {return "Setup returned $Code. See the ShatootConnect-Setup.log file in Windows TEMP for details."}
+    }
+}
+$startup=$null;$backup=$null;$replaced=$false;$readyFile=$null;$workerFile=$null;$acknowledged=$false
 try {
     $Target=[IO.Path]::GetFullPath($Target)
     if([IO.Path]::GetExtension($Target) -ne '.exe' -or $Version -notmatch '^\d+\.\d+\.\d+$'){throw 'Invalid update destination or version.'}
@@ -35,8 +45,23 @@ try {
     $readyFile=Join-Path $CacheDirectory ($ReadyToken+'.ready.json')
     if(Test-Path -LiteralPath $readyFile){Remove-Item -LiteralPath $readyFile -Force}
     $workerFile=Join-Path $CacheDirectory ($ReadyToken+'.worker.json')
+    if(!$Portable){
+        $destination=[IO.Path]::GetDirectoryName($Target)
+        $scope=if($destination.StartsWith([Environment]::GetFolderPath('ProgramFiles'),[StringComparison]::OrdinalIgnoreCase)){'/allusers'}else{'/currentuser'}
+        $report=Join-Path $CacheDirectory ($ReadyToken+'.space.txt')
+        try{
+            $probe=Start-Process -FilePath $Package -ArgumentList "/S $scope /SC_CHECK_SPACE=`"$report`" /D=$destination" -WindowStyle Hidden -PassThru -Wait
+            if($probe.ExitCode -ne 0){
+                $detail=if(Test-Path -LiteralPath $report){[IO.File]::ReadAllText($report,[Text.Encoding]::Unicode)}else{''}
+                if(!$detail){$detail=Get-SetupFailure $probe.ExitCode}
+                throw "$detail The application remains open; your profile is unchanged."
+            }
+            if(!(Test-Path -LiteralPath $report)){throw 'This installer does not support the update preflight check. Download the latest installer manually.'}
+        }finally{if(Test-Path -LiteralPath $report){Remove-Item -LiteralPath $report -Force}}
+    }
     Write-UpdateState 'installing'
     [IO.File]::WriteAllText($workerFile,(@{token=$ReadyToken;version=$Version}|ConvertTo-Json -Compress))
+    $acknowledged=$true
     $parentProcess=Get-Process -Id $ParentId -ErrorAction SilentlyContinue
     if($parentProcess -and !$parentProcess.WaitForExit(30000)){throw 'The application did not close. Please retry the update.'}
     Start-Sleep -Seconds 2
@@ -49,7 +74,7 @@ try {
         $destination=[IO.Path]::GetDirectoryName($Target)
         $scope=if($destination.StartsWith([Environment]::GetFolderPath('ProgramFiles'),[StringComparison]::OrdinalIgnoreCase)){'/allusers'}else{'/currentuser'}
         $setup=Start-Process -FilePath $Package -ArgumentList "/S $scope /D=$destination" -WindowStyle Hidden -PassThru -Wait
-        if($setup.ExitCode -ne 0){throw "Setup returned $($setup.ExitCode). The existing profile was retained."}
+        if($setup.ExitCode -ne 0){throw "$(Get-SetupFailure $setup.ExitCode) The existing profile was retained."}
     }
     $env:SHATOOTCONNECT_UPDATE_READY=$readyFile
     $startup=Start-Process -FilePath $Target -ArgumentList "--update-token=$ReadyToken" -WorkingDirectory ([IO.Path]::GetDirectoryName($Target)) -WindowStyle Normal -PassThru
@@ -76,7 +101,8 @@ try {
     if($CleanupOnly){exit 1}
     Write-UpdateState 'error' $failure
     if($workerFile){Remove-Item -LiteralPath $workerFile -Force -ErrorAction SilentlyContinue}
-    if($env:SHATOOTCONNECT_UPDATE_TEST -ne '1'){Add-Type -AssemblyName System.Windows.Forms;[System.Windows.Forms.MessageBox]::Show($failure,'Shatoot Connect update','OK','Error')|Out-Null;if(Test-Path -LiteralPath $Target){Start-Process -FilePath $Target -ArgumentList '--update-failed' -WindowStyle Normal}}
+    if(!$acknowledged){[Console]::Error.WriteLine($failure)}
+    elseif($env:SHATOOTCONNECT_UPDATE_TEST -ne '1'){Add-Type -AssemblyName System.Windows.Forms;[System.Windows.Forms.MessageBox]::Show($failure,'Shatoot Connect update','OK','Error')|Out-Null;if(Test-Path -LiteralPath $Target){Start-Process -FilePath $Target -ArgumentList '--update-failed' -WindowStyle Normal}}
     else{Write-Output $failure}
     exit 1
 }

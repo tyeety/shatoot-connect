@@ -23,6 +23,15 @@ public class NewUpdateFixture { public static void Main(string[] args) {
     $obsolete=Join-Path $cache 'ShatootConnect-Setup-0.12.0-win-x64.exe';[IO.File]::WriteAllText($obsolete,'obsolete cached setup')
     $keep=Join-Path $cache 'keep.txt';[IO.File]::WriteAllText($keep,'unrelated')
     $worker=Join-Path $workspaceRoot 'desktop/update-worker.ps1';$digest=Get-Sha256 $newExe
+    $spaceSetup=Join-Path $testRoot 'space-check.exe'
+    Add-Type -TypeDefinition 'using System;using System.IO;using System.Text;public class SpaceCheckFixture {public static void Main(string[] args){foreach(string a in args)if(a.StartsWith("/SC_CHECK_SPACE=")){File.WriteAllText(a.Substring(16),"Not enough free disk space: 1800 MiB required; 1400 MiB available.",Encoding.Unicode);Environment.Exit(13);}Environment.Exit(99);}}' -OutputAssembly $spaceSetup -OutputType WindowsApplication
+    $spaceToken=[guid]::NewGuid().ToString();$beforeSpaceHash=Get-Sha256 $target
+    $spaceWorker=Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$worker`" -ParentId $PID -Package `"$spaceSetup`" -Target `"$target`" -Digest $(Get-Sha256 $spaceSetup) -Version 0.14.0 -ReadyToken $spaceToken -CacheDirectory `"$cache`"" -WindowStyle Hidden -PassThru
+    if(!$spaceWorker.WaitForExit(15000)){Stop-Process -Id $spaceWorker.Id -Force;throw 'Space-check worker waited for the live parent instead of failing early.'};$spaceWorker.Refresh()
+    if($spaceWorker.ExitCode -ne 1 -or (Test-Path -LiteralPath (Join-Path $cache ($spaceToken+'.worker.json'))) -or (Get-Sha256 $target) -ne $beforeSpaceHash){throw 'Insufficient-space preflight must fail before asking the parent application to close.'}
+    $spaceResult=Get-Content -LiteralPath (Join-Path $cache 'last-update.json') -Raw|ConvertFrom-Json
+    if($spaceResult.error -notmatch '1800 MiB required; 1400 MiB available' -or $spaceResult.error -notmatch 'remains open'){throw 'Space failure did not include an actionable explanation.'}
+    Write-Output 'Installer-space refusal preserves the running parent, executable and detailed required/available space.'
     function Run-Worker([string]$Package,[string]$Hash,[string]$Version,[int]$Expected=0){
         $parentFixture=$null;$parentFixtureId=2147483647;$beforeHash=Get-Sha256 $target
         if($Expected -eq 0){$parentFixture=Start-Process powershell.exe -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 30' -WindowStyle Hidden -PassThru;$parentFixtureId=$parentFixture.Id}

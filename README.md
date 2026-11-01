@@ -1,6 +1,8 @@
 # Shatoot Connect
 
-Saved-computer desktop shortcuts use the latest cached profile photo (or the app icon when unavailable). Icons update when a new photo is learned and remain valid across app upgrades. Disconnect/Cancel closes its remote tab; recoverable network interruptions keep their reconnect controls.
+Saved-computer desktop shortcuts start with the contact's chosen name and use the latest cached profile photo (or the app icon when unavailable). Existing app-owned links migrate automatically. Icons update when a new photo is learned and remain valid across app upgrades. Disconnect/Cancel closes its remote tab; recoverable network interruptions keep their reconnect controls.
+
+Installer exit 13 means insufficient disk space for the installation and temporary extraction. Free space on the destination and Windows TEMP drives, then retry. The updater checks the new installer's space requirements before closing the app and reports required/available MiB. Upgrading from an older updater may still show the old numeric error; free the space and retry or run the latest Setup manually. Personal settings and history are retained.
 
 Windows remote desktop, nearby-computer discovery, private/group chat and file transfer. English is the default; Persian/RTL is available in the client and Server Manager. Client Settings uses a vertical tab sidebar (left in English, right in Persian) with independently scrolling content and Up/Down, Home/End keyboard navigation. In the client, **Settings > Display and language > Theme** switches between Dark (default) and Light; the saved choice applies immediately to main/chat windows, notifications and connection panels. This repository contains the client, coordinator, Windows service manager, native input helper, tests and packaging sources.
 

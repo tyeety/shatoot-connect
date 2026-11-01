@@ -301,11 +301,15 @@ Var SCLogHandle
     ${DriveSpace} "$1\" "/D=F /S=M" $0
     ${If} ${Errors}
     ${OrIf} $0 < $3
+      StrCpy $SCMessage "$(SCSpace)$\r$\n$1: $3 MiB required; $0 MiB available."
+      !insertmacro SCLog "Disk space failed: $1 required=$3 MiB available=$0 MiB"
       Return
     ${EndIf}
     ${DriveSpace} "$2\" "/D=F /S=M" $0
     ${If} ${Errors}
     ${OrIf} $0 < $4
+      StrCpy $SCMessage "$(SCSpace)$\r$\n$2: $4 MiB required; $0 MiB available."
+      !insertmacro SCLog "Disk space failed: $2 required=$4 MiB available=$0 MiB"
       Return
     ${EndIf}
     StrCpy $SCFailure 0
@@ -343,6 +347,23 @@ Var SCLogHandle
     StrCpy $SCFailure 1603
     !insertmacro SCLog "Setup started."
     ${If} ${Silent}
+      ${GetParameters} $R8
+      ClearErrors
+      ${GetOptions} $R8 "/SC_CHECK_SPACE=" $R9
+      ${IfNot} ${Errors}
+        ; Diagnostic-only: never reaches app closure, uninstall or extraction.
+        Call instFilesPre
+        Call SCPreflight
+        ClearErrors
+        FileOpen $0 "$R9" w
+        ${IfNot} ${Errors}
+          FileWriteUTF16LE $0 "$SCMessage"
+          FileClose $0
+        ${EndIf}
+        Call SCCleanupProbeDirectory
+        SetErrorLevel $SCFailure
+        Quit
+      ${EndIf}
       Call instFilesPre
       Call SCPreflight
       ${If} $SCFailure != 0

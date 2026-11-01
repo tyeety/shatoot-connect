@@ -113,7 +113,10 @@ const favoriteShortcutState=new Map();
 function createFavoriteShortcut(id) {
   const record = preferences.get(id);
   const executable = process.env.PORTABLE_EXECUTABLE_FILE || app.getPath('exe');
-  const target = path.join(app.getPath('desktop'), preferences.shortcutName(id));
+  const previous = path.join(app.getPath('desktop'), preferences.shortcutName(id));
+  const target = path.join(app.getPath('desktop'), preferences.shortcutName(id,true));
+  const owned=file=>{try{const args=shell.readShortcutLink(file).args;return args.includes(`--connect-saved=${id}`)||args.includes(`-Favorite ${id}`);}catch{return false;}};
+  if(fs.existsSync(target)&&!owned(target))throw Error('An unrelated desktop shortcut already uses this name.');
   const args = `${app.isPackaged ? '' : `"${path.resolve(__dirname, '..')}" `}--connect-saved=${id}`;
   const link=app.isPackaged?getLauncher().link({favorite:id}):{target:executable,cwd:path.dirname(executable),args,icon:executable,iconIndex:0};
   const directory=path.join(app.getPath('userData'),'shortcut-icons'),icons=require('./shortcut-icon.cjs');
@@ -123,7 +126,8 @@ function createFavoriteShortcut(id) {
     if(!shell.writeShortcutLink(target,fs.existsSync(target)?'update':'create',details))throw Error('Desktop shortcut could not be created.');
     favoriteShortcutState.set(id,signature);icons.pruneIcons(directory,id,icon);
   }
-  if(!record.shortcut)preferences.markShortcut(id);return target;
+  if(previous!==target&&fs.existsSync(previous)&&owned(previous))fs.unlinkSync(previous);
+  if(!record.shortcut||record.shortcutFile!==path.basename(target))preferences.markShortcut(id);return target;
 }
 function identity() {
   const saved = settings();

@@ -36,10 +36,15 @@ module.exports=async({host,createWindow,states,app,dialog,log})=>{
   const favoriteId=await run(host,"api.config().then(c=>c.favorites.find(f=>f.name==='Office PC').id)");
   await run(host,`api.computerCard('remember',{peer:{deviceId:'${b}',name:'Shortcut fixture',avatar:'data:image/png;base64,${png}'},route:{address:'127.0.0.1:${port}'}})`);
   const shortcut=await run(host,`api.favoriteShortcut('${favoriteId}')`),shell=require('electron').shell,nativeImage=require('electron').nativeImage,firstLink=shell.readShortcutLink(shortcut);
-  if(!firstLink.icon.endsWith('.ico')||!fs.existsSync(firstLink.icon)||!firstLink.args.includes(favoriteId))throw Error('Avatar shortcut missing stable favorite arguments or icon');
+  if(!path.basename(shortcut).startsWith('Office PC - Shatoot Connect ')||!firstLink.icon.endsWith('.ico')||!fs.existsSync(firstLink.icon)||!firstLink.args.includes(favoriteId))throw Error('Avatar shortcut missing contact-first name, stable favorite arguments or icon');
   const ico=fs.readFileSync(firstLink.icon);if(ico.readUInt16LE(4)!==4)throw Error('Avatar shortcut lacks DPI icon sizes');for(let i=0;i<4;i++){const offset=ico.readUInt32LE(6+i*16+12),length=ico.readUInt32LE(6+i*16+8);if(nativeImage.createFromBuffer(ico.subarray(offset,offset+length)).isEmpty())throw Error('Invalid ICO PNG frame');}
   const nextAvatar=await run(host,"(()=>{const c=document.createElement('canvas');c.width=c.height=64;c.getContext('2d').fillRect(0,0,64,64);return c.toDataURL()})()");await run(host,`api.computerCard('remember',{peer:{deviceId:'${b}',name:'Shortcut fixture',avatar:${JSON.stringify(nextAvatar)}},route:{address:'127.0.0.1:${port}'}})`);
   for(let n=0;n<60&&shell.readShortcutLink(shortcut).icon===firstLink.icon;n++)await sleep(50);if(shell.readShortcutLink(shortcut).icon===firstLink.icon||fs.existsSync(firstLink.icon))throw Error('Changed profile did not refresh the icon or prune the old image');
+    await run(host,`api.favoriteSave({address:'127.0.0.1:${port}',name:'Office renamed'})`);
+    const renamedShortcut=path.join(path.dirname(shortcut),`Office renamed - Shatoot Connect (${favoriteId.slice(0,8)}).lnk`);
+    for(let n=0;n<60&&!fs.existsSync(renamedShortcut);n++)await sleep(50);
+    if(!fs.existsSync(renamedShortcut)||fs.existsSync(shortcut)||!shell.readShortcutLink(renamedShortcut).args.includes(favoriteId))throw Error('Renaming a contact did not migrate its existing desktop shortcut');
+    await run(host,`api.favoriteSave({address:'127.0.0.1:${port}',name:'Office PC'});api.favoriteShortcut('${favoriteId}')`);
   // Focus rings must stay within every control, including compact tabs and datalist fields.
   const sweep="(()=>{let count=0;const errors=[];for(const control of document.querySelectorAll('button,input,select,textarea,a[href],[tabindex],[contenteditable=true]')){if(control.disabled||!control.getBoundingClientRect().width)continue;control.focus({preventScroll:true});if(document.activeElement!==control||!control.matches(':focus-visible'))continue;const style=getComputedStyle(control),width=parseFloat(style.outlineWidth)||0,offset=parseFloat(style.outlineOffset)||0;if(width&&style.outlineStyle!=='none'&&offset+width>0)errors.push(control.id||control.tagName);count++;}return {count,errors};})()";let focused=0;
   host.show();host.focus();await until(host,'document.hasFocus()');

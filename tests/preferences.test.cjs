@@ -62,11 +62,18 @@ test('favorites update without changing shortcut identity and reject invalid des
   const id = preferences.save(value); preferences.markShortcut(id);
   assert.equal(preferences.save({ ...value, name: 'Renamed', password: 'new-secret' }), id);
   assert.equal(preferences.list().length, 1); assert.equal(preferences.list()[0].shortcut, true);
-  assert.match(preferences.shortcutName(id), /^Shatoot Connect - LAN \([a-f0-9]{8}\)\.lnk$/);
+  assert.match(preferences.shortcutName(id), /^LAN - Shatoot Connect \([a-f0-9]{8}\)\.lnk$/);
   assert.throws(() => preferences.shortcutName('../bad'), /Invalid/);
   assert.throws(() => preferences.setFixedPassword('short'), /8 to 128/);
   assert.throws(() => preferences.save({ ...value, address: 'example.com' }), /Invalid LAN/);
   preferences.remove(id); assert.equal(preferences.list().length, 0);
+});
+test('legacy shortcut filenames remain findable until a name-first replacement is committed',()=>{
+  const{preferences:p}=fixture(),id=p.save({name:'Office',address:'192.168.1.10'}),legacy=`Shatoot Connect - Office (${id.slice(0,8)}).lnk`;
+  p.write({favorites:[{...p.get(id),shortcut:true,shortcutFile:legacy}]});
+  assert.equal(p.shortcutName(id),legacy);assert.equal(p.shortcutName(id,true),`Office - Shatoot Connect (${id.slice(0,8)}).lnk`);
+  p.renameComputer(p.get(id),'Saleh');assert.equal(p.shortcutName(id,true),`Saleh - Shatoot Connect (${id.slice(0,8)}).lnk`);
+  p.markShortcut(id);assert.equal(p.shortcutName(id),p.shortcutName(id,true));
 });
 test('unattended access is opt-in and is revoked when the fixed password is removed', () => {
   const { preferences } = fixture();

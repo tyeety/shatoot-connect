@@ -70,6 +70,11 @@ function Uninstall-TestCopy([int]$Expected = 0) {
 
 try {
     New-Item -ItemType Directory -Path $testRoot | Out-Null
+    $spaceReport=Join-Path $testRoot 'space report.txt'
+    Invoke-Setup $Installer "/S /currentuser /SC_CHECK_SPACE=`"$spaceReport`" /D=$installDir"
+    if(!(Test-Path -LiteralPath $spaceReport) -or (Test-Path -LiteralPath (Join-Path $installDir 'Shatoot Connect.exe')) -or [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($installRegistry)){throw 'Diagnostic preflight installed or registered the app.'}
+    if([IO.File]::ReadAllText($spaceReport,[Text.Encoding]::Unicode)){throw 'Successful preflight returned an error.'}
+    Write-Output 'Diagnostic preflight validates destination/space without installing or closing the app.'
     $invalid = Join-Path $testRoot 'Shatoot Connect unrelated'
     Invoke-Setup $Installer "/S /currentuser /D=$invalid" 11
     if ((Test-Path -LiteralPath $invalid) -and (Get-ChildItem -LiteralPath $invalid -Force)) { throw 'Rejected destination contains installed files.' }
