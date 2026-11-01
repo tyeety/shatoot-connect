@@ -13,6 +13,14 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.1 — 2026-11-01
+
+### Fixed
+
+- Legacy chat messages without queue-age metadata now use the receiver's local receipt time instead of the sender's raw clock. Existing history reconstructs incoming times from its stored local age/receipt evidence.
+- New messages carry their causal predecessor through direct chat, group relays and file transfers. Replies cannot sort ahead of a known predecessor, including after a clock rollback, reconnect, history reload or late arrival of that predecessor.
+- Queue age is measured independently from the adjusted timeline position, preserving the original waiting duration and yesterday's offline-message timestamps.
+
 ## 0.35.0 — 2026-11-01
 
 ### Added

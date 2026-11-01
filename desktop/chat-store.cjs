@@ -22,7 +22,7 @@ class ChatStore {
       if (data.version !== 1 || !data.contacts || !data.groups || !data.attachments || !Array.isArray(data.messages)) throw new Error();
       if(!data.readAt){data.readAt={};for(const message of data.messages)data.readAt[message.conversation]=Math.max(data.readAt[message.conversation]||0,message.receivedAt||0);}
       for(const message of [...data.messages])if(message.deleted)this.eraseMessage(data,message.conversation,message.id);
-      return this.data = data;
+      this.data=data;this.repairMessageTimes();return data;
     } catch { throw new Error('Chat history cannot be read. The existing history file has been kept.'); }
   }
   save() {
@@ -36,6 +36,21 @@ class ChatStore {
   change(fn) {
     const previous = structuredClone(this.load());
     try { const result = fn(this.data); this.save(); this.revision=(this.revision||0)+1; return result; } catch (error) { this.data = previous; throw error; }
+  }
+  repairMessageTimes(){
+    // Estimate dates from local evidence, then enforce the happened-before chain.
+    // Never measure queued age from the adjusted timeline position.
+    const data=this.load(),revision=this.revision||0;if(this.timeData===data&&this.timeRevision===revision)return;
+    const byId=new Map();for(const m of data.messages){
+      if(m.sender!==this.self||Number.isSafeInteger(m.ageReceivedAt)){const local=Number.isSafeInteger(m.ageReceivedAt)?m.ageReceivedAt:m.receivedAt,age=Number.isSafeInteger(m.originAgeMs)&&m.originAgeMs>=0?m.originAgeMs:0;m.at=local-age;}
+      if(!Number.isSafeInteger(m.at))m.at=m.receivedAt;
+      byId.set(m.conversation+'/'+m.id,m);
+    }
+    const done=new Set();for(const start of data.messages){if(done.has(start))continue;const chain=[],seen=new Set();let m=start;
+      while(m&&!done.has(m)&&!seen.has(m)){seen.add(m);chain.push(m);m=byId.get(m.conversation+'/'+m.causalAfter);}
+      const cycle=m&&seen.has(m);for(let i=chain.length-1;i>=0;i--){const child=chain[i],parent=byId.get(child.conversation+'/'+child.causalAfter);if(!cycle&&parent)child.at=Math.max(child.at,parent.at+1);done.add(child);}
+    }
+    this.timeData=data;this.timeRevision=revision;
   }
   attachmentIndexes(){const data=this.load(),revision=this.revision||0;if(this.fileIndex?.data===data&&this.fileIndex.revision===revision)return this.fileIndex;return this.fileIndex={data,revision,messages:new Set(data.messages.filter(m=>!m.deleted).map(m=>m.conversation+'/'+m.id)),attachments:new Map(Object.entries(data.attachments).map(([token,a])=>[a.conversation+'/'+a.message,token]))};}
   contact(peer, route) {
@@ -59,8 +74,9 @@ class ChatStore {
     const relay = value.conversation.startsWith('g:') && data.groups[key]?.owner === this.self;
     const pending = outgoing || relay ? [...new Set((value.pending || []).filter(id => UUID.test(id) && id !== this.self && (!relay || data.groups[key].members.some(m => m.deviceId === id))))] : [];
     const now=Date.now(),age=!outgoing&&Number.isSafeInteger(value.ageMs)&&value.ageMs>=0?Math.min(value.ageMs,366*86400000):null;
-    const message = { id: value.id, conversation: value.conversation, sender: value.sender, name: value.name, kind: value.kind, text: value.text, at: age!==null?now-age:Number.isSafeInteger(value.at)&&Math.abs(now-value.at)<365*86400000?value.at:now, receivedAt: Math.max(now, (data.messages.at(-1)?.receivedAt || 0) + 1), status: outgoing ? (pending.length ? 'queued' : 'sent') : 'received', pending };
-    if(age!==null){message.originAgeMs=age;message.ageReceivedAt=now;}
+    const message = { id: value.id, conversation: value.conversation, sender: value.sender, name: value.name, kind: value.kind, text: value.text, at: age!==null?now-age:outgoing&&Number.isSafeInteger(value.at)&&Math.abs(now-value.at)<365*86400000?value.at:now, receivedAt: Math.max(now, (data.messages.at(-1)?.receivedAt || 0) + 1), status: outgoing ? (pending.length ? 'queued' : 'sent') : 'received', pending };
+    const parent=outgoing?data.messages.findLast(m=>m.conversation===value.conversation&&!m.deleted)?.id:value.causalAfter;if(UUID.test(parent||'')&&parent!==message.id)message.causalAfter=parent;
+    message.originAgeMs=outgoing?Math.max(0,now-message.at):age??0;message.ageReceivedAt=now;
         for(const key of ['replyTo','forwardedFrom']){const ref=require('../shared/chat-reference.cjs').reference(value[key]);if(ref)message[key]=ref;}
     message.recipients=outgoing?(value.conversation.startsWith('g:')?data.groups[key].members.map(m=>m.deviceId).filter(id=>id!==this.self):[key]):[];
     return this.change(d => { const change=(d.mutations||[]).find(c=>c.message===message.id&&c.conversation===message.conversation&&c.sender===message.sender);if(change&&(change.removed||message.kind==='text'))this.applyMutation(message,change);if(!message.deleted){for(const reaction of d.reactionChanges||[])if(reaction.message===message.id&&reaction.conversation===message.conversation){message.reactions||={};message.reactions[reaction.sender]={emoji:reaction.emoji,revision:reaction.revision};}d.messages.push(message);if(!outgoing)this.queueReceipt(d,message,'delivered');} return { message, duplicate: false }; });
@@ -178,9 +194,9 @@ class ChatStore {
   }
   history({ conversation, before = Number.MAX_SAFE_INTEGER, search = '', limit = 100 } = {}) {
     if (typeof conversation !== 'string' || typeof search !== 'string' || search.length > 200 || !Number.isSafeInteger(before)) throw new Error('Invalid history query.');
-    return this.load().messages.filter(m => !m.deleted && m.conversation === conversation && m.receivedAt < before && (!search || m.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).slice(-Math.max(1, Math.min(100, Number(limit) || 100))).map(m => ({ ...m,pending:[...new Set([...m.pending,...(this.data.mutations||[]).filter(c=>c.message===m.id&&c.conversation===conversation).flatMap(c=>c.pending)])],attachment:m.deleted?undefined:this.attachmentIndexes().attachments.get(conversation+'/'+m.id) }));
+    this.repairMessageTimes();return this.load().messages.filter(m => !m.deleted && m.conversation === conversation && m.receivedAt < before && (!search || m.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).slice(-Math.max(1, Math.min(100, Number(limit) || 100))).map(m => ({ ...m,pending:[...new Set([...m.pending,...(this.data.mutations||[]).filter(c=>c.message===m.id&&c.conversation===conversation).flatMap(c=>c.pending)])],attachment:m.deleted?undefined:this.attachmentIndexes().attachments.get(conversation+'/'+m.id) }));
   }
-  pending(peer) { return this.load().messages.filter(m => !m.deleted && m.pending.includes(peer)); }
+  pending(peer) { this.repairMessageTimes();return this.load().messages.filter(m => !m.deleted && m.pending.includes(peer)); }
   schedule(value){
     const data=this.load(),conversation=value?.conversation,key=conversation?.slice(2);
     if(!/^[pg]:[a-f0-9-]{36}$/i.test(conversation||'')||!(conversation.startsWith('p:')?data.contacts[key]:data.groups[key])||typeof value.text!=='string'||!value.text.trim()||value.text.length>8000||!Number.isSafeInteger(value.sendAt)||value.sendAt<=Date.now()||value.sendAt>Date.now()+366*86400000)throw new Error('Choose a future time and enter a message.');
@@ -194,7 +210,7 @@ class ChatStore {
   dispatchDue(name,now=Date.now()){
     const due=(this.load().scheduled||[]).filter(m=>m.sendAt<=now);if(!due.length)return [];
     return this.change(d=>{const messages=[];for(const item of due){const group=item.conversation.startsWith('g:')&&d.groups[item.conversation.slice(2)],recipients=group?group.members.map(m=>m.deviceId).filter(id=>id!==this.self):[item.conversation.slice(2)],pending=group&&group.owner!==this.self?[group.owner]:recipients;
-      if(!d.messages.some(m=>m.id===item.id&&m.conversation===item.conversation)){const message={id:item.id,conversation:item.conversation,sender:this.self,name:String(name||'').slice(0,60),kind:'text',text:item.text,at:now,scheduledAt:item.sendAt,receivedAt:Math.max(now,(d.messages.at(-1)?.receivedAt||0)+1),status:pending.length?'queued':'sent',pending,recipients};d.messages.push(message);messages.push(message);}
+      if(!d.messages.some(m=>m.id===item.id&&m.conversation===item.conversation)){const message={id:item.id,conversation:item.conversation,sender:this.self,name:String(name||'').slice(0,60),kind:'text',text:item.text,at:now,originAgeMs:0,ageReceivedAt:now,causalAfter:d.messages.findLast(m=>m.conversation===item.conversation&&!m.deleted)?.id,scheduledAt:item.sendAt,receivedAt:Math.max(now,(d.messages.at(-1)?.receivedAt||0)+1),status:pending.length?'queued':'sent',pending,recipients};d.messages.push(message);messages.push(message);}
     }d.scheduled=(d.scheduled||[]).filter(m=>m.sendAt>now);return messages;});
   }
   react(value,outgoing=false){

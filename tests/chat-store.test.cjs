@@ -43,6 +43,27 @@ test('receiver-local message age compensates clock skew and preserves an offline
  store.append({...old,ageMs:0});assert.equal(store.history({conversation}).at(-1).at,old.at);
 });
 
+test('legacy replies ignore remote clocks and causal replies stay after their question across reload and clock rollback',t=>{
+ const {store,options,self,peer}=fixture(t),conversation='p:'+peer,clock=Date.now;let now=clock();Date.now=()=>now;
+ try{const question=store.append({id:crypto.randomUUID(),conversation,sender:self,name:'Me',kind:'text',text:'question',at:now,pending:[peer]},true).message;
+ const legacy=store.append({id:crypto.randomUUID(),conversation,sender:peer,name:'Peer',kind:'text',text:'legacy reply',at:now-300000}).message;
+ assert.ok(legacy.at>=question.at,'Legacy remote clock must never become the local message time');
+ now-=300000;const reply=store.append({id:crypto.randomUUID(),conversation,sender:peer,name:'Peer',kind:'text',text:'reply',at:now-900000,ageMs:5000,causalAfter:question.id}).message;
+ const ordered=store.history({conversation}).sort((a,b)=>a.at-b.at||a.receivedAt-b.receivedAt);assert.ok(ordered.findIndex(m=>m.id===question.id)<ordered.findIndex(m=>m.id===reply.id));assert.ok(reply.at>question.at);
+ const ownReply=store.append({id:crypto.randomUUID(),conversation,sender:self,name:'Me',kind:'text',text:'own reply',at:now,pending:[peer]},true).message;store.history({conversation});assert.equal(ownReply.causalAfter,reply.id);assert.equal(ownReply.ageReceivedAt,now);assert.equal(ownReply.originAgeMs,0);assert.ok(ownReply.at>reply.at,'Ordering must not change the original age clock');
+ store.save();const reload=new ChatStore(options);assert.ok(reload.history({conversation}).find(m=>m.id===reply.id).at>question.at);
+ const old=store.append({id:crypto.randomUUID(),conversation,sender:peer,name:'Peer',kind:'text',text:'queued yesterday',at:now+600000,ageMs:86400000}).message;assert.equal(old.at,now-86400000);
+ }finally{Date.now=clock;}
+});
+test('previously stored raw-clock replies are repaired and late causal parents are sorted before their children',t=>{
+ const {store,options,self,peer}=fixture(t),conversation='p:'+peer,now=Date.now(),question=store.append({id:crypto.randomUUID(),conversation,sender:self,name:'Me',kind:'text',text:'question',at:now,pending:[]},true).message;
+ const reply=store.append({id:crypto.randomUUID(),conversation,sender:peer,name:'Peer',kind:'text',text:'legacy',at:now}).message;delete reply.originAgeMs;delete reply.ageReceivedAt;reply.at=now-300000;store.save();
+ const reload=new ChatStore(options),rows=reload.history({conversation});assert.ok(rows.find(m=>m.id===reply.id).at>=question.at);
+ const parentId=crypto.randomUUID(),child=reload.append({id:crypto.randomUUID(),conversation,sender:peer,name:'Peer',kind:'text',text:'child',at:now,ageMs:300000,causalAfter:parentId}).message;
+ const parent=reload.append({id:parentId,conversation,sender:peer,name:'Peer',kind:'text',text:'parent',at:now,ageMs:0}).message;
+ const ordered=reload.history({conversation}).sort((a,b)=>a.at-b.at||a.receivedAt-b.receivedAt);assert.ok(ordered.findIndex(m=>m.id===parent.id)<ordered.findIndex(m=>m.id===child.id));
+});
+
 test('message pins persist and unread reactions clear only when that message is seen',t=>{
  const {store,options,self,peer}=fixture(t),conversation=`p:${peer}`,id=crypto.randomUUID();store.append({id,sender:self,name:'Me',conversation,kind:'text',text:'pinned',at:Date.now(),pending:[peer]},true);store.pinMessage(conversation,id);
  assert.equal(new ChatStore(options).list().messagePins[conversation],id);

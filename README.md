@@ -1,5 +1,7 @@
 # Shatoot Connect
 
+Chat timestamps use receiver-local time minus the sender's queued age. A legacy peer without age metadata falls back to local receipt time, never its raw clock. New clients also carry a causal predecessor so a reply stays after the message known when it was composed; queue age remains independent of that ordering adjustment. Stored history is corrected from its available local age/receipt evidence when read. Upgrade both peers for causal-order metadata in both directions.
+
 **Settings > Storage** shows per-section disk usage and Clear actions for story cache, received copies, sent photos/voice, temporary files, downloaded installers, browser cache and chat history. Clearing history deletes messages; clearing received files deletes their downloaded copies. Original source files, saved computers, credentials and connection settings are kept. Active authored story media is retained until expiry. While the app runs, expiry is checked every minute; stale temporary files are removed after one day and old update packages/helpers after seven days. Chromium's disk cache is capped at 128 MiB.
 
 Story media prefetches as soon as the author is reachable, using one shared download per story. Online file recipients receive immediately under the chosen file-approval policy; offline group recipients no longer block them, and pending deliveries retry when reconnected. Files already received open locally; thumbnails are asynchronous and attachment lookup is indexed. Opening an external app still depends on Windows and the associated viewer.

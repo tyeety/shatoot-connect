@@ -177,7 +177,7 @@
     }
     normalize(s, message) {
       if (!message || !UUID.test(message.sender) || !UUID.test(message.id) || typeof message.conversation !== 'string') throw new Error('Invalid chat message.');
-      const result = { id: message.id, conversation: message.conversation, sender: message.sender, name: '', ageMs:message.ageMs,replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,kind: message.kind, text: message.deleted?'Message deleted':message.text, at: message.at };
+      const result = { id: message.id, conversation: message.conversation, sender: message.sender, name: '', ageMs:message.ageMs,causalAfter:message.causalAfter,replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,kind: message.kind, text: message.deleted?'Message deleted':message.text, at: message.at };
       if (message.conversation === `p:${this.self.deviceId}` && message.sender === s.peer.deviceId) { result.conversation = `p:${s.peer.deviceId}`; result.name = s.peer.name; return result; }
       const group = this.group(message.conversation.slice(2));
       if (!message.conversation.startsWith('g:') || !group || !group.members.some(m => m.deviceId === message.sender) || (group.owner !== s.peer.deviceId && (group.owner !== this.self.deviceId || message.sender !== s.peer.deviceId))) throw new Error('Invalid group message.');
@@ -241,7 +241,7 @@
       const group = conversation.startsWith('g:') && this.group(conversation.slice(2));
       const pending = group ? (group.owner === this.self.deviceId ? group.members.map(m => m.deviceId).filter(id => id !== this.self.deviceId) : [group.owner]) : [conversation.slice(2)];
       const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'text', text: text.trim(),replyTo:options.replyTo,forwardedFrom:options.forwardedFrom,at: Date.now(), pending };
-      await this.api.collaboration('append', { message, outgoing: true }); await this.refresh();
+      Object.assign(message,(await this.api.collaboration('append', { message, outgoing: true })).message); await this.refresh();
       for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(async error=>{if(!/offline/i.test(error.message)){await this.api.collaboration('failed',{id:message.id,peer:id});await this.refresh();}});
       return message;
     }
@@ -318,7 +318,7 @@
       } finally { s.flushing = false; }
     }
     storyWire(s,story){const modern=s.features?.includes('story-design-v1'),media=!modern&&story.media?.mime==='audio/webm'?undefined:story.media;let text=story.text;if(!modern)text=[text,...(story.design?.layers||[]).map(layer=>layer.text)].filter(Boolean).join('\n').slice(0,1000);if(!media&&!story.image&&!text.trim())text='Update the app to view this story.';return {...story,media,design:modern?story.design:undefined,text,ageMs:Math.max(0,Date.now()-story.at)};}
-    wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind,ageMs:message.ageReceivedAt!==undefined?Math.max(0,(message.originAgeMs||0)+Date.now()-message.ageReceivedAt):Math.max(0,Date.now()-message.at), text: message.deleted?'Message deleted':message.text,replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,at: message.at }; }
+    wire(message) { return { id: message.id, conversation: message.conversation, sender: message.sender, name: message.name, kind: message.kind,causalAfter:message.causalAfter,ageMs:message.ageReceivedAt!==undefined?Math.max(0,(message.originAgeMs||0)+Date.now()-message.ageReceivedAt):Math.max(0,Date.now()-message.at), text: message.deleted?'Message deleted':message.text,replyTo:message.replyTo,forwardedFrom:message.forwardedFrom,at: message.at }; }
     async createGroup(name, members, existingId,details={}) {
       if (typeof name !== 'string' || !name.trim() || name.length > 60) throw new Error('Enter a group name of up to 60 characters.');
       if(!Array.isArray(members))throw new Error('Invalid group membership.');
@@ -342,7 +342,7 @@
       const first = targets[0]; if (!first) throw new Error('Connect to a contact first.');
       const entries = selection === 'drop' ? await this.api.collaborationDrop(first.id, value) : await this.api.collaborationFiles(first.id, selection, value); if (!entries.length) return;
       const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'file', text: options.text!==undefined?options.text:entries.slice(0, 12).map(e => e.name).join('\n').slice(0, 7800) + (entries.length > 12 ? `\n+ ${entries.length - 12}` : ''), replyTo:options.replyTo,forwardedFrom:options.forwardedFrom,at: Date.now(), pending: ids };
-      await this.api.collaboration('append', { message, outgoing: true });
+      Object.assign(message,(await this.api.collaboration('append', { message, outgoing: true })).message);
       await this.api.collaborationFiles(first.id,'attach-sources',{id:message.id,conversation});await this.refresh();
       for (const s of targets) {
         if (group && !await this.announceGroup(s, group)){await this.api.collaboration('failed',{id:message.id,peer:s.peer.deviceId});continue;}
