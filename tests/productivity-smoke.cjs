@@ -44,6 +44,8 @@ module.exports=async({host,createWindow,states,app,dialog,log})=>{
     const renamedShortcut=path.join(path.dirname(shortcut),`Office renamed - Shatoot Connect (${favoriteId.slice(0,8)}).lnk`);
     for(let n=0;n<60&&!fs.existsSync(renamedShortcut);n++)await sleep(50);
     if(!fs.existsSync(renamedShortcut)||fs.existsSync(shortcut)||!shell.readShortcutLink(renamedShortcut).args.includes(favoriteId))throw Error('Renaming a contact did not migrate its existing desktop shortcut');
+    await run(host,`api.favoriteSave({address:'127.0.0.1:${port}',name:'office renamed'});api.favoriteShortcut('${favoriteId}')`);
+    if(!fs.existsSync(renamedShortcut))throw Error('Case-only contact rename deleted its desktop shortcut');
     await run(host,`api.favoriteSave({address:'127.0.0.1:${port}',name:'Office PC'});api.favoriteShortcut('${favoriteId}')`);
   // Focus rings must stay within every control, including compact tabs and datalist fields.
   const sweep="(()=>{let count=0;const errors=[];for(const control of document.querySelectorAll('button,input,select,textarea,a[href],[tabindex],[contenteditable=true]')){if(control.disabled||!control.getBoundingClientRect().width)continue;control.focus({preventScroll:true});if(document.activeElement!==control||!control.matches(':focus-visible'))continue;const style=getComputedStyle(control),width=parseFloat(style.outlineWidth)||0,offset=parseFloat(style.outlineOffset)||0;if(width&&style.outlineStyle!=='none'&&offset+width>0)errors.push(control.id||control.tagName);count++;}return {count,errors};})()";let focused=0;

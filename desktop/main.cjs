@@ -126,7 +126,7 @@ function createFavoriteShortcut(id) {
     if(!shell.writeShortcutLink(target,fs.existsSync(target)?'update':'create',details))throw Error('Desktop shortcut could not be created.');
     favoriteShortcutState.set(id,signature);icons.pruneIcons(directory,id,icon);
   }
-  if(previous!==target&&fs.existsSync(previous)&&owned(previous))fs.unlinkSync(previous);
+  if(previous.toLowerCase()!==target.toLowerCase()&&fs.existsSync(previous)&&owned(previous))fs.unlinkSync(previous);
   if(!record.shortcut||record.shortcutFile!==path.basename(target))preferences.markShortcut(id);return target;
 }
 function identity() {

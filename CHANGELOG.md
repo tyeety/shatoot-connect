@@ -13,11 +13,12 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
-## 0.34.2 — 2026-11-01
+## 0.34.3 — 2026-11-01
 
 ### Changed
 
 - Saved-computer desktop shortcut names start with the contact's chosen name. Existing application-owned shortcuts migrate without changing their stable launcher or profile icon; unrelated desktop links are preserved.
+- Changing only the letter case of a contact name keeps its Windows desktop shortcut intact.
 
 ### Fixed
 
