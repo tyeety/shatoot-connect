@@ -20,7 +20,9 @@ test('download checks bytes and digest, deletes corrupt partials and never touch
   const bytes=crypto.randomBytes(10000), metadata=release(bytes); let corrupted=false;
   const updater=new Updater({version:'0.10.0',directory:path.join(dir,'updates'),portable:false,request: async url => Readable.from([url.includes('/releases?') ? JSON.stringify([metadata]) : corrupted ? Buffer.alloc(bytes.length) : bytes])});
   assert.equal((await updater.check()).state,'available'); await updater.download(); assert.deepEqual(fs.readFileSync(updater.file),bytes);
+  const restarted=new Updater({version:'0.10.0',directory:updater.directory,portable:false});assert.equal(await restarted.manualInstaller(true),updater.file);
   corrupted=true; await assert.rejects(updater.download(),/integrity/); assert.equal(fs.existsSync(updater.file+'.partial'),false); assert.deepEqual(fs.readFileSync(updater.file),bytes); assert.equal(fs.readFileSync(userProfile,'utf8'),'preserve-settings-and-history');
+  fs.writeFileSync(updater.file,Buffer.alloc(bytes.length));await assert.rejects(restarted.manualInstaller(true),/integrity/);
 });
 test('install rechecks highest stable release before and after download and refuses incomplete newer releases',async t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'shatoot-latest-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));

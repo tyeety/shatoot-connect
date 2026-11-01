@@ -13,6 +13,24 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.0 — 2026-11-01
+
+### Added
+
+- Settings > Storage reports space used by stories, received files, sent photos/voice, temporary files, downloaded installers, browser cache, chat history and other app data. Managed sections have individual Clear buttons; original source files and connection settings are retained.
+- Updates offers Run downloaded Setup and Show downloaded Setup after a failed update when a complete installer is available. Manual launch verifies its SHA-256, including after restarting the app.
+
+### Changed
+
+- Story video/audio downloads in the background as soon as its author is reachable. Concurrent viewers share one download; media reads use batches of eight chunks. Local playback reads the file through the media protocol instead of hundreds of base64 IPC calls.
+- Available group members receive files without waiting for offline members. Pending file deliveries replay from stored attachment sources when the peer reconnects, and transfers allow eight in-flight chunks while retaining backpressure and checksums. File-reception approval preferences remain effective.
+- Attachment lookup uses a revision-scoped index and image thumbnails are created asynchronously to keep file actions responsive with large histories.
+
+### Fixed
+
+- Expired story media is removed within the periodic one-minute sweep even when downloaded shortly before expiry; expired story records, pictures and activity are also removed. Active stories sharing the same media hash remain available.
+- Automatic maintenance removes temporary leftovers older than one day and old cached installers/helpers after seven days. Active update/receive paths and originals are protected; Chromium disk cache is limited to 128 MiB.
+
 ## 0.34.3 — 2026-11-01
 
 ### Changed

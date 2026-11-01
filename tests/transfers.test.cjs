@@ -35,3 +35,12 @@ test('rejects traversal, device paths, forged grants, oversized data, corruption
   await assert.rejects(receive.endFile({ index: 0, hash: 'wrong' }), /integrity/);
   await receive.reset(); assert.deepEqual(await fs.readdir(root), []);
 });
+
+test('an offline group member does not block available file recipients and pending files replay after reconnect',async()=>{
+ const sandbox={window:{},crypto,setTimeout,clearTimeout,setInterval,clearInterval,console};require('node:vm').runInNewContext(await fs.readFile(path.join(__dirname,'../desktop/ui/collaboration.js'),'utf8'),sandbox);
+ const self=crypto.randomUUID(),online=crypto.randomUUID(),offline=crypto.randomUUID(),group={id:crypto.randomUUID(),owner:self,members:[{deviceId:self},{deviceId:online},{deviceId:offline}]},messages=[],sent=[];
+ const api={collaboration:async(op,v)=>{if(op==='list')return {groups:[group],contacts:[],stories:[]};if(op==='append'){messages.push(v.message);return {};}if(op==='pending')return messages.filter(m=>m.pending.includes(v.peer));if(op==='delivered'){const row=messages.find(m=>m.id===v.id);row.pending=row.pending.filter(id=>id!==v.peer);return true;}if(op==='forward-sources')return ['/fixture.txt'];return [];},collaborationFiles:async()=>[{id:'source',name:'fixture.txt',size:1}]};
+ const client=new sandbox.window.CollaborationClient({api,self:{deviceId:self,name:'Self'}});await client.ready;const first={id:online,peer:{deviceId:online},channel:{readyState:'open'},features:[]};client.sessions.set(online,first);client.ensurePeer=async id=>{const s=client.peer(id);if(!s)throw Error('offline');return s;};client.announceGroup=async()=>true;client.transfer=async(s,entries,message)=>{sent.push(s.peer.deviceId);};
+ await client.sendFiles('g:'+group.id,'sources',['/fixture.txt']);assert.deepEqual(sent,[online]);assert.deepEqual(Array.from(messages[0].pending),[offline]);
+ const next={id:offline,peer:{deviceId:offline},channel:{readyState:'open'},features:[]};client.sessions.set(offline,next);await client.flush(next);await client.fileQueue;assert.deepEqual(sent,[online,offline]);assert.equal(messages[0].pending.length,0);
+});

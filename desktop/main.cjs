@@ -3,7 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const { createSignalingServer } = require('../server/index.cjs');
-protocol.registerSchemesAsPrivileged([{scheme:'shatoot-media',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true}}]);
+protocol.registerSchemesAsPrivileged([{scheme:'shatoot-media',privileges:{standard:true,secure:true,stream:true,supportFetchAPI:true,corsEnabled:true}}]);
 const { PROFILES } = require('../shared/protocol.cjs');
 const crypto = require('node:crypto');
 const network = require('../shared/network.cjs');
@@ -19,6 +19,7 @@ app.commandLine.appendSwitch('disable-features',[app.commandLine.getSwitchValue(
 const videoTrials=app.commandLine.getSwitchValue('force-fieldtrials');
 if(!videoTrials.includes('WebRTC-ForcePlayoutDelay/'))app.commandLine.appendSwitch('force-fieldtrials',videoTrials+(videoTrials&&!videoTrials.endsWith('/')?'/':'')+'WebRTC-ForcePlayoutDelay/min_ms:0,max_ms:30/');
 
+app.commandLine.appendSwitch('disk-cache-size',String(128*1024*1024));
 const smoke = !app.isPackaged && process.argv.includes('--smoke-test');
 if(smoke&&process.argv.includes('--chat-notification-smoke'))app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 if (smoke) { app.setPath('userData', path.join(__dirname, process.argv.includes('--media-smoke')?'../artifacts/media-profile':(process.argv.includes('--story-editor-smoke')||process.argv.includes('--workspace-smoke')||process.argv.includes('--productivity-smoke'))?'../artifacts/social-profile-'+process.pid:'../artifacts/smoke-profile')); const desktop = path.join(__dirname, '../artifacts/test-desktop'); fs.mkdirSync(desktop, { recursive: true }); app.setPath('desktop', desktop); const downloads = path.join(__dirname, '../artifacts/test-downloads'); fs.mkdirSync(downloads, { recursive: true }); app.setPath('downloads', downloads); }
@@ -242,7 +243,7 @@ function chatFilesReceived(s,record,files){
   if(!reading&&!s.chatStore?.isMuted(record.conversation)&&!s.chatStore?.isBlocked(record.sender)){record={...record,name:preferences.decorate({deviceId:record.sender,name:record.name}).displayName};const fa=s.language==='fa',voice=files?.length===1&&/^Voice-[a-f0-9-]{36}\.webm$/i.test(record.text);notices.toast(s.win,voice?(fa?`پیام صوتی از ${record.name}`:`Voice message from ${record.name}`):files?(fa?`فایل‌ها از ${record.name} دریافت شدند.`:`Files received from ${record.name}.`):record.name,{kind:'message',detail:voice?'':files?files.map(file=>path.basename(file)).slice(0,8).join('\n')+'\nDownloads':record.text.slice(0,500),onActivate:()=>openChat(s,{conversation:record.conversation,message:record.id})});}
 }
 const systemInfo=require('./system-info.cjs').createSystemInfo({app,screen});
-const collaborationHost = require('./collaboration-host.cjs').installCollaboration({systemInfo, ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, previewImage:file=>readProfilePhoto(file,true),catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
+const collaborationHost = require('./collaboration-host.cjs').installCollaboration({systemInfo, ipcMain, state, app, safeStorage, dialog: {showOpenDialog:(...args)=>dialog.showOpenDialog(...args),showMessageBox:(owner,options)=>notices.showMessageBox(owner,options),cancelFor:(owner,priority)=>notices.cancelFor(owner,priority)}, shell, smoke, settings, clipboardRead:s=>nativeClipboard(s,{op:'read'}), decorateComputer:(peer,route)=>preferences.decorate(peer,route), rememberComputer:(peer,route,preview)=>{rememberComputer(peer,route,preview);computerChanged();}, previewImage:async file=>{const image=await require('electron').nativeImage.createThumbnailFromPath(file,{width:320,height:180});return image.isEmpty()?'':image.toDataURL();},catalogChanged:publishUnread,received:chatFilesReceived, messageReceived:(s,record)=>chatFilesReceived(s,record) });
 ipcMain.handle('voice-recording',(event,enabled)=>{
   const s=state(event);if(s.owner||typeof enabled!=='boolean')throw new Error('Invalid microphone request.');
   s.voicePermissions||=new Map();if(enabled)s.voicePermissions.set(event.sender.id,Date.now()+15000);else s.voicePermissions.delete(event.sender.id);
@@ -359,9 +360,15 @@ ipcMain.handle('chat-call', (e, operation, args = []) => {
 ipcMain.on('chat-result', (e, data) => { const pending = chatPending.get(data?.id); if (!pending || pending.s.win.webContents !== e.sender || e.senderFrame !== e.sender.mainFrame) return; clearTimeout(pending.timer); chatPending.delete(data.id); data.error ? pending.reject(new Error(data.error)) : pending.resolve(data.value); });
 ipcMain.on('chat-publish', (e, value) => { const s = state(e,false); if (!s||s.win.webContents !== e.sender) return; if(s.chatStore)value={...value,catalog:{...value.catalog,unread:s.chatStore.unread(),muted:{...s.chatStore.load().muted},pins:{...s.chatStore.load().pins},pinOrder:[...(s.chatStore.load().pinOrder||[])],lastSelected:s.chatStore.load().lastSelected||''}};if (s.chatWindow && !s.chatWindow.isDestroyed()) s.chatWindow.webContents.send('chat-snapshot', value); });
 let installingUpdate=false;
+const storageManager=()=>new(require('./storage.cjs').Storage)({root:app.getPath('userData'),temp:app.getPath('temp'),downloads:app.getPath('downloads'),stores:()=>[...states.values()].map(s=>s.chatStore).filter(Boolean),protectedFiles:()=>[...[...states.values()].map(s=>s.chatStore?.file&&s.chatStore.file+'.tmp').filter(Boolean),...[...states.values()].flatMap(s=>(s.chatStore?.load().stories||[]).filter(v=>v.media&&v.sender===s.identity?.deviceId&&v.expiresAt>Date.now()).map(v=>path.join(app.getPath('userData'),'story-media',v.media.hash+'.media'))),...[...states.values()].flatMap(s=>[s.transfers?.incoming?.parts,s.transfers?.incoming?.folder,...[...(s.chatGrants?.values()||[])].flatMap(g=>[g.receive.incoming?.parts,g.receive.incoming?.folder])]).filter(Boolean),...(!installingUpdate&&!update.busy?[]:[...(update.file?[update.file]:[]),...((update.asset&&!update.file)?[path.join(update.directory,update.asset.name)]:[])] )]});
+ipcMain.handle('storage',async(e,operation,section)=>{state(e);const manager=storageManager();if(operation==='snapshot')return manager.snapshot();if(operation!=='clear')throw Error('Invalid storage operation.');if(installingUpdate||update.busy||[...states.values()].some(s=>s.transfers?.incoming||[...(s.chatGrants?.values()||[])].some(g=>g.receive.incoming)))throw Error('Wait for the active transfer or update to finish.');if(section==='browser')await session.defaultSession.clearCache();const result=await manager.clear(section);for(const s of states.values()){s.attachmentPreviews?.clear();for(const win of [s.win,s.chatWindow])if(win&&!win.isDestroyed())win.webContents.send('storage-cleared',section);}return {...result,sections:await manager.snapshot()};});
+let storageMaintenanceBusy=false;
+async function maintainStorage(){if(storageMaintenanceBusy||installingUpdate||update.busy)return;storageMaintenanceBusy=true;try{const stories=[...states.values()].flatMap(s=>s.chatStore?.load().stories||[]);const media=new(require('./story-media.cjs').StoryMedia)(path.join(app.getPath('userData'),'story-media'));media.track(stories);media.prune(stories.filter(s=>s.expiresAt>Date.now()));for(const s of states.values()){const store=s.chatStore;if(store?.load().stories?.some(v=>v.expiresAt<=Date.now())){store.change(d=>{d.stories=d.stories.filter(v=>v.expiresAt>Date.now());const ids=new Set(d.stories.map(v=>v.id));d.storyEvents=(d.storyEvents||[]).filter(e=>ids.has(e.story));d.storySeen=Object.fromEntries(Object.entries(d.storySeen||{}).filter(([id])=>ids.has(id)));});s.win.webContents.send('storage-cleared','expired-stories');}}for(const s of states.values())if(s.storyMedia)s.storyMedia.expiry=media.expiry;await storageManager().maintain();}catch{}finally{storageMaintenanceBusy=false;}}
 ipcMain.handle('update', async (e, operation) => {
   state(e);
   if (operation === 'status') return update.status;
+  if(operation==='manual-status')return {available:!!await update.manualInstaller()};
+  if(operation==='manual-install'||operation==='show-installer'){if(installingUpdate||update.busy)throw Error('An update is already in progress.');const file=await update.manualInstaller(true);if(!file)throw Error('No verified downloaded installer is available. Download the update first.');if(operation==='show-installer'){shell.showItemInFolder(file);return;}const error=await shell.openPath(file);if(error)throw Error(error);return;}
   if (operation === 'check') return update.check();
   if (operation !== 'install' || !app.isPackaged) throw new Error('Updates can only be installed in a packaged application.');
   if(installingUpdate)throw new Error('An update is already in progress.');installingUpdate=true;
@@ -457,7 +464,7 @@ function createWindow({viewerOwner,target}={}) {
   if(viewerOwner){win.setTitle('Shatoot Connect · '+target.address);win.on('page-title-updated',event=>event.preventDefault());}
   const contentsId = win.webContents.id;
   if (smoke) {
-    win.webContents.on('console-message', (_event, details) => smokeLog(`renderer: ${details.message}`));
+    win.webContents.on('console-message', (event,...args) => smokeLog(`renderer: ${event.message||args[1]||args[0]?.message||''}`));
     win.webContents.on('did-fail-load', (_event, code, description) => smokeLog(`load error ${code}: ${description}`));
     win.webContents.on('did-finish-load', () => smokeLog('did-finish-load'));
     win.webContents.on('render-process-gone', (_event, details) => smokeLog(`renderer gone: ${details.reason}`));
@@ -793,7 +800,7 @@ ipcMain.handle('exchange', async (e, operation, value) => {
 });
 
 app.whenReady().then(async () => {
-  protocol.handle('shatoot-media',async request=>{try{const url=new URL(request.url),token=url.hostname,index=Number(url.pathname.slice(1));if(!require('./discovery.cjs').UUID.test(token)||!Number.isInteger(index)||index<0)return new Response(null,{status:404});for(const state of states.values()){try{const files=state.composerMedia?.get(token)||state.chatStore?.files(token);if(files?.[index])return await require('./attachment-protocol.cjs').response(files[index],request);}catch{}}}catch{}return new Response(null,{status:404});});
+  protocol.handle('shatoot-media',async request=>{try{const url=new URL(request.url),token=url.hostname,index=Number(url.pathname.slice(1));if(url.pathname==='/story'&&require('./discovery.cjs').UUID.test(token)){for(const s of states.values()){const story=s.chatStore?.load().stories?.find(v=>v.id===token&&v.expiresAt>Date.now());if(story?.media&&s.storyMedia?.has(story.media))return await require('./attachment-protocol.cjs').response(s.storyMedia.file(story.media),request,story.media.mime);}return new Response(null,{status:404});}if(!require('./discovery.cjs').UUID.test(token)||!Number.isInteger(index)||index<0)return new Response(null,{status:404});for(const state of states.values()){try{const files=state.composerMedia?.get(token)||state.chatStore?.files(token);if(files?.[index])return await require('./attachment-protocol.cjs').response(files[index],request);}catch{}}}catch{}return new Response(null,{status:404});});
   displayPrivacy=new(require('./display-privacy.cjs').DisplayPrivacy)({BrowserWindow,screen,supported:privacySupported,escapeAvailable:()=>globalShortcut.isRegistered('CommandOrControl+Shift+F12'),changed:(s,reason)=>{if(!['active','released'].includes(reason))s.privacyPermitted=false;publishPrivacy(s);}});
   smokeLog('app ready');
   if(crashProbe){await require('../tests/crash-recorder-smoke.cjs')({app,BrowserWindow,crashReporter:require('electron').crashReporter});return;}
@@ -820,6 +827,7 @@ app.whenReady().then(async () => {
     for (const s of states.values()) { release(s); s.source = null; s.captureAllowed = false; hideHostOverlay(s); s.win.webContents.send('emergency-stop'); }
   });
   const win = createWindow();
+  if(!smoke){setTimeout(maintainStorage,30000).unref();setInterval(maintainStorage,60000).unref();}
   if (!smoke) {
     tray = new Tray(path.join(__dirname, 'ui/assets/app-icon.png')); tray.setToolTip('Shatoot Connect');
     refreshTray(states.get(win.webContents.id));tray.on('double-click', () => showMain(states.get(win.webContents.id)));

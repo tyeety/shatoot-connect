@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   onComputerCards:callback=>ipcRenderer.on('computer-cards-changed',()=>callback()),
   appReady: () => ipcRenderer.invoke('app-ready'),
   update: operation => ipcRenderer.invoke('update', operation),
+  storage: (operation,section) => ipcRenderer.invoke('storage',operation,section),
+  onStorageCleared: callback=>ipcRenderer.on('storage-cleared',(_event,section)=>callback(section)),
   onUpdate: callback => ipcRenderer.on('update-status', (_event, value) => callback(value)),
   firewallStatus: (force=false) => ipcRenderer.invoke('firewall-status',force),
   repairFirewall: () => ipcRenderer.invoke('firewall-repair'),

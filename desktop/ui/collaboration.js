@@ -4,7 +4,7 @@
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   class CollaborationClient {
     constructor({ api, self, internet, ensureInternet, changed = () => {}, error = () => {}, progress = () => {} }) {
-      Object.assign(this, { api, self, internet, ensureInternet, changed, error, progress }); this.sessions = new Map(); this.connectAttempts=new Set(); this.fileQueue = Promise.resolve(); this.catalog = { contacts: [], groups: [], conversations: [] }; this.ready = this.refresh();
+      Object.assign(this, { api, self, internet, ensureInternet, changed, error, progress }); this.storyFetches=new Map();this.prefetchedStories=new Set();this.storyPrefetchQueue=Promise.resolve();this.sessions = new Map(); this.connectAttempts=new Set(); this.fileQueue = Promise.resolve(); this.catalog = { contacts: [], groups: [], conversations: [] }; this.ready = this.refresh();
       api.onChatReceipts?.(()=>this.sendReceipts());
     }
     async ensurePeer(id,background=false) {
@@ -35,7 +35,7 @@
         if(!this.refreshQueued)this.refreshQueued=this.refreshFlight.catch(()=>{}).then(()=>{this.refreshQueued=null;return this.refresh();});
         return this.refreshQueued;
       }
-      this.refreshFlight=(async()=>{this.catalog=await this.api.collaboration('list');this.notify();this.sendReceipts();this.sendStoryEvents();})().finally(()=>{this.refreshFlight=null;});
+      this.refreshFlight=(async()=>{this.catalog=await this.api.collaboration('list');this.notify();this.sendReceipts();this.sendStoryEvents();this.prefetchStories();})().finally(()=>{this.refreshFlight=null;});
       return this.refreshFlight;
     }
     sendStoryEvents(){for(const s of this.sessions.values())if(!s.closed&&s.channel?.readyState==='open'&&s.features?.includes('story-events-v1'))this.flushStoryEvents(s).catch(()=>{});}
@@ -263,12 +263,14 @@
       const reaction={id:crypto.randomUUID(),message,conversation,sender:this.self.deviceId,emoji,revision:(row.reactions?.[this.self.deviceId]?.revision||0)+1,pending};
       await this.api.collaboration('react',{reaction,outgoing:true});await this.refresh();for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});return reaction;
     }
-    async storyMediaCache(id){const story=this.catalog.stories.find(v=>v.id===id);if(!story)throw Error('Story expired or unavailable.');await this.storyMedia(story);return true;}
-    async storyMedia(story){
-      if(!story.media)throw Error('Story media is unavailable.');
-      if(!await this.api.collaboration('story-media-status',{id:story.id})){const s=this.peer(story.sender);if(!s)throw Error('The story author is offline.');for(let offset=0;offset<story.media.size;){const chunk=await this.rpc(s,'story-media-read',{id:story.id,offset});if(!Number.isSafeInteger(chunk.length)||chunk.length<1||chunk.length>32768)throw Error('Invalid story media chunk.');await this.api.collaboration('story-media-write',{session:s.id,id:story.id,offset,bytes:chunk.bytes});offset+=chunk.length;}}
-      const parts=[];for(let offset=0;offset<story.media.size;){const chunk=await this.api.collaboration('story-media-local',{id:story.id,offset}),bytes=Uint8Array.from(atob(chunk.bytes),c=>c.charCodeAt(0));parts.push(bytes);offset+=chunk.length;}return new Blob(parts,{type:story.media.mime});
+    prefetchStories(){for(const story of this.catalog.stories||[])if(story.media&&story.sender!==this.self.deviceId&&this.peer(story.sender)&&!this.prefetchedStories.has(story.id)){this.prefetchedStories.add(story.id);this.storyPrefetchQueue=this.storyPrefetchQueue.then(()=>this.storyMediaCache(story.id)).catch(()=>{setTimeout(()=>this.prefetchedStories.delete(story.id),30000);});}}
+    async storyMediaCache(id){
+      if(this.storyFetches.has(id))return this.storyFetches.get(id);
+      const operation=(async()=>{const story=this.catalog.stories.find(v=>v.id===id);if(!story?.media)throw Error('Story expired or unavailable.');
+        if(!await this.api.collaboration('story-media-status',{id})){const s=this.peer(story.sender);if(!s)throw Error('The story author is offline.');for(let offset=0;offset<story.media.size;){const offsets=Array.from({length:Math.min(8,Math.ceil((story.media.size-offset)/32768))},(_,i)=>offset+i*32768),chunks=await Promise.all(offsets.map(offset=>this.rpc(s,'story-media-read',{id,offset})));for(let i=0;i<chunks.length;i++){const chunk=chunks[i],expected=Math.min(32768,story.media.size-offset);if(chunk.length!==expected)throw Error('Invalid story media chunk.');await this.api.collaboration('story-media-write',{session:s.id,id,offset,bytes:chunk.bytes});offset+=chunk.length;}}}return true;
+      })();this.storyFetches.set(id,operation);try{return await operation;}finally{this.storyFetches.delete(id);}
     }
+    async storyMedia(story){await this.storyMediaCache(story.id);const url=await this.api.collaboration('story-media-url',{id:story.id}),response=await fetch(url);if(!response.ok)throw Error('Story media is unavailable.');return response.blob();}
     async sendPreview(s){if(s.closed||!s.features?.includes('desktop-card-preview-v1')||s.previewBusy)return;s.previewBusy=true;try{const preview=await this.api.desktopCardPreview();if(preview&&preview!==s.lastPreview){await this.rpc(s,'desktop-card-preview',s.features.includes('wallpaper-card-v1')?{kind:'wallpaper',preview}:preview);s.lastPreview=preview;}}finally{s.previewBusy=false;}}
     async changeMessage(conversation,id,text,removed=false){
       await this.ready;const rows=await this.api.collaboration('history',{conversation,limit:100,search:''});let row=rows.find(m=>m.id===id);
@@ -295,6 +297,9 @@
         if(s.features?.includes('story-events-v1'))await this.flushStoryEvents(s);
         const messages = await this.api.collaboration('pending', { peer: s.peer.deviceId });
         for (const message of messages) {
+          if(message.kind==='file'){
+            s.queuedFiles||=new Set();if(!s.queuedFiles.has(message.id)){s.queuedFiles.add(message.id);const operation=this.fileQueue.then(async()=>{if(s.closed||!(await this.api.collaboration('pending',{peer:s.peer.deviceId})).some(m=>m.id===message.id))return;const group=message.conversation.startsWith('g:')&&this.group(message.conversation.slice(2));if(group&&!await this.announceGroup(s,group))return;const paths=await this.api.collaboration('forward-sources',{conversation:message.conversation,id:message.id}),entries=await this.api.collaborationFiles(s.id,'sources',paths);await this.transfer(s,entries,message);await this.api.collaboration('delivered',{id:message.id,peer:s.peer.deviceId});await this.refresh();});this.fileQueue=operation.catch(()=>{});operation.catch(e=>this.error(e.message)).finally(()=>s.queuedFiles.delete(message.id));}continue;
+          }
           if (message.kind !== 'text') continue;
           const group = message.conversation.startsWith('g:') && this.group(message.conversation.slice(2));
           if (group && !await this.announceGroup(s, group)){await this.api.collaboration('failed',{id:message.id,peer:s.peer.deviceId});continue;}
@@ -332,8 +337,8 @@
     async sendSelectedFiles(conversation, selection = 'pick', value,options={}) {
       const group = conversation.startsWith('g:') && this.group(conversation.slice(2));
       const ids = group ? (group.owner === this.self.deviceId ? group.members.map(m => m.deviceId).filter(id => id !== this.self.deviceId) : [group.owner]) : [conversation.slice(2)];
-      await Promise.all(ids.map(id=>this.ensurePeer(id)));
-      const targets = ids.map(id => this.peer(id)); if (targets.some(s => !s)) throw new Error('All file recipients must be connected. Connect them and try again.');
+      const attempts=ids.map(id=>this.ensurePeer(id));for(const attempt of attempts)attempt.catch(()=>{});if(!ids.some(id=>this.peer(id)))await Promise.any(attempts);
+      const targets = ids.map(id => this.peer(id)).filter(Boolean);
       const first = targets[0]; if (!first) throw new Error('Connect to a contact first.');
       const entries = selection === 'drop' ? await this.api.collaborationDrop(first.id, value) : await this.api.collaborationFiles(first.id, selection, value); if (!entries.length) return;
       const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'file', text: options.text!==undefined?options.text:entries.slice(0, 12).map(e => e.name).join('\n').slice(0, 7800) + (entries.length > 12 ? `\n+ ${entries.length - 12}` : ''), replyTo:options.replyTo,forwardedFrom:options.forwardedFrom,at: Date.now(), pending: ids };
@@ -359,7 +364,7 @@
             const request = this.rpc(s, 'write', { index, offset, bytes: chunk.bytes }); pending.add(request); request.then(() => pending.delete(request), () => {});
             offset += chunk.length; sent += chunk.length; if (chunk.hash) hash = chunk.hash;
             if (Date.now() - reported > 400) { reported = Date.now(); this.progress({ conversation: message.conversation, text: 'Transferring files…', percent: Math.floor(sent / Math.max(1, total) * 100) }); }
-            if (pending.size >= 2) await Promise.race(pending);
+            if (pending.size >= 8) await Promise.race(pending);
           }
           await Promise.all(pending); await this.rpc(s, 'end-file', { index, hash });
         }

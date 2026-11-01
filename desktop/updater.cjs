@@ -47,6 +47,15 @@ function response(url, range, redirects = 0) {
 class Updater {
   constructor({ version, directory, portable, changed = () => {}, request = response }) { Object.assign(this, { version, directory, portable, changed, request }); this.status = { state: 'idle', current: version }; }
   emit(patch) { Object.assign(this.status, patch); this.changed({ ...this.status }); return { ...this.status }; }
+  rememberPackage(asset){fs.mkdirSync(this.directory,{recursive:true});fs.writeFileSync(path.join(this.directory,'downloaded-update.json'),JSON.stringify(asset));}
+  async manualInstaller(verify=false){
+    if(this.portable)return null;
+    let asset;try{asset=JSON.parse(await fs.promises.readFile(path.join(this.directory,'downloaded-update.json'),'utf8'));}catch{asset=this.asset;}
+    if(!asset||!/^\d+\.\d+\.\d+$/.test(asset.version)||asset.name!==`ShatootConnect-Setup-${asset.version}-win-x64.exe`||!/^[a-f0-9]{64}$/.test(asset.digest))return null;
+    const file=path.join(this.directory,asset.name);let stat;try{stat=await fs.promises.lstat(file);}catch{return null;}if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==asset.size)return null;
+    if(verify){const hash=crypto.createHash('sha256');for await(const bytes of fs.createReadStream(file))hash.update(bytes);if(hash.digest('hex')!==asset.digest)throw Error('Update integrity check failed. Download the installer again.');}
+    return file;
+  }
   async check() {
     if (this.busy) return this.status;
     this.busy = true; this.emit({ state: 'checking', error: '' });
@@ -66,7 +75,7 @@ class Updater {
       const status=await this.check();if(status.state==='error')throw new Error(status.error);if(!this.asset)throw new Error('The latest version is already installed.');
       const asset=this.asset,target=path.join(this.directory,asset.name);
       let valid=false;if(fs.existsSync(target)&&fs.statSync(target).size===asset.size){const hash=crypto.createHash('sha256');for await(const chunk of fs.createReadStream(target))hash.update(chunk);valid=hash.digest('hex')===asset.digest;}
-      if(valid){this.file=target;this.emit({state:'ready',percent:100});}else await this.download();
+      if(valid){this.file=target;this.rememberPackage(asset);this.emit({state:'ready',percent:100});}else await this.download();
       const fresh=await this.check();if(fresh.state==='error')throw new Error(fresh.error);
       if(this.asset?.version===asset.version&&this.asset.digest===asset.digest){this.emit({state:'ready',percent:100});return this.file;}
     }throw new Error('A newer release appeared during download. Please retry.');}
@@ -80,7 +89,7 @@ class Updater {
       fs.mkdirSync(this.directory, { recursive: true });
       const space = fs.statfsSync(this.directory); if (space.bavail * space.bsize < a.size * 2) throw new Error('Not enough free space for the update.');
       await require('./update-download.cjs').download({asset:a,partial,request:this.request,progress:value=>this.emit(value)});
-      fs.renameSync(partial, target); this.file = target; return this.emit({ state: 'ready', percent: 100 });
+      fs.renameSync(partial, target); this.file = target;this.rememberPackage(a); return this.emit({ state: 'ready', percent: 100 });
     } catch (error) { if(!error.resumable)fs.rmSync(partial, { force: true }); this.emit({ state: 'error', error: error.message }); throw error; }
     finally { this.busy = false; }
   }

@@ -43,7 +43,9 @@ class Transfers {
     if (total > LIMIT) throw new Error('Transfer limit: 10 GB.');
     await fs.mkdir(this.root, { recursive: true });
     const folder = await fs.mkdtemp(path.join(this.root, 'Receive-'));
-    let parts; try { parts = await fs.mkdtemp(path.join(this.root, '.parts-')); } catch (error) { await fs.rmdir(folder); throw error; }
+    await fs.writeFile(path.join(folder,'.shatoot-receive'),'Shatoot Connect received files',{flag:'wx'});
+    let parts; try { parts = await fs.mkdtemp(path.join(this.root, '.parts-')); } catch (error) { await fs.unlink(path.join(folder,'.shatoot-receive')).catch(()=>{});await fs.rmdir(folder); throw error; }
+    await fs.writeFile(path.join(parts,'.shatoot-parts'),'Shatoot Connect partial transfer',{flag:'wx'});
     this.incoming = { folder, parts, entries, index: 0, offset: 0, hash: crypto.createHash('sha256'), handle: null };
     return true;
   }
@@ -64,7 +66,7 @@ class Transfers {
   }
   async finish() {
     const s = this.incoming; if (!s || s.index !== s.entries.length) throw new Error('Incomplete transfer.');
-    await fs.rmdir(s.parts); this.completed = [...new Set(s.entries.map(e => path.join(s.folder, e.name.split('/')[0])))]; this.incoming = null; return this.completed;
+    await fs.unlink(path.join(s.parts,'.shatoot-parts'));await fs.rmdir(s.parts); this.completed = [...new Set(s.entries.map(e => path.join(s.folder, e.name.split('/')[0])))]; this.incoming = null; return this.completed;
   }
   async abort() { const s = this.incoming; this.incoming = null; if (s?.handle) await s.handle.close().catch(() => {}); if (s) { await fs.rm(s.parts, { recursive: true, force: true }); await fs.rm(s.folder, { recursive: true, force: true }); } }
   async reset() { this.sources.clear(); this.selectedPaths=[];this.completed = []; await this.abort(); }

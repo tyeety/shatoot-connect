@@ -7,11 +7,13 @@ window.installClientSettings = (config, profileChanged) => {
     ['chat', 'Chat and files', `<label class="pointer-setting"><input id="show-chat-in-remote" type="checkbox"><span>Show the chat window in remote sessions</span></label><label class="pointer-setting"><input id="auto-accept-files" type="checkbox"><span>Ask before receiving files</span></label><label class="pointer-setting"><input id="require-chat-approval" type="checkbox"><span>Ask before receiving ordinary messages</span></label>`],
     ['updates', 'Updates', `<p>Updates are checked automatically on GitHub. Installing an update restarts the app and keeps settings, saved computers and chat history.</p><p id="update-details" role="status"></p><div class="inline-setting"><button id="check-update" class="small-button">Check for updates</button><button id="install-update" class="small-button" hidden>Update and restart</button></div>`]
   ];
+  tabs.push(['storage','Storage',`<div class="storage-heading"><strong id="storage-total"></strong><button id="storage-refresh" class="small-button">Refresh</button></div><div id="storage-sections"></div><p class="footnote">Clearing received files removes downloaded copies. Original files and connection settings are kept.</p>`]);
   for (const [id, title, content] of tabs) {
     const tab = document.createElement('button'); tab.id = `tab-${id}`; tab.dataset.settingsTab = id; tab.role = 'tab'; tab.setAttribute('aria-controls', `settings-${id}`); tab.setAttribute('aria-selected', 'false'); tab.tabIndex = -1; tab.textContent = tr(title); document.querySelector('.settings-tabs').append(tab);
     const page = document.createElement('section'); page.id = `settings-${id}`; page.role = 'tabpanel'; page.className = 'settings-page'; page.hidden = true; page.setAttribute('aria-labelledby', tab.id); page.innerHTML = content; $('settings-dialog').insertBefore(page, $('settings-status'));
   }
   document.querySelector('.settings-tabs').prepend($('tab-general'));
+  const manual=document.createElement('button'),reveal=document.createElement('button');manual.id='manual-update';reveal.id='reveal-update';for(const [button,label]of [[manual,'Run downloaded Setup'],[reveal,'Show downloaded Setup']]){button.className='small-button';button.textContent=tr(label);button.hidden=true;$('install-update').parentElement.append(button);}
   const startupHint = document.createElement('p'); startupHint.id = 'startup-hint'; startupHint.className = 'footnote'; startupHint.textContent = tr('On by default. After you sign in to Windows, the app starts in the system tray without opening the main window.'); $('startup-enabled').setAttribute('aria-describedby', startupHint.id); $('startup-enabled').closest('label').after(startupHint);
   selectSettingsTab('general');
   const themeLabel=document.createElement('label');themeLabel.htmlFor='appearance-theme';themeLabel.textContent=tr('Theme');const theme=document.createElement('select');theme.id='appearance-theme';for(const[value,label]of [['dark','Dark'],['light','Light']]){const option=document.createElement('option');option.value=value;option.textContent=tr(label);theme.append(option);}document.querySelector('label[for=language]').before(themeLabel,theme);theme.value=config.theme||'dark';
@@ -49,6 +51,7 @@ window.installClientSettings = (config, profileChanged) => {
   }
   function update(value) {
     lastUpdate=value;
+    if(['error','ready','available'].includes(value.state))api.update('manual-status').then(result=>{if(lastUpdate===value)manual.hidden=reveal.hidden=!result.available;}).catch(()=>{});else manual.hidden=reveal.hidden=true;
     const messages = { idle: 'Check for updates', checking: 'Checking for updates…', current: 'You are using the latest version.', available: 'Update available', downloading: 'Downloading update…', ready: 'Update ready', installing: 'Installing update…', error: value.error };
     const busy=['checking','downloading','installing'].includes(value.state),amount=Math.max(0,Math.min(100,Math.floor(Number(value.percent)||0)));
     $('update-details').textContent = tr(messages[value.state] || value.state) + (value.version ? ` · ${value.version}` : '') + (value.state === 'downloading' ? ` ${amount}%`+(value.retrying?' · '+tr('Reconnecting download…'):value.speed>0?' · '+(value.speed/1048576).toFixed(2)+' MB/s':'') : '');
@@ -62,8 +65,14 @@ window.installClientSettings = (config, profileChanged) => {
   }
   window.addEventListener('shatoot-language-change',()=>{if(lastUpdate)update(lastUpdate);});
   $('check-update').onclick = run(async () => update(await api.update('check')));
+  manual.onclick=run(()=>api.update('manual-install'));reveal.onclick=run(()=>api.update('show-installer'));
   const install = run(async () => { $('install-update').disabled = true; notice.disabled = true; try { window.actionNotice?.('Downloading update…');await api.update('install'); } finally { $('install-update').disabled = false; notice.disabled = false; } });
   $('install-update').onclick = install; notice.onclick = install; api.onUpdate(update); api.update('status').then(update); showProfile(); window.i18n.setLanguage(config.language);
+  const storageLabels={stories:'Stories',received:'Received files',sent:'Sent photos and voice',temporary:'Temporary files',installers:'Downloaded installers',browser:'Browser cache',history:'Chat history',other:'Settings and other app data'};
+  const size=bytes=>bytes<1024?bytes+' B':bytes<1048576?(bytes/1024).toFixed(1)+' KB':bytes<1073741824?(bytes/1048576).toFixed(1)+' MB':(bytes/1073741824).toFixed(2)+' GB';
+  let storageRevision=0;async function showStorage(){const revision=++storageRevision,rows=await api.storage('snapshot');if(revision!==storageRevision)return;$('storage-total').textContent=tr('Used space')+': '+size(rows.reduce((n,r)=>n+r.bytes,0));$('storage-sections').replaceChildren();for(const row of rows){const item=document.createElement('div');item.className='storage-row';item.dataset.storageSection=row.id;const label=document.createElement('span');label.textContent=tr(storageLabels[row.id]);const amount=document.createElement('small');amount.dir='ltr';amount.textContent=size(row.bytes);const button=document.createElement('button');button.className='small-button';button.textContent=tr('Clear');button.disabled=!row.bytes||row.id==='other';button.onclick=run(async()=>{button.disabled=true;try{const result=await api.storage('clear',row.id);$('settings-status').textContent=tr(result.skipped?'Some files are in use. Try again later.':'Storage cleared.');}finally{await showStorage();}});item.append(label,amount,button);$('storage-sections').append(item);}}
+  $('storage-refresh').onclick=run(showStorage);document.addEventListener('settings-tab-changed',event=>{if(event.detail==='storage')run(showStorage)();});
+  api.onStorageCleared?.(section=>{window.collaboration?.refresh().catch(()=>{});});
   const enterTargets={'remote-id':'join','remote-password':'join','server-url':'connect-server','server-key':'connect-server','fixed-password':'save-fixed-password','profile-name':'profile-save'};
   document.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.isComposing&&enterTargets[event.target.id]){event.preventDefault();const button=$(enterTargets[event.target.id]);if(button&&!button.disabled)button.click();}});
 };

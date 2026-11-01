@@ -752,6 +752,7 @@ function selectSettingsTab(name, focus = false) {
     button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1;
     $(button.getAttribute('aria-controls')).hidden = !selected; if (selected && focus) button.focus();
   }
+  document.dispatchEvent(new CustomEvent('settings-tab-changed',{detail:name}));
 }
 document.querySelector('.settings-tabs').setAttribute('aria-orientation','vertical');
 document.querySelector('.settings-tabs').addEventListener('click',event=>{const tab=event.target.closest('[data-settings-tab]');if(tab)selectSettingsTab(tab.dataset.settingsTab);});

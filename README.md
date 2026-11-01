@@ -1,5 +1,11 @@
 # Shatoot Connect
 
+**Settings > Storage** shows per-section disk usage and Clear actions for story cache, received copies, sent photos/voice, temporary files, downloaded installers, browser cache and chat history. Clearing history deletes messages; clearing received files deletes their downloaded copies. Original source files, saved computers, credentials and connection settings are kept. Active authored story media is retained until expiry. While the app runs, expiry is checked every minute; stale temporary files are removed after one day and old update packages/helpers after seven days. Chromium's disk cache is capped at 128 MiB.
+
+Story media prefetches as soon as the author is reachable, using one shared download per story. Online file recipients receive immediately under the chosen file-approval policy; offline group recipients no longer block them, and pending deliveries retry when reconnected. Files already received open locally; thumbnails are asynchronous and attachment lookup is indexed. Opening an external app still depends on Windows and the associated viewer.
+
+If an update fails after downloading a complete Setup, **Settings > Updates > Run downloaded Setup** launches it manually after SHA-256 verification. **Show downloaded Setup** opens its folder. Both actions remain available after restarting the app while the package is retained; incomplete or modified packages cannot run through this action.
+
 Saved-computer desktop shortcuts start with the contact's chosen name and use the latest cached profile photo (or the app icon when unavailable). Existing app-owned links migrate automatically. Icons update when a new photo is learned and remain valid across app upgrades. Disconnect/Cancel closes its remote tab; recoverable network interruptions keep their reconnect controls.
 
 Installer exit 13 means insufficient disk space for the installation and temporary extraction. Free space on the destination and Windows TEMP drives, then retry. The updater checks the new installer's space requirements before closing the app and reports required/available MiB. Upgrading from an older updater may still show the old numeric error; free the space and retry or run the latest Setup manually. Personal settings and history are retained.

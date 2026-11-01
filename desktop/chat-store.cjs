@@ -37,6 +37,7 @@ class ChatStore {
     const previous = structuredClone(this.load());
     try { const result = fn(this.data); this.save(); this.revision=(this.revision||0)+1; return result; } catch (error) { this.data = previous; throw error; }
   }
+  attachmentIndexes(){const data=this.load(),revision=this.revision||0;if(this.fileIndex?.data===data&&this.fileIndex.revision===revision)return this.fileIndex;return this.fileIndex={data,revision,messages:new Set(data.messages.filter(m=>!m.deleted).map(m=>m.conversation+'/'+m.id)),attachments:new Map(Object.entries(data.attachments).map(([token,a])=>[a.conversation+'/'+a.message,token]))};}
   contact(peer, route) {
     if (!peer || !UUID.test(peer.deviceId) || typeof peer.name !== 'string' || peer.name.length > 60 || peer.deviceId === this.self) throw new Error('Invalid chat contact.');
     return this.change(data => data.contacts[peer.deviceId] = { ...data.contacts[peer.deviceId], ...require('../shared/profile.cjs').profile(peer), deviceId: peer.deviceId, name: peer.name, route: route || data.contacts[peer.deviceId]?.route || null });
@@ -177,7 +178,7 @@ class ChatStore {
   }
   history({ conversation, before = Number.MAX_SAFE_INTEGER, search = '', limit = 100 } = {}) {
     if (typeof conversation !== 'string' || typeof search !== 'string' || search.length > 200 || !Number.isSafeInteger(before)) throw new Error('Invalid history query.');
-    return this.load().messages.filter(m => !m.deleted && m.conversation === conversation && m.receivedAt < before && (!search || m.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).slice(-Math.max(1, Math.min(100, Number(limit) || 100))).map(m => ({ ...m,pending:[...new Set([...m.pending,...(this.data.mutations||[]).filter(c=>c.message===m.id&&c.conversation===conversation).flatMap(c=>c.pending)])],attachment:m.deleted?undefined:Object.entries(this.data.attachments).find(([, a]) => a.message === m.id && a.conversation === conversation)?.[0] }));
+    return this.load().messages.filter(m => !m.deleted && m.conversation === conversation && m.receivedAt < before && (!search || m.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).slice(-Math.max(1, Math.min(100, Number(limit) || 100))).map(m => ({ ...m,pending:[...new Set([...m.pending,...(this.data.mutations||[]).filter(c=>c.message===m.id&&c.conversation===conversation).flatMap(c=>c.pending)])],attachment:m.deleted?undefined:this.attachmentIndexes().attachments.get(conversation+'/'+m.id) }));
   }
   pending(peer) { return this.load().messages.filter(m => !m.deleted && m.pending.includes(peer)); }
   schedule(value){
@@ -210,6 +211,6 @@ class ChatStore {
   }
   pendingReactions(peer){return (this.load().reactionChanges||[]).filter(r=>r.pending.includes(peer));}
   deliveredReaction(id,peer){if(this.load().reactionChanges?.some(r=>r.id===id&&r.pending.includes(peer)))return this.change(d=>{const reaction=d.reactionChanges.find(r=>r.id===id);reaction.pending=reaction.pending.filter(p=>p!==peer);});}
-  files(token) { const attachment = this.load().attachments[token]; if (!attachment || !this.load().messages.some(m=>m.id===attachment.message&&m.conversation===attachment.conversation&&!m.deleted)) throw new Error('This attachment is unavailable.'); return attachment.files; }
+  files(token) { const attachment = this.load().attachments[token]; if (!attachment || !this.attachmentIndexes().messages.has(attachment.conversation+'/'+attachment.message)) throw new Error('This attachment is unavailable.'); return attachment.files; }
 }
 module.exports = { ChatStore };
