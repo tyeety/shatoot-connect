@@ -631,7 +631,7 @@ async function joinTarget(record,retrying=false) {
     await attempt.wait(api.connections('attempt',connectionAttempt));
     if(id.includes('.')||id.includes(':')){
       if(!password)throw new Error(tr('Enter the host LAN password.'));
-      const endpoint=await attempt.wait(api.directEndpoint(id));$('quality').value='lan';profileName='lan';sessionRoute='lan-viewer';iceServers=[];forceRelay=false;
+      const endpoint=await attempt.wait(api.directEndpoint(id));sessionRoute='lan-viewer';iceServers=[];forceRelay=false;
       await attempt.wait(new Promise((resolve,reject)=>{
         const ws=new window.LANSocket(endpoint);directSocket=ws;
         ws.onerror=()=>reject(new Error(tr('Cannot reach the LAN host. Check its IP and allow TCP 8788 in Windows firewall.')));

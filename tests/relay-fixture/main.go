@@ -31,7 +31,7 @@ func main() {
     },
     PacketConnConfigs: []turn.PacketConnConfig{{
       PacketConn: &observedConn{PacketConn:conn},
-      RelayAddressGenerator: &turn.RelayAddressGeneratorStatic{ RelayAddress: relayIP, Address: "0.0.0.0" },
+      RelayAddressGenerator: &turn.RelayAddressGeneratorStatic{ RelayAddress: relayIP, Address: relayIP.String() },
     }},
   })
   if err != nil { panic(err) }

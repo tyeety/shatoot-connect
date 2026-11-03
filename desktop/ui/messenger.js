@@ -1,7 +1,7 @@
 'use strict';
 window.installMessenger = ({ api, self, internet, ensureInternet, remote, detached = false }) => {
   const $ = id => document.getElementById(id), tr = text => window.i18n.translate(text);
-  let engine, targetMessage='',selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer,historyFlight;
+  let engine, targetMessage='',selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, submitting=false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer,historyFlight;
   let replying=null,composer;
   const collectionFilter=window.installCollectionFilter($('chat-conversations'),()=>render());
   let voice,extras,autoSelecting=false,renderedConversation='',historyRequest=0,dayFadeTimer,resizeFrame;
@@ -132,10 +132,9 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
         }
         const actions=document.createElement('div');actions.className='chat-message-actions';
         if(row.attachment){actions.append(button(own?'Open sent files':'Open received files',()=>api.collaboration('open-attachment',{token:row.attachment}),'play_arrow'));actions.append(button('Open containing folder',()=>api.collaboration('reveal-attachment',{token:row.attachment}),'folder'));}
-        const copy=button('Copy',()=>row.kind==='file'?api.chatClipboard('copy',row.attachment):api.copyText(selectedMessageText(text)||text.innerText),'content_copy');copy.disabled=row.kind==='file'&&!row.attachment;copy.addEventListener('pointerdown',event=>{if(selectedMessageText(text))event.preventDefault();});const quick=document.createElement('div');quick.className='message-quick-actions';const menuCopy=button('Copy',()=>copy.click(),'content_copy');menuCopy.disabled=copy.disabled;actions.append(menuCopy);quick.append(copy,button('React to message',()=>extras.openReaction(rows.find(m=>m.id===row.id)||row),'sentiment_satisfied'));footer.append(quick);
+        const copy=button('Copy',()=>row.kind==='file'?api.chatClipboard('copy',row.attachment):api.copyText(selectedMessageText(text)||text.innerText),'content_copy');copy.disabled=row.kind==='file'&&!row.attachment;copy.addEventListener('pointerdown',event=>{if(selectedMessageText(text))event.preventDefault();});const quick=document.createElement('div');quick.className='message-quick-actions';quick.append(copy,button('React to message',()=>extras.openReaction(rows.find(m=>m.id===row.id)||row),'sentiment_satisfied'));footer.append(quick);
         actions.append(button('Reply',()=>beginReply(rows.find(m=>m.id===row.id)||row),'reply'),button('Forward',()=>forwardPicker(rows.find(m=>m.id===row.id)||row),'forward'));
         if(own&&row.conversation.startsWith('g:'))actions.append(button('Message info',()=>showMessageInfo(rows.find(m=>m.id===row.id)||row),'info'));
-        actions.append(button('React to message',()=>extras.openReaction(rows.find(m=>m.id===row.id)||row),'sentiment_satisfied'));
         if(own){if(['text','file'].includes(row.kind))actions.append(button('Edit message',()=>editMessage(rows.find(m=>m.id===row.id)||row),'edit'));actions.append(button('Delete message',async()=>{if(!await confirmDelete(rows.find(m=>m.id===row.id)||row))return;await engine.changeMessage(row.conversation,row.id,'',true);await load(false);},'delete'));}
         actions.append(button(engine.catalog.messagePins?.[selected]===row.id?'Unpin message':'Pin message',async()=>{await api.collaboration('pin-message',{conversation:row.conversation,id:engine.catalog.messagePins?.[row.conversation]===row.id?'':row.id});await engine.refresh();},'pin'));
         actions.setAttribute('role','menu');actions.addEventListener('click',event=>{if(event.target.closest('button'))actions.classList.remove('menu-open');});for(const b of actions.children){b.setAttribute('role','menuitem');const label=document.createElement('span');label.textContent=b.title;b.append(label);}const menu=event=>{if(event.target.closest('button,a,video,audio,.spoiler')||event.type!=='contextmenu'&&window.getSelection()?.toString())return;document.querySelectorAll('.chat-message-actions.menu-open').forEach(m=>{if(m!==actions)m.classList.remove('menu-open');});if(event.type==='contextmenu')actions.classList.add('menu-open');else actions.classList.toggle('menu-open');const x=event.clientX||item.getBoundingClientRect().left+10,y=event.clientY||item.getBoundingClientRect().top+20;actions.style.left=Math.max(8,Math.min(x,innerWidth-230))+'px';actions.style.top=Math.max(8,Math.min(y,innerHeight-actions.scrollHeight-12))+'px';};item.tabIndex=0;item.onclick=menu;item.oncontextmenu=event=>{event.preventDefault();menu(event);};item.onkeydown=event=>{if(event.target!==item)return;if(['Enter','ContextMenu'].includes(event.key)){event.preventDefault();menu(event);}if(event.key==='Escape')actions.classList.remove('menu-open');};
@@ -205,7 +204,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     $('chat-edit-group').hidden=!group||group.owner!==self.deviceId;
     person($('chat-title'),group||peer||{name:tr('Select a conversation')},!!group);
     const peerStatus=$('chat-peer-status');peerStatus.replaceChildren();if(group)for(const member of group.members){const label=document.createElement('span');person(label,member.deviceId===self.deviceId?self:{...member,...contact(member.deviceId)});peerStatus.append(label);}peerStatus.className=peer?'presence-dot presence-'+(online(peer.deviceId)?peer.status||'available':'offline'):'';
-    const blocked=!!engine.catalog.blocked?.[selected.slice(2)];$('chat-text').disabled = !selected||blocked;$('chat-send').disabled = !selected||busy||blocked;$('chat-send-files').disabled = !selected||busy||blocked;if($('chat-block')){const b=$('chat-block');b.hidden=!selected.startsWith('p:');b.title=tr(blocked?'Unblock contact':'Block contact');b.setAttribute('aria-label',b.title);b.setAttribute('aria-pressed',String(blocked));}
+    const blocked=!!engine.catalog.blocked?.[selected.slice(2)];$('chat-text').disabled = !selected||blocked;$('chat-send').disabled = !selected||busy||submitting||blocked;$('chat-send-files').disabled = !selected||busy||blocked;if($('chat-block')){const b=$('chat-block');b.hidden=!selected.startsWith('p:');b.title=tr(blocked?'Unblock contact':'Block contact');b.setAttribute('aria-label',b.title);b.setAttribute('aria-pressed',String(blocked));}
     voice?.sync();composer?.sync();
     extras?.sync();social?.render();window.workspace?.render();
     const pinned=engine.catalog.messagePins?.[selected];let banner=$('pinned-message');if(!banner){banner=document.createElement('button');banner.id='pinned-message';banner.className='pinned-message';$('chat-search').after(banner);}banner.hidden=!pinned;banner.textContent=tr('Pinned message')+' · '+(rows.find(m=>m.id===pinned)?.text.slice(0,90)||'');banner.onclick=()=>navigate({conversation:selected,message:pinned});
@@ -231,7 +230,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   function snapshot() { return { self, pendingConnections:engine.connectAttempts?[...engine.connectAttempts].filter(a=>!a.background).length:0,catalog: engine.catalog, connected: engine.connected(), language: window.i18n.language, discovery, selected, progress: [...progress] }; }
   api.onChatUnread?.(value=>{if(engine){engine.catalog.unread=value.unread;if(value.unseenReactions)engine.catalog.unseenReactions=value.unseenReactions;const badge=$('chat-total-unread');badge.textContent=value.total>99?'99+':String(value.total);badge.hidden=!value.total;render();}});
   const totalBadge=document.createElement('span');totalBadge.id='chat-total-unread';totalBadge.className='unread-badge';totalBadge.hidden=true;$('open-messenger').append(totalBadge);
-  engine = new window.CollaborationClient({ api, self, internet, ensureInternet, changed: () => { render(true); publish(); }, error, progress: value => { const text = tr(value.text) + (Number.isInteger(value.percent) ? ` ${value.percent}%` : ''); progress.set(value.conversation, text); if (selected === value.conversation) $('chat-progress').textContent = text; publish(); } });
+  engine = new window.CollaborationClient({ api, self, internet, ensureInternet, changed: change => { if(change?.reaction){const r=change.reaction,row=rows.find(m=>m.id===r.message&&m.conversation===r.conversation);if(row&&(!row.reactions?.[r.sender]||row.reactions[r.sender].revision<=r.revision)){row.reactions||={};row.reactions[r.sender]={emoji:r.emoji,revision:r.revision};const item=[...logElement.querySelectorAll('.chat-message')].find(e=>e.dataset.messageId===r.message);if(item)extras?.renderReactions(item,row);}}else render(true);publish(); }, error, progress: value => { const text = tr(value.text) + (Number.isInteger(value.percent) ? ` ${value.percent}%` : ''); progress.set(value.conversation, text); if (selected === value.conversation) $('chat-progress').textContent = text; publish(); } });
   if(!detached)api.onChatTarget(target=>navigate(target).catch(error));
   if (!detached) api.onChatCommand(async (operation, args) => { if (operation === 'snapshot') return snapshot(); if (operation === 'close') { engine.close(engine.peer(args[0])); return; } const result = await engine[operation](...args); return operation === 'connect' ? { peer: result.peer } : result; });
   window.collaboration = engine;social=window.installSocial?.({api,engine,self,button,tr,error,pickSticker:choose=>extras.openSticker(choose)});window.social=social;
@@ -243,7 +242,21 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('chat-connect-form').onsubmit = run(async () => { const address = $('chat-address').value.trim(); await start({ type: address.includes('.') || address.includes(':') ? 'lan' : 'id', address }); });
   $('chat-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
   $('chat-older').onclick = run(() => load(true));
-  $('chat-compose').onsubmit = run(async () => { const text = $('chat-text').value;if(composer.editing){const row=composer.editing;await engine.changeMessage(row.conversation,row.id,text);composer.reset();await load(false);return;}if(voice?.active()||!text.trim()){voice?.activate();return;} const prepared=composer.prepare();if(prepared.files.length)await engine.sendFiles(selected,'sources',prepared.files,{text:prepared.text,replyTo:replying?.reference});else await engine.send(selected, text,{replyTo:replying?.reference});composer.reset();replying=null;renderReply();$('chat-text').value = '';voice?.sync(); following=true;await load(false); $('chat-messages').scrollTop = $('chat-messages').scrollHeight; });
+  $('chat-compose').onsubmit = run(async () => {
+    if(submitting)return;
+    const conversation=selected,text=$('chat-text').value,editing=composer.editing;
+    if(!editing&&(voice?.active()||!text.trim())){voice?.activate();return;}
+    submitting=true;$('chat-send').disabled=true;
+    const filesBefore=JSON.stringify(composer.files);
+    try{
+      if(editing)await engine.changeMessage(conversation,editing.id,text);
+      else {const prepared=composer.prepare();if(prepared.files.length)await engine.sendFiles(conversation,'sources',prepared.files,{text:prepared.text,replyTo:replying?.reference});else await engine.send(conversation,text,{replyTo:replying?.reference});}
+      // A slow save must not erase a newly typed draft or another conversation.
+      if(selected===conversation&&$('chat-text').value===text&&JSON.stringify(composer.files)===filesBefore&&composer.editing===editing){composer.reset();replying=null;renderReply();voice?.sync();following=true;}
+      if(selected===conversation)load(false).catch(error);
+    }finally{submitting=false;$('chat-send').disabled=!selected||busy||!!engine.catalog.blocked?.[selected.slice(2)];}
+  });
+
   function insertPaste(text){const field=$('chat-text');field.insertMessageText(text);}
   async function pasteClipboard(event){const target=selected;if(!target)return;try{
     const items=[...(event.clipboardData?.items||[])],image=items.find(item=>item.kind==='file'&&item.type.startsWith('image/')),text=event.clipboardData?.getData('text/plain')||'';
@@ -257,7 +270,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('chat-text').addEventListener('paste',pasteClipboard);
   $('chat-text').onkeydown = event => {if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-compose').requestSubmit(); } };
   async function files(operation = 'pick', value) { if (busy) throw new Error('A file transfer is already in progress.'); busy = true; render(); try { await engine.sendFiles(selected, operation, value); } finally { busy = false; render(); } }
-  voice=window.installVoiceMessages({api,conversation:()=>selected,available:()=>!!selected&&!busy,send:(conversation,data)=>engine.sendFiles(conversation,'voice',data),error});
+  voice=window.installVoiceMessages({api,conversation:()=>selected,available:()=>!!selected&&!busy&&!submitting,send:(conversation,data)=>engine.sendFiles(conversation,'voice',data),error});
   composer=window.installMessageComposer({field:$('chat-text'),api,tr,button,pasteClipboard});
   extras=window.installChatExtras({api,engine,self,field:$('chat-text'),selected:()=>selected,button,run,tr,error,reload:()=>load(false)});composer.layout();
   $('chat-send-files').onclick = run(() => files());

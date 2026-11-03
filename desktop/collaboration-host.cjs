@@ -52,7 +52,7 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
     if(op==='react'){
       const reaction=value.reaction;
       if(!value.outgoing){const g=grant(s,value.session),group=history.load().groups[reaction?.conversation?.slice(2)];if(reaction?.conversation===`p:${g.peer.deviceId}`){if(reaction.sender!==g.peer.deviceId)throw new Error('Invalid reaction author.');}else if(!group||(group.owner!==g.peer.deviceId&&(group.owner!==s.identity.deviceId||reaction.sender!==g.peer.deviceId)))throw new Error('Invalid reaction author.');}
-      return history.react(reaction,value.outgoing===true);
+      const result=history.react(reaction,value.outgoing===true);catalogChanged(s);return result;
     }
     if(op==='pending-receipts')return history.pendingReceipts(grant(s,value.session).peer.deviceId);
     if(op==='ack-receipt')return history.ackReceipt(value.id,grant(s,value.session).peer.deviceId);

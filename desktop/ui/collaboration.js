@@ -48,7 +48,8 @@
       if(s.receiptsBusy){s.receiptsAgain=true;return;}s.receiptsBusy=true;
       try{do{s.receiptsAgain=false;let receipts;do{receipts=await this.api.collaboration('pending-receipts',{session:s.id});for(const receipt of receipts){await this.rpc(s,'message-receipt',receipt);await this.api.collaboration('ack-receipt',{session:s.id,id:receipt.id});}}while(receipts.length===100&&!s.closed);}while(s.receiptsAgain&&!s.closed);}finally{s.receiptsBusy=false;}
     }
-    notify() { this.changed(); }
+    refreshSoon(){if(this.refreshTimer)return;this.refreshTimer=setTimeout(()=>{this.refreshTimer=null;this.refresh().catch(e=>this.error(e.message));},32);}
+    notify(change) { this.changed(change); }
     peer(id) { return [...this.sessions.values()].find(s => !s.closed && s.peer?.deviceId === id && s.channel?.readyState === 'open'); }
     group(id) { return this.catalog.groups.find(g => g.id === id); }
     connected() { return [...new Map([...this.sessions.values()].filter(s => !s.closed && s.channel?.readyState === 'open').map(s => [s.peer.deviceId, s.peer])).values()]; }
@@ -152,7 +153,8 @@
         }
         if (packet.reply != null) { const pending = s.pending.get(packet.reply); if (pending) { clearTimeout(pending.timer); s.pending.delete(packet.reply); packet.error ? pending.reject(new Error(packet.error)) : pending.resolve(packet.value); } return; }
         if (!Number.isSafeInteger(packet.id) || typeof packet.op !== 'string') return;
-        s.queue = s.queue.then(async () => {
+        const lane=['message','message-reaction','receipt','message-change'].includes(packet.op)?'interactiveQueue':'queue';
+        s[lane] = (s[lane]||Promise.resolve()).then(async () => {
           if (s.closed) return;
           try { const value = await this.request(s, packet.op, packet.value); if (!s.closed) this.raw(s, { reply: packet.id, value }); }
           catch (error) { if (!s.closed) this.raw(s, { reply: packet.id, error: String(error.message).slice(0, 300) }); }
@@ -214,12 +216,12 @@
       }
       if(op==='message-reaction'){
         const normalized=this.normalize(s,{...value,id:value?.message,kind:'text'}),reaction={...value,conversation:normalized.conversation,pending:normalized.pending||[]};
-        await this.api.collaboration('react',{session:s.id,reaction});await this.refresh();for(const id of reaction.pending){const next=this.peer(id);if(next)this.flush(next).catch(()=>{});}return true;
+        const result=await this.api.collaboration('react',{session:s.id,reaction});if(result.reaction)this.notify({reaction:result.reaction});for(const id of reaction.pending){const next=this.peer(id);if(next)this.flushReactions(next).catch(()=>{});}return true;
       }
       if (op === 'message') {
         const now = Date.now(); if (!s.textRate || now - s.textRate.at > 10000) s.textRate = { at: now, count: 0 }; if (++s.textRate.count > 100) throw new Error('Too many chat messages.');
         const message = this.normalize(s, value); if (message.kind !== 'text') throw new Error('Invalid text message.');
-        await this.api.collaboration('append', { message }); await this.refresh();
+        await this.api.collaboration('append', { message }); this.refreshSoon();
         for (const id of message.pending || []) { const next = this.peer(id); if (next) this.flush(next).catch(e => this.error(e.message)); }
         return true;
       }
@@ -241,9 +243,9 @@
       const group = conversation.startsWith('g:') && this.group(conversation.slice(2));
       const pending = group ? (group.owner === this.self.deviceId ? group.members.map(m => m.deviceId).filter(id => id !== this.self.deviceId) : [group.owner]) : [conversation.slice(2)];
       const message = { id: crypto.randomUUID(), conversation, sender: this.self.deviceId, name: this.self.name, kind: 'text', text: text.trim(),replyTo:options.replyTo,forwardedFrom:options.forwardedFrom,at: Date.now(), pending };
-      Object.assign(message,(await this.api.collaboration('append', { message, outgoing: true })).message); await this.refresh();
-      for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(async error=>{if(!/offline/i.test(error.message)){await this.api.collaboration('failed',{id:message.id,peer:id});await this.refresh();}});
-      return message;
+      Object.assign(message,(await this.api.collaboration('append', { message, outgoing: true })).message);
+      for(const id of pending)this.ensurePeer(id).then(s=>this.flushMessages(s)).catch(async error=>{if(!/offline/i.test(error.message)){await this.api.collaboration('failed',{id:message.id,peer:id});this.refreshSoon();}});
+      this.refreshSoon();return message;
     }
     async forwardMessage(source,id,target){
       const row=await this.api.collaboration('message',{conversation:source,id});if(!row||row.deleted)throw Error('This message is unavailable.');
@@ -258,10 +260,22 @@
     async schedule(conversation,text,sendAt,id){const item=await this.api.collaboration('schedule',{conversation,text,sendAt,id});await this.refresh();return item;}
     async cancelScheduled(id){await this.api.collaboration('cancel-scheduled',{id});await this.refresh();}
     async react(conversation,message,emoji){
-      await this.ready;const row=await this.api.collaboration('message',{conversation,id:message});if(!row)throw new Error('This message is unavailable.');
+      await this.ready;
       const group=conversation.startsWith('g:')&&this.group(conversation.slice(2)),pending=group?(group.owner===this.self.deviceId?group.members.map(m=>m.deviceId).filter(id=>id!==this.self.deviceId):[group.owner]):[conversation.slice(2)];
-      const reaction={id:crypto.randomUUID(),message,conversation,sender:this.self.deviceId,emoji,revision:(row.reactions?.[this.self.deviceId]?.revision||0)+1,pending};
-      await this.api.collaboration('react',{reaction,outgoing:true});await this.refresh();for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});return reaction;
+      const reaction={id:crypto.randomUUID(),message,conversation,sender:this.self.deviceId,emoji,pending};
+      const result=await this.api.collaboration('react',{reaction,outgoing:true});
+      if(result.reaction)this.notify({reaction:result.reaction});
+      for(const id of pending)this.ensurePeer(id).then(s=>this.flushReactions(s)).catch(()=>{});
+      return result.reaction;
+    }
+    async flushReactions(s){
+      if(s.reactionsBusy){s.reactionsAgain=true;return;}
+      if(s.closed||!s.features?.includes('message-reactions-v1'))return;
+      s.reactionsBusy=true;
+      try{do{s.reactionsAgain=false;for(const reaction of await this.api.collaboration('pending-reactions',{peer:s.peer.deviceId})){
+        const group=reaction.conversation.startsWith('g:')&&this.group(reaction.conversation.slice(2));if(group&&!await this.announceGroup(s,group))continue;
+        await this.rpc(s,'message-reaction',{...reaction,pending:undefined});await this.api.collaboration('delivered-reaction',{id:reaction.id,peer:s.peer.deviceId});
+      }}while(s.reactionsAgain&&!s.closed);}finally{s.reactionsBusy=false;}
     }
     prefetchStories(){for(const story of this.catalog.stories||[])if(story.media&&story.sender!==this.self.deviceId&&this.peer(story.sender)&&!this.prefetchedStories.has(story.id)){this.prefetchedStories.add(story.id);this.storyPrefetchQueue=this.storyPrefetchQueue.then(()=>this.storyMediaCache(story.id)).catch(()=>{setTimeout(()=>this.prefetchedStories.delete(story.id),30000);});}}
     async storyMediaCache(id){
@@ -287,9 +301,24 @@
       const invitation=this.rpc(s,'group',group).then(accepted=>{if(accepted){s.groups.add(group.id);s.groupVersions||=new Map();s.groupVersions.set(group.id,group.revision||0);}else s.declined.add(group.id);return accepted;});s.groupInvitations.set(group.id,invitation);
       try{return await invitation;}finally{s.groupInvitations.delete(group.id);}
     }
+    async flushMessages(s){
+      if(s.textBusy){s.textAgain=true;return;}if(s.closed)return;s.textBusy=true;
+      clearTimeout(s.textRetry);
+      try{do{s.textAgain=false;for(const message of await this.api.collaboration('pending',{peer:s.peer.deviceId})){
+        if(message.kind!=='text')continue;
+        const group=message.conversation.startsWith('g:')&&this.group(message.conversation.slice(2));if(group&&!await this.announceGroup(s,group))continue;
+        try{await this.rpc(s,'message',this.wire(message));await this.api.collaboration('delivered',{id:message.id,peer:s.peer.deviceId});s.textRetryDelay=0;}
+        catch(error){await this.api.collaboration('failed',{id:message.id,peer:s.peer.deviceId});throw error;}
+      }}while(s.textAgain&&!s.closed);}catch(error){
+        if(!s.closed){s.textRetryDelay=Math.min(15000,(s.textRetryDelay||500)*2);s.textRetry=setTimeout(()=>this.flushMessages(s).catch(()=>{}),s.textRetryDelay);}
+        throw error;
+      }finally{s.textBusy=false;this.refreshSoon();}
+    }
     async flush(s) {
-      if (s.flushing) { s.flushAgain = true; return; } if (s.closed) return; s.flushing = true;
+      if(s.closed)return;const messages=this.flushMessages(s);
+      if (s.flushing) { s.flushAgain = true; return messages; } s.flushing = true;
       try {
+        await messages;
         for(const group of this.catalog.groups)if(group.owner===this.self.deviceId&&group.members.some(m=>m.deviceId===s.peer.deviceId))await this.announceGroup(s,group);
         do {
         s.flushAgain = false;
@@ -300,19 +329,11 @@
           if(message.kind==='file'){
             s.queuedFiles||=new Set();if(!s.queuedFiles.has(message.id)){s.queuedFiles.add(message.id);const operation=this.fileQueue.then(async()=>{if(s.closed||!(await this.api.collaboration('pending',{peer:s.peer.deviceId})).some(m=>m.id===message.id))return;const group=message.conversation.startsWith('g:')&&this.group(message.conversation.slice(2));if(group&&!await this.announceGroup(s,group))return;const paths=await this.api.collaboration('forward-sources',{conversation:message.conversation,id:message.id}),entries=await this.api.collaborationFiles(s.id,'sources',paths);await this.transfer(s,entries,message);await this.api.collaboration('delivered',{id:message.id,peer:s.peer.deviceId});await this.refresh();});this.fileQueue=operation.catch(()=>{});operation.catch(e=>this.error(e.message)).finally(()=>s.queuedFiles.delete(message.id));}continue;
           }
-          if (message.kind !== 'text') continue;
-          const group = message.conversation.startsWith('g:') && this.group(message.conversation.slice(2));
-          if (group && !await this.announceGroup(s, group)){await this.api.collaboration('failed',{id:message.id,peer:s.peer.deviceId});continue;}
-          try{await this.rpc(s, 'message', this.wire(message)); await this.api.collaboration('delivered', { id: message.id, peer: s.peer.deviceId });}
-          catch(error){await this.api.collaboration('failed',{id:message.id,peer:s.peer.deviceId});await this.refresh();throw error;}
         }
         const changes=await this.api.collaboration('pending-changes',{peer:s.peer.deviceId});
         if(s.features?.includes('message-changes-v1'))for(const change of changes){const group=change.conversation.startsWith('g:')&&this.group(change.conversation.slice(2));if(group&&!await this.announceGroup(s,group))continue;await this.rpc(s,'message-change',{...change,pending:undefined,kind:'text'});await this.api.collaboration('delivered-change',{id:change.id,peer:s.peer.deviceId});}
         else if(changes.length&&s.features&&!s.changeCompatibilityNotice){s.changeCompatibilityNotice=true;this.error('Update the other computer to synchronize message changes.');}
-        if(s.features?.includes('message-reactions-v1'))for(const reaction of await this.api.collaboration('pending-reactions',{peer:s.peer.deviceId})){
-          const group=reaction.conversation.startsWith('g:')&&this.group(reaction.conversation.slice(2));if(group&&!await this.announceGroup(s,group))continue;
-          await this.rpc(s,'message-reaction',{...reaction,pending:undefined});await this.api.collaboration('delivered-reaction',{id:reaction.id,peer:s.peer.deviceId});
-        }
+        await this.flushReactions(s);
         await this.refresh();
         } while (s.flushAgain && !s.closed);
       } finally { s.flushing = false; }
@@ -384,7 +405,7 @@
       }
     }
     close(s, reason = 'Chat connection closed.', notifyRemote = true) {
-      if (!s || s.closed) return; s.closed = true; clearTimeout(s.timer);
+      if (!s || s.closed) return; s.closed = true; clearTimeout(s.timer);clearTimeout(s.textRetry);
       if (notifyRemote) try { s.route.send({ type: 'collab-leave', session: s.id }); } catch {}
       s.pc?.close(); s.route.socket?.close(); for (const p of s.pending.values()) { clearTimeout(p.timer); p.reject(new Error(reason)); } for (const f of s.frames.values()) clearTimeout(f.timer);
       clearInterval(s.previewTimer);s.pending.clear(); s.frames.clear(); s.reject(new Error(reason)); this.sessions.delete(s.id); this.api.collaboration('end', { session: s.id }).catch(() => {}); this.notify();

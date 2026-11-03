@@ -33,7 +33,15 @@ class Discovery extends EventEmitter {
   }
   presence() { return { service: 'ShatootConnect', version: 1,appVersion:this.appVersion,kind: 'presence', deviceId: this.identity.deviceId, name: String(this.name).slice(0, 60), status: this.status || 'available', port: this.port, capabilities: ['desktop', 'chat', 'files', 'groups'] }; }
   snapshot() { return { peers: [...this.peers.values()].map(p => ({ ...p, endpoints: [...p.endpoints.keys()] })), interfaces: interfaces(this.networkInterfaces?.()), errors: [...this.errors] }; }
-  publish() { if (!this.closed) this.emit('change', this.snapshot()); }
+  publish() {
+    if(this.closed)return;
+    const value=this.snapshot();
+    // Heartbeats renew liveness, not card contents. Repeated full snapshots
+    // rebuild avatars/wallpapers and persist the same computers on every reply.
+    const signature=JSON.stringify({...value,peers:value.peers.map(({lastSeen,profileAt,...peer})=>peer)});
+    if(signature===this.publishedSignature)return;
+    this.publishedSignature=signature;this.emit('change',value);
+  }
   ingest(data, remote) {
     if (!localAddress(remote) || !Buffer.isBuffer(data) || data.length > 1400) return;
     let value; try { value = JSON.parse(data); } catch { return; }

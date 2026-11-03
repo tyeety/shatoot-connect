@@ -13,6 +13,20 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.3 — 2026-11-03
+
+### Fixed
+
+- Prevent repeated Send/Enter submissions during a pending save, clear the draft only after persistence, and preserve text typed during a slow save. Text delivery/ACKs bypass story and file-approval queues; failed acknowledgements retry with the original durable message ID.
+- Improve weak-link detail with lower automatic frame budgets, bandwidth-only probes before resolution upgrades, and conservative upgrade thresholds that avoid recurring keyframe bursts. LAN quality menus now show the saved/negotiated mode rather than incorrectly claiming LAN Ultra.
+- Bind the local TURN test fixture's relay sockets to the advertised interface, preventing multi-NIC routing from invalidating bottleneck measurements.
+
+- Reactions update only the affected message after local persistence, use an independent delivery queue, and no longer wait for full catalog/history reloads. Outgoing revisions are assigned atomically in the local store. Emoji pickers close immediately and reuse unchanged category buttons.
+
+- Suppress unchanged LAN discovery heartbeat snapshots so idle peers do not repeatedly rebuild computer cards and republish full chat state. Liveness, profile changes and expiration remain active.
+- Automatic video quality now reduces capture and encoder frame rate before resolution under sustained encoder/decoder CPU pressure, including low-packet desktops, and recovers gradually.
+- Remove duplicated Copy and React entries from message menus while retaining inline actions.
+
 ## 0.35.2 — 2026-11-01
 
 ### Fixed

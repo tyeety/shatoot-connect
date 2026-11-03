@@ -14,11 +14,11 @@ test('automatic quality drops under actual sustained bandwidth pressure with a s
 });
 test('high capacity upgrades slowly, while a low-traffic desktop does not masquerade as a speed test',()=>{
  const idle=new QualityPolicy(PROFILES);for(let n=0;n<30;n++)idle.sample(stats({sent:100}),n*2000);assert.equal(idle.name,'balanced');
- const active=new QualityPolicy(PROFILES);for(let n=0;n<6;n++)active.sample(stats({sent:n*100,rtt:.1,capacity:20000000}),n*1000);assert.equal(active.name,'quality');
- active.sample(stats({sent:700,rtt:.1,capacity:20000000}),6000);assert.equal(active.name,'quality');
+ const active=new QualityPolicy(PROFILES);for(let n=0;n<6;n++)active.sample(stats({sent:n*100,rtt:.1,capacity:40000000}),n*1000);assert.equal(active.name,'quality');
+ active.sample(stats({sent:700,rtt:.1,capacity:40000000}),6000);assert.equal(active.name,'quality');
 });
-test('loss/added latency/cpu pressure cause backoff even when nominal capacity is high',()=>{
- for(const bad of [{rtt:.9},{lost:30},{limitation:'cpu'}]){
+test('loss/added latency pressure cause backoff even when nominal capacity is high',()=>{
+ for(const bad of [{rtt:.9},{lost:30}]){
   const policy=new QualityPolicy(PROFILES);policy.sample(stats({sent:100}),0);
   policy.sample(stats({sent:200,...bad}),2000);policy.sample(stats({sent:300,...bad}),4000);
   assert.notEqual(policy.name,'balanced');
@@ -36,7 +36,8 @@ test('startup estimates and a constant VPN latency do not throttle a healthy str
 test('a capped estimate cannot ratchet the ceiling down and recovered traffic can probe up',()=>{
  const policy=new QualityPolicy(PROFILES);policy.reset('economy');
  for(let n=0;n<11;n++)policy.sample(stats({capacity:policy.profiles.economy.bitrate,sent:n*100}),n*1000);
- assert.equal(policy.name,'balanced');
+ assert.equal(policy.name,'economy');assert.equal(policy.sample(stats({capacity:4000000,sent:1200}),12000).bitrate,PROFILES.balanced.bitrate);
+ for(let n=13;n<20;n++)policy.sample(stats({capacity:12000000,sent:n*100}),n*1000);assert.equal(policy.name,'balanced');
 });
 
 test('packet queue deltas lower quality without mistaking cumulative counters for current pressure',()=>{
@@ -81,7 +82,7 @@ test('sub-megabit pressure jumps directly to a usable capture size within one se
   const policy=new QualityPolicy(PROFILES);
   for(let n=0;n<=3;n++)policy.sample(stats({capacity,sent:n*30,limitation:'bandwidth'}),n*500);
   assert.equal(policy.name,name);
-  assert.ok(policy.profiles[name].height<=540);
+  assert.ok(policy.profiles[name].height<=720);
  }
 });
 
@@ -112,7 +113,7 @@ test('fast LAN skips warmup while recovered internet climbs without oscillation'
 test('automatic low-bandwidth rungs do not change saved manual presets',async()=>{
  const sizes=[],params=[],track={readyState:'live',async applyConstraints(c){sizes.push(c);}},sender={getParameters:()=>({encodings:[{}]}),async setParameters(p){params.push(p);}};
  const quality=new StreamQuality({profiles:PROFILES,peer:{},stream:{getVideoTracks:()=>[track]},sender});
- await quality.apply('survival',250000);assert.equal(sizes.at(-1).height.max,270);assert.equal(params.at(-1).encodings[0].maxFramerate,15);
+ await quality.apply('survival',250000);assert.equal(sizes.at(-1).height.max,360);assert.equal(params.at(-1).encodings[0].maxFramerate,8);
  await quality.setMode(false,'economy');assert.equal(sizes.at(-1).height.max,720);assert.equal(params.at(-1).encodings[0].maxFramerate,24);assert.equal(params.at(-1).encodings[0].maxBitrate,2500000);
  quality.stop();
 });
@@ -120,7 +121,7 @@ test('automatic low-bandwidth rungs do not change saved manual presets',async()=
 test('receiver decode pressure adapts capture but stale or malformed feedback cannot',()=>{
  const policy=new QualityPolicy(PROFILES);
  for(let n=0;n<4;n++)policy.sample(stats({capacity:5000000,sent:n*50}),n*500,{fps:12,decodeMs:50,dropRatio:.4,at:n*500});
- assert.equal(policy.name,'economy');
+ assert.equal(policy.name,'balanced');assert.equal(policy.cpuFps,15);
  const recovered=new QualityPolicy(PROFILES);
  for(let n=0;n<5;n++)recovered.sample(stats({capacity:5000000,sent:n*50}),5000+n*500,{fps:12,decodeMs:50,dropRatio:.4,at:0});
  assert.equal(recovered.name,'balanced');
@@ -147,4 +148,40 @@ test('an ICE path change resets the latency baseline instead of treating a new V
 });
 test('inactive viewers retain resolution while limiting encode/decode work and restore the foreground frame budget',async()=>{
  const constraints=[],params=[],track={readyState:'live',async applyConstraints(c){constraints.push(c);}},sender={getParameters:()=>({encodings:[{}]}),async setParameters(p){params.push(p);}};const q=new StreamQuality({profiles:PROFILES,peer:{},stream:{getVideoTracks:()=>[track]},sender});await q.apply('balanced',12000000);await q.setActive(false);assert.equal(constraints.at(-1).frameRate.max,3);assert.equal(constraints.at(-1).height.max,1080);assert.equal(params.at(-1).encodings[0].maxFramerate,3);await q.setActive(true);assert.equal(params.at(-1).encodings[0].maxFramerate,30);q.stop();
+});
+
+
+test('CPU pressure lowers FPS before resolution even on low-packet desktops, with gradual recovery',()=>{
+ const q=new QualityPolicy(PROFILES);
+ for(let n=0;n<3;n++)q.sample(stats({capacity:100000000,sent:1,limitation:'cpu'}),n*500);
+ assert.equal(q.name,'balanced');assert.equal(q.cpuFps,15);
+ q.sample(stats({sent:1,limitation:'cpu'}),2000);assert.equal(q.cpuFps,10);
+ for(let at=2500;at<5000;at+=500)q.sample(stats({sent:1,limitation:'cpu'}),at);
+ assert.equal(q.name,'balanced');
+ for(let at=5000;at<=6000;at+=500)q.sample(stats({sent:1,limitation:'cpu'}),at);
+ assert.notEqual(q.name,'balanced');
+ const recovered=new QualityPolicy(PROFILES);
+ recovered.sample(stats({limitation:'cpu'}),0);recovered.sample(stats({limitation:'cpu'}),500);
+ for(let at=1000;at<=8500;at+=500)recovered.sample(stats({sent:100}),at);
+ assert.equal(recovered.cpuFps,15);
+ recovered.sample(stats({sent:100}),9000);assert.equal(recovered.cpuFps,20);
+ recovered.sample(stats({sent:100}),12000);assert.equal(recovered.cpuFps,25);
+ recovered.sample(stats({sent:100}),15000);assert.equal(recovered.cpuFps,null);
+});
+
+test('CPU frame budget reaches both capture and encoder and survives backgrounding; manual mode restores preset',async()=>{
+ const captures=[],encodes=[],track={readyState:'live',async applyConstraints(c){captures.push(c);}},sender={getParameters:()=>({encodings:[{}]}),async setParameters(p){encodes.push(p);}};
+ const q=new StreamQuality({profiles:PROFILES,peer:{connectionState:'connected',getStats:async()=>stats({sent:1,limitation:'cpu'})},stream:{getVideoTracks:()=>[track]},sender});
+ await q.apply('balanced',12000000,15);
+ assert.equal(captures.at(-1).width.max,1920);assert.equal(captures.at(-1).frameRate.max,15);assert.equal(encodes.at(-1).encodings[0].maxFramerate,15);
+ await q.setActive(false);assert.equal(encodes.at(-1).encodings[0].maxFramerate,3);
+ await q.setActive(true);assert.equal(encodes.at(-1).encodings[0].maxFramerate,15);
+ await q.setMode(false,'balanced');assert.equal(encodes.at(-1).encodings[0].maxFramerate,30);q.stop();
+});
+
+
+test('a 1 Mbps path probes bandwidth without repeatedly selecting a 2 Mbps capture tier',()=>{
+ const q=new QualityPolicy(PROFILES);q.reset('narrow');let plan;
+ for(let n=0;n<80;n++){plan=q.sample(stats({capacity:1000000,sent:n*30,rtt:.08}),n*500);assert.equal(plan.name,'narrow');assert.equal(plan.fps,12);}
+ assert.equal(q.profiles.narrow.height,540);assert.equal(plan.bitrate,q.profiles.mobile.bitrate);
 });

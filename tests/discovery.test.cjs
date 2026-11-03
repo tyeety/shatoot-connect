@@ -65,3 +65,19 @@ test('actual UDP discovery accepts valid peers, deduplicates addresses and drops
   discovery.ingest(Buffer.from(JSON.stringify(presence)), '192.168.1.12'); assert.equal(discovery.snapshot().peers.length, 1); assert.equal(discovery.snapshot().peers[0].endpoints.length, 2);
   discovery.ingest(Buffer.from(JSON.stringify({ ...presence, deviceId: crypto.randomUUID() })), '8.8.8.8'); discovery.ingest(Buffer.alloc(1500), '127.0.0.1'); discovery.ingest(Buffer.from('{}'), '127.0.0.1'); assert.equal(discovery.snapshot().peers.length, 1);
 });
+
+
+test('unchanged discovery heartbeats do not republish cards; real changes and expiry still do',()=>{
+ const discovery=new Discovery({identity:{deviceId:crypto.randomUUID()},name:'Self',port:8788,neighbors:false,networkInterfaces:()=>({}),ttl:20000});
+ discovery.loadProfile=()=>{};
+ const value={service:'ShatootConnect',version:1,kind:'presence',deviceId:crypto.randomUUID(),name:'Peer',status:'available',port:8788};
+ let changes=0;discovery.on('change',()=>changes++);
+ discovery.ingest(Buffer.from(JSON.stringify(value)),'192.168.1.90');assert.equal(changes,1);
+ for(let i=0;i<100;i++)discovery.ingest(Buffer.from(JSON.stringify(value)),'192.168.1.90');
+ discovery.publish();assert.equal(changes,1);
+ discovery.ingest(Buffer.from(JSON.stringify({...value,status:'busy'})),'192.168.1.90');assert.equal(changes,2);
+ discovery.ingest(Buffer.from(JSON.stringify(value)),'192.168.1.91');assert.equal(changes,3);
+ discovery.peers.get(value.deviceId).preview='data:image/jpeg;base64,test';discovery.publish();assert.equal(changes,4);
+ discovery.peers.get(value.deviceId).lastSeen=Date.now()-30000;discovery.sweepAt=Date.now();discovery.knownProbeAt=Date.now();discovery.refresh();assert.equal(changes,5);assert.equal(discovery.snapshot().peers.length,0);
+ discovery.close();
+});
