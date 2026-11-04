@@ -13,7 +13,7 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
-## 0.35.4 — 2026-11-04
+## 0.35.5 — 2026-11-04
 
 ### Added
 
@@ -31,6 +31,10 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 - Pass 161 unit tests, the full local RTC media acceptance test (including native-scale pointer mapping, capture cleanup, and input failure/recovery transport), and the Windows native shared-input regression for drag, text selection, resize and release.
 - These component checks do not establish the cause of every connected-but-unresponsive peer. Live acceptance on the reported host is still outstanding.
+
+## 0.35.4 — 2026-11-04
+
+Not published: the packaged UI gate found a missing Material icon on the new image-scale control. Superseded by 0.35.5, which includes that icon and updates the toolbar acceptance inventory.
 
 ## 0.35.3 — 2026-11-03
 

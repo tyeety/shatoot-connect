@@ -26,6 +26,10 @@ module.exports=async({host,createWindow,states,privacy,app,log})=>{
   await join(viewer);await until(host,manual?'videoQuality?.automatic===false':'videoQuality?.automatic===true');
   if(!await run(viewer,'peerMediaFeedback===true'))throw Error('Decoder feedback capability was not negotiated');
   if(!await run(viewer,"document.querySelector('#live-quality').value===(config.autoQuality?'auto':config.qualityProfile)"))throw Error('LAN menu misrepresented the negotiated quality mode');
+  for(const language of ['en','fa']){
+    const errors=await run(viewer,`(async()=>{window.i18n.setLanguage('${language}');await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));const errors=[];for(const b of document.querySelectorAll('.session-toolbar button:not([hidden])')){const icon=b.querySelector('.mi');if(!icon){errors.push(b.id+' missing icon');continue;}const r=b.getBoundingClientRect(),i=icon.getBoundingClientRect();if(i.width<20||Math.abs(r.x+r.width/2-i.x-i.width/2)>.75||Math.abs(r.y+r.height/2-i.y-i.height/2)>.75)errors.push(b.id+' alignment');}return errors;})()`);
+    if(errors.length)throw Error(language+' remote toolbar: '+errors.join(', '));
+  }
   await run(viewer,"document.querySelector('#video-scale').click();true");
   if(!await run(viewer,"(()=>{const v=document.querySelector('#remote-video'),r=v.getBoundingClientRect(),p=position({clientX:r.left+r.width*.75,clientY:r.top+r.height*.25});return Math.abs(r.width*devicePixelRatio-v.videoWidth)<2&&Math.abs(p.x-.75)<.001&&Math.abs(p.y-.25)<.001})()"))throw Error('Native scale or pointer mapping is incorrect');
   await run(viewer,"document.querySelector('#video-stage').scrollLeft=100;true");

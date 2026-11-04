@@ -53,7 +53,7 @@ Builds go to `release/`. Binaries belong in GitHub Release assets, not source co
 
 ## Features
 
-- Direct WebRTC desktop video: speed and balanced profiles target 1080p60, economy 720p30 and quality up to 4K60. These are targets, not guaranteed throughput or hardware encoding.
+- Direct WebRTC desktop video: speed targets 1080p45, balanced 1080p30, economy 720p24, quality up to 4K30 and LAN up to 8K30. These are targets, not guaranteed throughput or hardware encoding.
 - Optional fixed password, explicit unattended access, encrypted saved-computer credentials and named desktop shortcuts.
 - Independent guest input that leaves the physical host cursor alone by default; separate guest/host pointer indicators, a glass host-disconnect panel and video fullscreen.
 - Automatically refreshed nearby devices across private IPv4 LAN/VPN interfaces.
