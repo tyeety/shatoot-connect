@@ -1,6 +1,6 @@
 'use strict';
 const{test}=require('node:test'),assert=require('node:assert/strict');
-const{evaluateFirewall,firewallStatus}=require('../desktop/firewall.cjs');
+const{evaluateFirewall,firewallStatus,repairFirewall}=require('../desktop/firewall.cjs');
 test('firewall shortcut detects denied/missing access only for active enabled profiles',()=>{
  const profile={id:2,enabled:true,defaultAction:0},rule={enabled:true,direction:1,action:1,profiles:2,protocol:256,ports:'*'};
  const state=(rules,profiles=[profile])=>evaluateFirewall({profiles,rules}).needsRepair;
@@ -17,4 +17,14 @@ test('firewall checks are read-only, hidden, bounded and return unknown on failu
  assert.deepEqual(await firewallStatus('C:\\App\\app.exe',{run}),{needsRepair:true});
  assert.deepEqual(await firewallStatus('C:\\App\\app.exe',{run:(_e,_a,_o,done)=>done(Error('denied'))}),{needsRepair:null});
  assert.deepEqual(await firewallStatus('C:\\App\\app.exe',{run:(_e,_a,_o,done)=>done(null,'invalid')}),{needsRepair:null});
+});
+
+test('firewall evaluation follows the actual fallback LAN port',async()=>{
+ const profiles=[{id:2,enabled:true,defaultAction:0}],base={enabled:true,direction:1,action:1,profiles:2};
+ const rules=[{...base,protocol:6,ports:'28788'},{...base,protocol:17,ports:'*'}];
+ assert.equal(evaluateFirewall({profiles,rules,tcpPort:28788}).needsRepair,false);
+ assert.equal(evaluateFirewall({profiles,rules,tcpPort:8788}).needsRepair,true);
+ assert.deepEqual(await firewallStatus('app.exe',{tcpPort:28788,run:(_exe,_args,_options,done)=>done(null,JSON.stringify({profiles,rules}))}),{needsRepair:false});
+ assert.throws(()=>repairFirewall('app.exe','28788;exit'),/Invalid LAN port/);
+ assert.equal(evaluateFirewall({profiles,rules:[...rules,{...base,action:0,protocol:6,ports:'28788'}],tcpPort:28788}).needsRepair,true);
 });

@@ -385,8 +385,8 @@ ipcMain.handle('update', async (e, operation) => {
   }catch(error){update.emit({state:'error',error:error.message});throw error;}finally{installingUpdate=false;}
 });
 let firewallCheck,firewallCheckedAt=0;
-ipcMain.handle('firewall-status',async(e,force=false)=>{const s=state(e);if(smoke)return s.firewallStatus||{needsRepair:false};if(!firewallCheck||force===true||Date.now()-firewallCheckedAt>30000){firewallCheckedAt=Date.now();firewallCheck=require('./firewall.cjs').firewallStatus(app.getPath('exe'));}return firewallCheck;});
-ipcMain.handle('firewall-repair',async e=>{const s=state(e);if(smoke){s.firewallStatus={needsRepair:false};return true;}try{return await require('./firewall.cjs').repairFirewall(app.getPath('exe'));}finally{firewallCheck=null;}});
+ipcMain.handle('firewall-status',async(e,force=false)=>{const s=state(e);if(smoke)return s.firewallStatus||{needsRepair:false};if(!firewallCheck||force===true||Date.now()-firewallCheckedAt>30000){firewallCheckedAt=Date.now();firewallCheck=require('./firewall.cjs').firewallStatus(app.getPath('exe'),{tcpPort:settings().lanListenPort||8788});}return firewallCheck;});
+ipcMain.handle('firewall-repair',async e=>{const s=state(e);if(smoke){s.firewallStatus={needsRepair:false};return true;}try{return await require('./firewall.cjs').repairFirewall(app.getPath('exe'),settings().lanListenPort||8788);}finally{firewallCheck=null;}});
 ipcMain.handle('chat-preferences', (e, value) => { state(e); if (!value || typeof value.autoAcceptFiles !== 'boolean' || typeof value.requireChatApproval !== 'boolean') throw new Error('Invalid chat settings.'); saveSettings({ autoAcceptFiles: value.autoAcceptFiles, requireChatApproval: value.requireChatApproval }); return value; });
 ipcMain.handle('chat-remote-visible',(e,value)=>{state(e);if(typeof value!=='boolean')throw new Error('Invalid chat settings.');if(workspaceRoot?.workspaceActive==='chat')workspaceRoot.setContentProtection(!value);saveSettings({showChatInRemote:value});for(const s of states.values()){if(s.chatWindow&&!s.chatWindow.isDestroyed())s.chatWindow.setContentProtection(!value);syncCursorExclusions(s);}return value;});
 function announceProfile(next){for(const s of states.values()){if(!s.owner&&!s.win.isDestroyed())s.win.webContents.send('profile-changed',next);if(s.discovery){s.discovery.name=next.name;s.discovery.status=next.status;s.discovery.refresh();}if(s.directSocket?.readyState===1)s.directSocket.send(JSON.stringify({type:'profile',name:next.name,avatar:next.avatar,status:next.status}));}}
@@ -594,9 +594,10 @@ ipcMain.handle('direct-listener', async e => {
     const hostToken = crypto.randomBytes(32).toString('hex');
     s.directHostToken = hostToken;
     const presence = () => ({ service: 'ShatootConnect', version: 1,appVersion:app.getVersion(),kind: 'presence', deviceId: s.identity.deviceId, name: profile().name, status: profile().status, port: service.server.address()?.port, capabilities: ['desktop', 'chat', 'files', 'groups'] });
-    const service = createSignalingServer({ port: smoke ? 0 : 8788, directHostToken: hostToken, presence, deviceProfile: async () => ({ ...compactProfile(), deviceId: s.identity.deviceId,preview:await wallpaperPreview().catch(()=>''),previewKind:'wallpaper' }) });
+    let service;
     try {
-      await service.listen(); s.directService = service;
+      service=await require('./lan-listener.cjs').listenDirect(port=>createSignalingServer({port,directHostToken:hostToken,presence,deviceProfile:async()=>({...compactProfile(),deviceId:s.identity.deviceId,preview:await wallpaperPreview().catch(()=>''),previewKind:'wallpaper'})}),smoke?0:(settings().lanListenPort||8788));
+      s.directService = service;
       const port = service.server.address().port;
       const { WebSocket } = require('ws');
       const ws = new WebSocket(`ws://127.0.0.1:${port}`); s.directSocket = ws;
@@ -616,8 +617,9 @@ ipcMain.handle('direct-listener', async e => {
       s.discovery = new (require('./discovery.cjs').Discovery)({ identity: s.identity,appVersion:app.getVersion(),name: profile().name, port,knownEndpoints:()=>preferences.computers().filter(r=>!r.endpoint).map(r=>r.address), ...(smoke ? { discoveryPort: 0, networkInterfaces: () => ({}), neighbors: false } : {}) }); s.discovery.status = profile().status;
       s.discovery.on('change',value=>{let changed=false;for(const peer of value.peers)changed=rememberComputer(peer,{address:peer.endpoints[0]},peer.previewKind==='wallpaper')||changed;if(changed)computerChanged();if(!s.win.isDestroyed())s.win.webContents.send('discovery',decorateDiscovery(value));});
       s.discovery.start().catch(() => {});
+      if(!smoke){saveSettings({lanListenPort:port});firewallCheck=null;}
       return s.directInfo = { addresses, port, password: credentials.password, fixedPassword: credentials.fixedPassword };
-    } catch (error) { s.directSocket?.close(); await service.close(); s.directService = null; s.directInfo = null; throw error; }
+    } catch (error) { s.directSocket?.close(); if(service)await service.close(); s.directService = null; s.directInfo = null; throw error; }
   })();
   try { return await s.directStarting; } finally { s.directStarting = null; }
 });
