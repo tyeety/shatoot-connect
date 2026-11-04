@@ -204,7 +204,8 @@ public class VerifiedSetupFixture {
             if($property.Name -eq 'sharedCursor' -and !$settingsBefore.PSObject.Properties['inputModeVersion']){if($afterProperty.Value -ne $true){throw 'Shared mouse migration failed.'};continue}
             if(!$afterProperty -or ($property.Value|ConvertTo-Json -Depth 100 -Compress) -cne ($afterProperty.Value|ConvertTo-Json -Depth 100 -Compress)){throw ('Installed update changed an existing preference: '+$property.Name)}
         }
-        foreach($property in $settingsAfter.PSObject.Properties){if(!$settingsBefore.PSObject.Properties[$property.Name] -and $property.Name -notin @('deviceId','deviceSecret','inputModeVersion','sharedCursor')){throw ('Unexpected startup preference change: '+$property.Name)}}
+        foreach($property in $settingsAfter.PSObject.Properties){if(!$settingsBefore.PSObject.Properties[$property.Name] -and $property.Name -notin @('deviceId','deviceSecret','inputModeVersion','sharedCursor','lanListenPort')){throw ('Unexpected startup preference change: '+$property.Name)}}
+        if($settingsAfter.PSObject.Properties['lanListenPort'] -and ($settingsAfter.lanListenPort -isnot [int] -or $settingsAfter.lanListenPort -lt 1 -or $settingsAfter.lanListenPort -gt 65535)){throw 'Packaged startup persisted an invalid LAN port.'}
         if(!$settingsAfter.deviceId -or !$settingsAfter.deviceSecret){throw 'Packaged startup did not retain the device identity.'}
         # A first application launch initializes identity; retain this complete
         # profile byte-for-byte through the following uninstall checks.

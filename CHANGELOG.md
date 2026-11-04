@@ -13,13 +13,14 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
-## 0.35.6 — 2026-11-04
+## 0.35.7 — 2026-11-04
 
 ### Fixed
 
 - Recover LAN hosting when Windows reserves TCP 8788 (`listen EACCES`) or another application occupies it. Try stable alternative ports, then let Windows allocate a free port; reuse the successful port at the next launch. No system port reservations or services are changed.
 - Publish the actual listening port through LAN discovery and the displayed connection address. Existing peers support explicit `IP:port` addresses.
 - Evaluate and repair the app's existing firewall rule for the selected TCP port rather than always assuming 8788. Firewall repair still requires the existing user action and Windows permission; it is not performed automatically.
+- Recognize and validate the newly persisted LAN port in the installed-update profile-preservation test. The 0.35.6 release was blocked by that outdated test and was not published.
 
 ### Validation
 
