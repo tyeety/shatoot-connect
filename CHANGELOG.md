@@ -13,6 +13,25 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.4 — 2026-11-04
+
+### Added
+
+- Add a 100% remote-image view with local scrollbars, physical-pixel sizing on scaled displays, and matching pointer/cursor coordinates after panning.
+- Forward Windows input rejection and recovery to the viewer through the reliable control channel. Explain how the host can handle administrator windows locally; do not block retries or automate UAC.
+- Add an opt-in native input-status diagnostic that reports window/process identities and mouse capture without reading window titles, content, clipboard data or key values.
+
+### Fixed
+
+- Explicitly release captured guest pointers when control pauses, the window loses focus or a pointer is cancelled. Scrollbar interactions no longer send remote clicks.
+- Maximize the shared window once when the first image arrives in a new remote tab, preserving later manual window changes.
+- Correct quality preset labels to match their actual frame-rate budgets. A saved Economy preset still limits capture size; choose LAN for native desktop detail.
+
+### Validation
+
+- Pass 161 unit tests, the full local RTC media acceptance test (including native-scale pointer mapping, capture cleanup, and input failure/recovery transport), and the Windows native shared-input regression for drag, text selection, resize and release.
+- These component checks do not establish the cause of every connected-but-unresponsive peer. Live acceptance on the reported host is still outstanding.
+
 ## 0.35.3 — 2026-11-03
 
 ### Fixed

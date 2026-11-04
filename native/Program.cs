@@ -18,6 +18,7 @@ if(args.Contains("--text-pipe-self-test")){
 // Narrow local stdin protocol. No shell execution or network listener.
 Native.SetProcessDpiAwarenessContext(new IntPtr(-4));
 if(args.Length==2&&args[0]=="--virtual-clipboard-self-test"){Environment.ExitCode=VirtualClipboard.SelfTest(args[1]);return;}
+if(args.Contains("--input-status")){Console.WriteLine(JsonSerializer.Serialize(KeyboardSync.InputStatus()));return;}
 if (args.Contains("--self-test")) { Environment.ExitCode = IndependentPointer.SelfTest(); return; }
 if(args.Contains("--menu-self-test")){Environment.ExitCode=IndependentPointer.MenuSelfTest();return;}
 if(args.Contains("--shared-input-self-test")){Environment.ExitCode=IndependentPointer.SharedSelfTest();return;}
@@ -160,8 +161,12 @@ static class Native {
         CursorMoveCount++;
         Inject(new INPUT{type=0,u=new InputUnion{mi=new MOUSEINPUT{dx=(int)Math.Clamp(Math.Round((x-left)*65535.0/(width-1)),0,65535),dy=(int)Math.Clamp(Math.Round((y-top)*65535.0/(height-1)),0,65535),dwFlags=0xC001|flags,mouseData=unchecked((uint)data)}}});
     }
+    static bool? inputAccepted;
+    static long inputReportedAt;
     public static void Inject(INPUT input) {
-        if (SendInput(1, [input], Marshal.SizeOf<INPUT>()) != 1) Console.Error.WriteLine("Input blocked (possibly elevated desktop).");
+        bool ok=SendInput(1, [input], Marshal.SizeOf<INPUT>())==1;
+        long now=Environment.TickCount64;
+        if(inputAccepted!=ok||(!ok&&now-inputReportedAt>=1000)){inputAccepted=ok;inputReportedAt=now;Console.WriteLine(ok?"{\"type\":\"input-result\",\"ok\":true}":"{\"type\":\"input-result\",\"ok\":false}");}
     }
     public static bool Extended(ushort k) => k is 0x21 or 0x22 or 0x23 or 0x24 or 0x25 or 0x26 or 0x27 or 0x28 or 0x2D or 0x2E or 0xA3 or 0xA5 or 0x5B or 0x5C or 0x6F or 0x90;
     public static ushort VirtualKey(string code) {

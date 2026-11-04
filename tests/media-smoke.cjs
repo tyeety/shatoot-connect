@@ -26,6 +26,23 @@ module.exports=async({host,createWindow,states,privacy,app,log})=>{
   await join(viewer);await until(host,manual?'videoQuality?.automatic===false':'videoQuality?.automatic===true');
   if(!await run(viewer,'peerMediaFeedback===true'))throw Error('Decoder feedback capability was not negotiated');
   if(!await run(viewer,"document.querySelector('#live-quality').value===(config.autoQuality?'auto':config.qualityProfile)"))throw Error('LAN menu misrepresented the negotiated quality mode');
+  await run(viewer,"document.querySelector('#video-scale').click();true");
+  if(!await run(viewer,"(()=>{const v=document.querySelector('#remote-video'),r=v.getBoundingClientRect(),p=position({clientX:r.left+r.width*.75,clientY:r.top+r.height*.25});return Math.abs(r.width*devicePixelRatio-v.videoWidth)<2&&Math.abs(p.x-.75)<.001&&Math.abs(p.y-.25)<.001})()"))throw Error('Native scale or pointer mapping is incorrect');
+  await run(viewer,"document.querySelector('#video-stage').scrollLeft=100;true");
+  if(!await run(viewer,"(()=>{const v=document.querySelector('#remote-video'),r=v.getBoundingClientRect(),p=position({clientX:r.left+r.width*.5,clientY:r.top+r.height*.5});return Math.abs(p.x-.5)<.001})()"))throw Error('Native scale pointer mapping drifted after pan');
+  await run(viewer,"document.querySelector('#video-scale').click();true");
+  const pointer=await run(viewer,"(()=>{const r=document.querySelector('#remote-video').getBoundingClientRect();return{x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()");
+  viewer.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...pointer});
+  await until(viewer,"activeGuestPointers.size===1");
+  await run(viewer,"window.fixturePointers=[...activeGuestPointers];setRemoteInputState({reason:'host'});true");
+  if(!await run(viewer,"activeGuestPointers.size===0&&fixturePointers.every(id=>!stage.hasPointerCapture(id))"))throw Error('Host activity left guest pointer capture attached');
+  viewer.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...pointer});
+  await run(viewer,"setRemoteInputState({reason:'ready'});true");
+  host.webContents.send('input-error',{ok:false});
+  await until(viewer,"!document.querySelector('#input-result').hidden");
+  host.webContents.send('input-error',{ok:true});
+  await until(viewer,"document.querySelector('#input-result').hidden");
+  log('Native scaling, panned pointer coordinates and input failure/recovery feedback over RTC passed');
   if(process.argv.includes('--media-performance')){
    const capturedId=states.get(host.webContents.id)?.source?.display_id;const captureDisplay=screen.getAllDisplays().find(d=>String(d.id)===String(capturedId))||screen.getPrimaryDisplay();const area=captureDisplay.bounds;
    target=new BrowserWindow({...area,frame:false,focusable:false,alwaysOnTop:true,webPreferences:{sandbox:true,contextIsolation:true,backgroundThrottling:false}});

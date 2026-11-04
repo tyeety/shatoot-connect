@@ -79,10 +79,18 @@ sealed class KeyboardSync {
         var current = GetKeyboardLayout(GetWindowThreadProcessId(window, out _)); int index = Array.FindIndex(layouts, 0, count, item => Same(item, current));
         SendMessageTimeout(window, 0x50, IntPtr.Zero, layouts[(index + 1) % count], 3, 100, out _);
     }
+    // Window identities only: no titles, text, clipboard contents or key values.
+    public static object InputStatus(){
+        var foreground=GetForegroundWindow();var thread=GetWindowThreadProcessId(foreground,out var process);
+        var info=new GUITHREADINFO{Size=Marshal.SizeOf<GUITHREADINFO>()};bool ok=GetGUIThreadInfo(thread,ref info);
+        Native.GetCursorPos(out var point);var under=WindowFromPoint(point);GetWindowThreadProcessId(under,out var pointerProcess);
+        return new{foreground=foreground.ToInt64(),process,thread,ok,capture=info.Capture.ToInt64(),focus=info.Focus.ToInt64(),underPointer=under.ToInt64(),pointerProcess};
+    }
     public static int SelfTest() => IndependentPointer.KeyboardSelfTest();
     public static IntPtr LayoutFor(IntPtr window) => GetKeyboardLayout(GetWindowThreadProcessId(window, out _));
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] struct GUITHREADINFO { public int Size; public uint Flags; public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret; public RECT CaretRect; }
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(IndependentPointer.POINT point);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);

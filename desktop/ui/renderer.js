@@ -283,6 +283,7 @@ function bindChannel(channel) {
     if(channel.label==='control'&&data.type==='session-ending'&&role==='viewer'){remoteRetry?.cancel();finishRemoteSession(false).catch(e=>status(e.message,true));return;}
     if(channel.label==='control'&&data.type==='privacy-screen-state'&&role==='viewer'){setRemotePrivacy(data);return;}
     if(channel.label==='control'&&data.type==='privacy-screen'&&role==='host'&&typeof data.active==='boolean'){api.privacyScreen(data.active).then(value=>channel.readyState==='open'&&channel.send(JSON.stringify({type:'privacy-screen-state',...value}))).catch(e=>{if(channel.readyState==='open')channel.send(JSON.stringify({type:'privacy-screen-state',active:false,allowed:false,error:e.message}));});return;}
+    if(role==='viewer'&&channel.label==='control'&&data.type==='input-result'){showInputResult(data);return;}
     if(role==='viewer'&&channel.label==='control'&&data.type==='input-state'){setRemoteInputState(data);return;}
     if(role==='host'&&channel.label==='control'&&data.type==='viewer-state'&&typeof data.active==='boolean'){videoQuality?.setActive(data.active);return;}
     if(role==='host'&&channel.label==='control'&&data.type==='media-feedback'){videoQuality?.feedback(data);return;}
@@ -321,19 +322,27 @@ api.onHostCursor(data => { lastLocalCursor = data; if (role === 'host' && pointe
 function renderHostCursor() {
   const marker = $('host-cursor'), video = $('remote-video'), stage = $('video-stage');
   if (!config?.showHostCursor || role !== 'viewer' || remoteInputReason!=='host' || hostCursor?.physical!==true || !hostCursor.visible || hostCursor.x < 0 || hostCursor.x > 1 || hostCursor.y < 0 || hostCursor.y > 1 || !video.videoWidth) { marker.hidden = true; return; }
-  const width = stage.clientWidth, height = stage.clientHeight, scale = Math.min(width / video.videoWidth, height / video.videoHeight), w = video.videoWidth * scale, h = video.videoHeight * scale;
-  marker.style.left = ((width-w)/2+hostCursor.x*w)+'px'; marker.style.top = ((height-h)/2+hostCursor.y*h)+'px'; marker.hidden = false;
+  const vr=video.getBoundingClientRect(),sr=stage.getBoundingClientRect(),scale=Math.min(vr.width/video.videoWidth,vr.height/video.videoHeight),w=video.videoWidth*scale,h=video.videoHeight*scale;
+  marker.style.left=(vr.left-sr.left+stage.scrollLeft+(vr.width-w)/2+hostCursor.x*w)+'px';marker.style.top=(vr.top-sr.top+stage.scrollTop+(vr.height-h)/2+hostCursor.y*h)+'px'; marker.hidden = false;
 }
 function renderPointerPause(){
   const badge=$('pointer-pause'),stage=$('video-stage');
   badge.hidden=role!=='viewer'||!allowedControl||remoteInputReason!=='host'||!guestPointerPoint;
   if(badge.hidden)return;
   badge.lastElementChild.textContent=tr('Host active · resumes after 2 s of inactivity');
-  badge.style.left=Math.max(0,Math.min(guestPointerPoint.x+18,stage.clientWidth-badge.offsetWidth-4))+'px';
-  badge.style.top=Math.max(0,Math.min(guestPointerPoint.y+20,stage.clientHeight-badge.offsetHeight-4))+'px';
+  badge.style.left=(stage.scrollLeft+Math.max(0,Math.min(guestPointerPoint.x+18,stage.clientWidth-badge.offsetWidth-4)))+'px';
+  badge.style.top=(stage.scrollTop+Math.max(0,Math.min(guestPointerPoint.y+20,stage.clientHeight-badge.offsetHeight-4)))+'px';
 }
+function sizeRemoteVideo(){
+  const video=$('remote-video');video.style.setProperty('--native-width',(video.videoWidth/devicePixelRatio)+'px');video.style.setProperty('--native-height',(video.videoHeight/devicePixelRatio)+'px');
+}
+$('video-scale').onclick=()=>{
+  const native=$('video-stage').classList.toggle('native-size');$('video-scale').setAttribute('aria-pressed',String(native));
+  $('video-stage').scrollLeft=0;$('video-stage').scrollTop=0;sizeRemoteVideo();renderHostCursor();
+};
+$('video-stage').addEventListener('scroll',()=>{renderHostCursor();renderPointerPause();},{passive:true});
 new ResizeObserver(()=>{renderHostCursor();renderPointerPause();}).observe($('video-stage'));
-$('remote-video').addEventListener('resize',()=>{const video=$('remote-video');if(role==='viewer'&&video.videoWidth&&!document.fullscreenElement)requestAnimationFrame(()=>api.fitVideo({width:video.videoWidth,height:video.videoHeight,extraWidth:innerWidth-$('video-stage').clientWidth,extraHeight:innerHeight-$('video-stage').clientHeight}).catch(()=>{}));});
+$('remote-video').addEventListener('resize',()=>{const video=$('remote-video');sizeRemoteVideo();if(role==='viewer'&&video.videoWidth&&!document.fullscreenElement)requestAnimationFrame(()=>api.fitVideo({width:video.videoWidth,height:video.videoHeight,extraWidth:innerWidth-$('video-stage').clientWidth,extraHeight:innerHeight-$('video-stage').clientHeight}).catch(()=>{}));});
 document.addEventListener('dragstart',event=>{if(!event.target.closest('input,textarea,[contenteditable=true],.pinned-draggable'))event.preventDefault();});
 api.onKeyboardApplied(data => { if (role === 'host' && controlChannel?.readyState === 'open') controlChannel.send(JSON.stringify(data)); if (!data.ok && allowedControl) { input({ type: 'release' }); status(tr('Keyboard sync failed; typing paused'), true); if (layoutSync) layoutSync.expected = ''; api.currentKeyboard().then(layout => { guestKeyboardLayout = layout; sendKeyboardLayout(); }).catch(e => status(e.message, true)); } });
 async function applyProfile(name,automatic=config.autoQuality!==false) {
@@ -390,7 +399,7 @@ function closePeer() {
   clearInterval(statsTimer); clearTimeout(joinTimer); statsTimer = null; previousStats = null;
   controlChannel?.close(); pointerChannel?.close(); pc?.close(); pc = null; sender = null;
   controlChannel = null; pointerChannel = null; candidates = [];
-  $('remote-video').srcObject = null; $('video-placeholder').hidden = false;
+  $('input-result').hidden=true;$('remote-video').srcObject = null; $('video-placeholder').hidden = false;
   $('session-panel').hidden = true; document.body.classList.remove('viewing');
   for (const id of ['stat-rtt','stat-fps','stat-size','stat-bitrate','stat-codec','stat-route']) $(id).textContent = '—';
 }
@@ -494,6 +503,7 @@ stage.addEventListener('pointermove', event => {
   pointerFrame = setTimeout(() => { pointerFrame = 0; if (guestCursorPosition) sendGuestCursor(guestCursorPosition); if (latestPointer) input({ type: 'move', ...latestPointer }, true); }, 8);
 });
 stage.addEventListener('pointerdown', event => {
+  if(event.target!==$('remote-video'))return;
   if (!allowedControl) return; const p = position(event); if (!p) return;
   event.preventDefault(); stage.focus(); stage.setPointerCapture(event.pointerId);
   activeGuestPointers.add(event.pointerId);
@@ -507,7 +517,7 @@ stage.addEventListener('pointerup', event => {
   if (p) input({ type: 'button', button: event.button, down: false, ...p });
   if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
 });
-stage.addEventListener('pointercancel', () => { activeGuestPointers.clear(); input({ type: 'release' }); });
+stage.addEventListener('pointercancel', releaseGuestKeyboard);
 stage.addEventListener('lostpointercapture', event => { if (activeGuestPointers.delete(event.pointerId)) input({ type: 'release' }); });
 stage.addEventListener('contextmenu', e => e.preventDefault());
 stage.addEventListener('wheel', e => {
@@ -554,7 +564,7 @@ for (const type of ['keydown', 'keyup']) stage.addEventListener(type, e => {
   sendGuestKey({ type: 'key', code: e.code, down: type === 'keydown' }, type === 'keydown' && ((e.ctrlKey && e.code === 'KeyV') || (e.shiftKey && e.code === 'Insert')), e.shiftKey);
 });
 stage.addEventListener('focus', () => { if (role === 'viewer' && allowedControl && peerKeyboardSync) api.keyboardGrab(true).catch(e => status(e.message, true)); });
-function releaseGuestKeyboard() { guestCursorPosition=null; sendGuestCursor({visible:false}); activeGuestPointers.clear(); keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); input({ type: 'release' }); }
+function releaseGuestKeyboard() { guestCursorPosition=null; sendGuestCursor({visible:false}); const pointers=[...activeGuestPointers];activeGuestPointers.clear();for(const id of pointers){try{if(stage.hasPointerCapture(id))stage.releasePointerCapture(id);}catch{}} keyboardGrabActive = false; api.keyboardGrab(false).catch(() => {}); input({ type: 'release' }); }
 stage.addEventListener('blur', releaseGuestKeyboard);
 window.addEventListener('blur', releaseGuestKeyboard);
 window.addEventListener('focus', () => { if (document.activeElement === stage && role === 'viewer' && allowedControl && peerKeyboardSync) api.keyboardGrab(true).catch(e => status(e.message, true)); });
@@ -807,7 +817,11 @@ for (const [button, field] of [['copy-id','host-id'], ['copy-password','host-pas
 });
 api.onEmergency(() => { stopSession(true); status('اتصال با میان‌بر اضطراری قطع شد.'); toast('اشتراک‌گذاری و کنترل متوقف شدند.'); });
 api.onHostDisconnect(() => { stopSession(true); status('اتصال قطع شد.'); });
-api.onInputError(() => status(tr('Windows blocked input. Some apps require shared cursor mode; elevated windows and UAC are unsupported.'), true));
+function showInputResult(data){
+  const notice=$('input-result');notice.hidden=data?.ok===true;
+  if(!notice.hidden)notice.textContent=data?.reason==='unavailable'?tr('Remote input is unavailable. Reconnect.'):tr('Windows rejected remote input. On the host, close the administrator window or restart Shatoot Connect as administrator. UAC must be handled locally.');
+}
+api.onInputError(data=>{const result={type:'input-result',ok:data?.ok===true,reason:data?.ok===false?'blocked':'unavailable'};if(role==='host'&&controlChannel?.readyState==='open')controlChannel.send(JSON.stringify(result));if(role==='viewer')showInputResult(result);});
 window.shatootconnectDiagnostics = () => ({ ...currentStats, automaticQuality:videoQuality?.automatic,qualityProfile:videoQuality?.name,targetBitrate:videoQuality?.bitrate, sessionRoute, videoWidth: $('remote-video').videoWidth, videoHeight: $('remote-video').videoHeight, registered, role, language: window.i18n.language, capturing: !!stream?.getVideoTracks().some(t => t.readyState === 'live'), iceConnectionState: pc?.iceConnectionState, iceGatheringState: pc?.iceGatheringState, iceErrors, networkProbe: $('network-status').textContent, forceRelay, iceUrls: iceServers.map(s => s.urls), localCandidates: pc?.localDescription?.sdp.split('\r\n').filter(l => l.startsWith('a=candidate')) });
 let networkBusy = false;
 async function verifyNetwork() {
