@@ -2,6 +2,7 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['علامت‌گذاری به‌عنوان خوانده‌شده','Mark as read'],['نشانی‌های IP','IP addresses'],['انجام عمل اعلان ممکن نشد.','Could not complete the notification action.'],
     ['تصویر ۱۰۰٪','100% image'],
     ['ویندوز ورودی ریموت را رد کرد. در میزبان، پنجرهٔ Administrator را ببندید یا Shatoot Connect را با دسترسی Administrator اجرا کنید. پیام UAC باید در خود میزبان تأیید شود.','Windows rejected remote input. On the host, close the administrator window or restart Shatoot Connect as administrator. UAC must be handled locally.'],
 ["تنظیمات و سایر داده‌های برنامه", "Settings and other app data"],["نصب‌کنندهٔ دانلودشده و معتبر موجود نیست. ابتدا آپدیت را دانلود کنید.", "No verified downloaded installer is available. Download the update first."],["صحت فایل آپدیت تأیید نشد. نصب‌کننده را دوباره دانلود کنید.", "Update integrity check failed. Download the installer again."],

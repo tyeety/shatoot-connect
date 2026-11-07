@@ -61,3 +61,13 @@ test('clicking a passive notice activates its destination once; Hide and critica
 test('an OS-destroyed notice is removed without touching destroyed webContents',async t=>{
  const f=fixture(t),done=f.api.toast(f.owner,'Closing');await f.ready();const task=[...f.api.entries.values()][0],win=task.win;win.destroyed=true;Object.defineProperty(win,'webContents',{get(){throw Error('Object has been destroyed');}});win.emit('closed');await done;assert.equal(f.api.entries.size,0);f.screen.emit('display-metrics-changed');
 });
+
+test('explicit message action runs once, while Hide, body activation and expiry never mark read',async t=>{
+ const f=fixture(t);let read=0,opened=0;
+ const options={kind:'message',buttons:['Mark as read'],onAnswer:()=>read++,onActivate:()=>opened++};
+ const done=f.api.toast(f.owner,'Message',options);await f.ready();const record=[...f.api.entries.values()][0],event=f.event(record);
+ f.answer(record,0);f.listeners.get('notice-answer')(event,0);await done;await Promise.resolve();assert.equal(read,1);assert.equal(opened,0);
+ const hidden=f.api.toast(f.owner,'Hidden',options);await f.ready();f.hide([...f.api.entries.values()][0]);await hidden;assert.equal(read,1);
+ const clicked=f.api.toast(f.owner,'Opened',options);await f.ready();f.listeners.get('notice-open')(f.event([...f.api.entries.values()][0]));await clicked;await Promise.resolve();assert.equal(read,1);assert.equal(opened,1);
+ const expired=f.api.toast(f.owner,'Expired',options);await f.ready();f.clock(7400);await expired;assert.equal(read,1);
+});

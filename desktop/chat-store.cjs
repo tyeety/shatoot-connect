@@ -128,6 +128,15 @@ class ChatStore {
     const reactions=Object.entries(this.load().unseenReactions||{}).filter(([,r])=>r.conversation===conversation&&ids.includes(r.message));
     if(messages.length||reactions.length)return this.change(d=>{for(const message of messages){message.seenReported=true;this.queueReceipt(d,message,'seen');}for(const [key]of reactions)delete d.unseenReactions[key];});
   }
+  readThroughMessage(conversation,id){
+    const target=this.load().messages.find(m=>m.conversation===conversation&&m.id===id);
+    if(!target)return;
+    return this.change(data=>{
+      data.readAt||={};data.readAt[conversation]=Math.max(data.readAt[conversation]||0,target.receivedAt);
+      const ids=new Set();for(const message of data.messages)if(message.conversation===conversation&&message.receivedAt<=target.receivedAt){ids.add(message.id);if(message.sender!==this.self&&!message.seenReported){message.seenReported=true;this.queueReceipt(data,message,'seen');}}
+      for(const [key,reaction]of Object.entries(data.unseenReactions||{}))if(reaction.conversation===conversation&&ids.has(reaction.message))delete data.unseenReactions[key];
+    });
+  }
   ackReceipt(id,peer){if(this.load().receipts?.[id]?.peer===peer)return this.change(d=>{delete d.receipts[id];});}
   failed(id,peer){return this.change(d=>{const m=d.messages.find(m=>m.id===id&&m.sender===this.self&&m.pending.includes(peer));if(m&&m.status!=='seen'&&m.status!=='delivered'){m.status='failed';m.failure=true;}});}
   attachment(conversation, message, files) {

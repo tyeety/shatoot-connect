@@ -15,6 +15,16 @@ function fixture(t) {
   const store = new ChatStore(options); store.contact({ deviceId: peer, name: 'همکار' }, { type: 'lan', address: '192.168.1.10:8788' }); return { store, options, self, peer, other };
 }
 
+test('notification read action batches receipts and leaves later messages and other chats unread',t=>{
+ const {store,options,peer,other}=fixture(t),conversation='p:'+peer;store.contact({deviceId:other,name:'Other'},{});let target;
+ for(let n=0;n<105;n++)target=store.append({id:crypto.randomUUID(),sender:peer,name:'Peer',conversation,kind:'text',text:'fixture',at:Date.now()}).message;
+ store.append({id:crypto.randomUUID(),sender:peer,name:'Peer',conversation,kind:'text',text:'later',at:Date.now()});
+ store.append({id:crypto.randomUUID(),sender:other,name:'Other',conversation:'p:'+other,kind:'text',text:'other',at:Date.now()});
+ store.readThroughMessage(conversation,target.id);assert.equal(store.unread()[conversation],1);assert.equal(store.unread()['p:'+other],1);
+ assert.equal(Object.values(store.load().receipts).filter(r=>r.stage==='seen').length,105);
+ assert.equal(new ChatStore(options).unread()[conversation],1);store.readThroughMessage(conversation,crypto.randomUUID());assert.equal(store.unread()[conversation],1);
+});
+
 test('story views, likes and comments authenticate actors, persist offline and relay only through the author',t=>{
  const {store,options,self,peer,other}=fixture(t);store.contact({deviceId:other,name:'Other'},{});
  const receiver=new ChatStore({...options,file:options.file+'.viewer',self:peer});receiver.contact({deviceId:self,name:'Author'},{});

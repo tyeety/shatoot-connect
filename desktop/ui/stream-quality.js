@@ -5,11 +5,13 @@
   // Ceilings deliberately leave congestion control room to probe upwards.
   function automaticProfiles(profiles){return {
     ...profiles,
+    balanced:{...profiles.balanced,width:profiles.quality.width,height:profiles.quality.height,fps:24,bitrate:16000000},
     survival:{width:640,height:360,fps:8,bitrate:250000},
     narrow:{width:960,height:540,fps:12,bitrate:900000},
     mobile:{width:1280,height:720,fps:15,bitrate:2000000},
     economy:{...profiles.economy,width:1920,height:1080,fps:20,bitrate:4000000}
   };}
+  function captureProfile(profiles,name,automatic){return (automatic?automaticProfiles(profiles):profiles)[name]||profiles.speed;}
   const floors={survival:50000,narrow:180000,mobile:500000,economy:1000000,balanced:2500000,quality:12000000,lan:35000000};
   class QualityPolicy {
     constructor(profiles){this.profiles=automaticProfiles(profiles);this.order=['survival','narrow','mobile','economy','balanced','quality','lan'].filter(n=>this.profiles[n]);this.reset('balanced');}
@@ -102,7 +104,7 @@
     constructor({profiles,peer,stream,sender,automatic=true,profile='balanced',onChange=()=>{},onError=()=>{}}){
       Object.assign(this,{profiles,peer,stream,sender,onChange,onError});this.policy=new QualityPolicy(profiles);this.queue=Promise.resolve();this.revision=0;this.stopped=false;this.active=true;this.automatic=this.lastAutomatic=automatic;this.manual=profiles[profile]?profile:'speed';this.name=automatic?'balanced':this.manual;
     }
-    start(){this.policy.reset(this.name);this.timer=setInterval(()=>this.poll(),500);return this.apply(this.name,this.profiles[this.name].bitrate);}
+    start(){this.policy.reset(this.name);this.timer=setInterval(()=>this.poll(),500);return this.apply(this.name,captureProfile(this.profiles,this.name,this.automatic).bitrate);}
     setActive(active){if(this.active===active)return;this.active=active;if(active){this.policy.reset(this.name);if(this.automatic&&this.fps<this.policy.profiles[this.name].fps)this.policy.cpuFps=this.fps;}this.receiver=null;this.revision++;return this.apply(this.name,this.bitrate||this.profiles[this.name]?.bitrate,this.fps).catch(this.onError);}
     feedback(value){
       if(!value||!Number.isFinite(value.fps)||value.fps<0||value.fps>240||!Number.isFinite(value.decodeMs)||value.decodeMs<0||value.decodeMs>10000||!Number.isFinite(value.dropRatio)||value.dropRatio<0||value.dropRatio>1)return;
@@ -120,7 +122,7 @@
         const p=(this.automatic?this.policy.profiles:this.profiles)[name],track=this.stream.getVideoTracks()[0];if(!p||!track||track.readyState==='ended')return;
         const frameRate=this.active?Math.min(p.fps,fps??p.fps):3;
         if(this.appliedFps!==frameRate||this.appliedName!==name||this.appliedAutomatic!==this.automatic||this.appliedActive!==this.active){
-          track.contentHint=name==='survival'?'motion':'detail';
+          track.contentHint=name==='survival'?'motion':'text';
           // Raising only a maximum permits Chromium to keep the old small
           // capture forever after recovery. Request the desired size as well.
           await track.applyConstraints({width:{ideal:p.width,max:p.width},height:{ideal:p.height,max:p.height},frameRate:{ideal:frameRate,max:frameRate}});
@@ -145,5 +147,5 @@
     }
     stop(){this.stopped=true;this.revision++;clearInterval(this.timer);}
   }
-  const exported={QualityPolicy,StreamQuality};if(typeof module!=='undefined')module.exports=exported;else Object.assign(root,exported);
+  const exported={QualityPolicy,StreamQuality,captureProfile};if(typeof module!=='undefined')module.exports=exported;else Object.assign(root,exported);
 })(globalThis);

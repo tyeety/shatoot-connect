@@ -68,6 +68,7 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await until(()=>run(chat,`document.querySelector('#chat-app-version').hidden&&!document.querySelector('#chat-app-version').textContent&&[...document.querySelectorAll('.chat-sidebar .computer-version')].every(e=>e.hidden&&!e.textContent)`));
   await run(chat,"document.querySelector('#chat-system-info').click();true");
   await until(()=>run(chat,"!!document.querySelector('#computer-info-dialog [data-info=cpu]')"));
+  if(!await run(chat,"!!document.querySelector('#computer-info-dialog [data-info=ip]')?.textContent"))throw Error('System details omitted IP addresses');
   if(!await run(chat,`document.querySelector('.system-details-version').hidden&&document.querySelector('[data-info=memory]').textContent.includes('GB')&&document.querySelector('[data-info=displays]').textContent.includes('×')`))throw Error('System details were not read over the approved chat connection');
   if(!await run(chat,"getComputedStyle(document.querySelector('#chat-system-info .mi')).maskImage.includes('info_outline.svg')"))throw Error('System details button has no information icon');
   chat.show();chat.focus();await pause(250);
@@ -395,6 +396,15 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   clear();const short=notices.toast(host,'Saved');await until(()=>notices.entries.size>0);const shortNotice=[...notices.entries.values()][0];await until(()=>run(shortNotice.win,"!!document.querySelector('#notice-hide')"));await until(()=>shortNotice.win.getBounds().height<230);const shortHeight=shortNotice.win.getBounds().height;if(shortNotice.win.getBounds().width>=420)throw Error('Short notification did not compact its width');fs.writeFileSync(path.join(artifacts,'notice-compact.png'),(await shortNotice.win.webContents.capturePage()).toPNG());shortNotice.finish(0);await short;
   const long=notices.toast(host,'A longer notification',{detail:'One\nTwo\nThree\nFour\nFive\nSix'});await until(()=>notices.entries.size>0);const longNotice=[...notices.entries.values()][0];await until(()=>run(longNotice.win,"!!document.querySelector('#notice-hide')"));await until(()=>longNotice.win.getBounds().height>shortHeight);fs.writeFileSync(path.join(artifacts,'notice-content.png'),(await longNotice.win.webContents.capturePage()).toPNG());longNotice.finish(0);await long;
   chat.close();await until(()=>!owner.chatWindow);clear();
+  const marked=await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Notification read action fixture').then(m=>m.id)`);
+  await until(()=>[...notices.entries.values()].some(r=>r.owner===host&&r.data.detail==='Notification read action fixture'));
+  const readNotice=[...notices.entries.values()].find(r=>r.owner===host&&r.data.detail==='Notification read action fixture');
+  await until(()=>run(readNotice.win,"!!document.querySelector('#notice-hide')&&[...document.querySelectorAll('#notice-actions button')].some(b=>b.textContent===window.i18n.translate('Mark as read'))"));
+  await run(readNotice.win,"[...document.querySelectorAll('#notice-actions button')].find(b=>b.textContent===window.i18n.translate('Mark as read')).click();true");
+  await until(()=>readNotice.done&&!owner.chatStore.unread()[conversation]);
+  await until(()=>peer.chatStore.history({conversation:'p:'+owner.identity.deviceId}).find(m=>m.id===marked)?.status==='seen');
+  if(owner.chatWindow)throw Error('Mark as read opened a chat window');
+  log('Notification Mark as read clears unread badges and sends real RTC seen receipts without opening chat; Hide remains separate');
   await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Reopen chat from notification').then(()=>true)`);await until(()=>[...notices.entries.values()].some(r=>r.owner===host&&r.data.detail==='Reopen chat from notification'));
   const reopenNotice=[...notices.entries.values()].find(r=>r.owner===host&&r.data.detail==='Reopen chat from notification');await until(()=>run(reopenNotice.win,"!!document.querySelector('#notice-message')"));await run(reopenNotice.win,"document.querySelector('#notice-message').click();true");await until(()=>owner.chatWindow);
   await until(()=>run(owner.chatWindow,`window.shatootconnectChatReady===true&&window.chatSelected==='${conversation}'&&[...document.querySelectorAll('.message-target p')].some(e=>e.textContent==='Reopen chat from notification')`));

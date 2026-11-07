@@ -13,6 +13,23 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.8 — 2026-11-07
+
+### Added
+
+- Add **Mark as read** beside **Hide** in incoming text, voice and file notifications. The action updates unread badges and queues seen receipts without opening a chat. It reads through that notification's message, preserving newer arrivals and other conversations, and writes the batch once to encrypted history.
+- Show the computer's non-loopback IPv4 and IPv6 addresses in system details, with IPv4 first. Older reports remain compatible; a known LAN endpoint is used when the remote report has no address list.
+
+### Changed
+
+- Start automatic capture with a 4K/24 FPS ceiling and 16 Mbps encoder ceiling instead of 1080p/30 FPS. This avoids a permanent 1080p cap on otherwise healthy static high-resolution desktops. All desktop senders use the text-content hint to favor readable screen content. Manual profiles remain unchanged; CPU and network adaptation still reduce load under pressure.
+- The sender-side quality changes require updating the computer whose screen is shared. A 4K ceiling does not upscale smaller source displays or guarantee 4K delivery over a constrained connection.
+
+### Validation
+
+- Pass 168 unit tests, including notification actions, batched read watermarks/receipts, IP validation, static-desktop capture and manual-quality compatibility.
+- Real RTC chat/UI acceptance verifies that the notification action clears unread counts, delivers a seen receipt and leaves the chat closed; system details render addresses in the existing dialog.
+
 ## 0.35.7 — 2026-11-04
 
 ### Fixed

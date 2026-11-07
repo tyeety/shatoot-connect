@@ -7,7 +7,7 @@
   const send = data => api.hostSend(data);
   window.shatootconnectHostDiagnostics=()=>({active:videoQuality?.active,automaticQuality:videoQuality?.automatic,qualityProfile:videoQuality?.name,privacyAllowed});
   function stop(reason='host-ended') { if (stopped) return; stopped = true;if(reason==='host-ended'&&control?.readyState==='open')try{control.send(JSON.stringify({type:'session-ending'}));}catch{} videoQuality?.stop(); exchange?.close(); pc?.close(); stream?.getTracks().forEach(t => t.stop()); api.revoke(); api.watchKeyboard(false); send({ type: 'desktop-end',reason }); }
-  window.shatootconnectCapture = async () => { const p = config.profiles[profile] || config.profiles.speed; stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never', frameRate: { ideal: p.fps, max: p.fps }, width: { max: p.width }, height: { max: p.height } }, audio: false }); stream.getVideoTracks()[0].contentHint = ['lan','quality'].includes(profile) ? 'detail' : 'motion'; stream.getVideoTracks()[0].onended = ()=>stop(); };
+  window.shatootconnectCapture = async () => { const p = window.captureProfile(config.profiles,profile,config.autoQuality!==false); stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never', frameRate: { ideal: p.fps, max: p.fps }, width: { ideal:p.width,max:p.width }, height: { ideal:p.height,max:p.height } }, audio: false }); stream.getVideoTracks()[0].contentHint = 'text'; stream.getVideoTracks()[0].onended = ()=>stop(); };
   async function quality(name,automatic=config.autoQuality!==false) {
     if(!config.profiles[name]||!stream)return;
     profile=name;if(!sender)return;

@@ -839,9 +839,9 @@ async function verifyNetwork() {
 }
 $('network-test').onclick = verifyNetwork;
 window.shatootconnectCapture = async () => {
-  const p = config.profiles[profileName] || config.profiles.speed;
-  stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never', frameRate: { ideal: p.fps, max: p.fps }, width: { max: p.width }, height: { max: p.height } }, audio: false });
-  stream.getVideoTracks()[0].contentHint = profileName === 'quality' ? 'detail' : 'motion';
+  const p = window.captureProfile(config.profiles,profileName,config.autoQuality!==false);
+  stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never', frameRate: { ideal: p.fps, max: p.fps }, width: { ideal:p.width,max:p.width }, height: { ideal:p.height,max:p.height } }, audio: false });
+  stream.getVideoTracks()[0].contentHint = 'text';
   stream.getVideoTracks()[0].onended = () => { stopSession(true); status('اتصال پایان یافت.'); };
 };
 $('language').onchange = guarded(async () => { window.i18n.setLanguage(await api.language($('language').value)); renderFavorites(config.favorites || []); });
