@@ -285,6 +285,13 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   const pastedImage=peer.chatStore.history({conversation:sentConversation}).filter(r=>r.text===image.text&&r.attachment).at(-1);
   if(!fs.readFileSync(peer.chatStore.files(pastedImage.attachment)[0]).equals(fs.readFileSync(owner.chatStore.files(image.attachment)[0])))throw Error('Copied file Paste changed file bytes');
   log('Clipboard image/file drafts wait for Send, retain caption and extra files across chat switches, allow removal and preserve confirmed file bytes');
+  await until(()=>run(chat,"!document.querySelector('#chat-text').value&&!document.querySelector('#chat-send').disabled"));
+  await run(chat,"document.querySelector('#chat-editor .tiptap').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));true");
+  await until(()=>run(chat,`!document.querySelector('.edit-message-banner').hidden&&document.querySelector('#chat-text').value===${JSON.stringify(pastedImage.text)}`));
+  await run(chat,"document.querySelector('#chat-text').value='Image-caption edited by ArrowUp';document.querySelector('#chat-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#chat-send').click();true");
+  await until(()=>peer.chatStore.history({conversation:sentConversation}).find(m=>m.id===pastedImage.id)?.text==='Image-caption edited by ArrowUp');
+  const editedAttachment=peer.chatStore.history({conversation:sentConversation}).find(m=>m.id===pastedImage.id);if(editedAttachment.kind!=='file'||editedAttachment.attachment!==pastedImage.attachment||!fs.readFileSync(peer.chatStore.files(editedAttachment.attachment)[0]).equals(fs.readFileSync(owner.chatStore.files(image.attachment)[0])))throw Error('Editing an attachment caption changed the attachment');
+  log('ArrowUp edits an own image/file caption across RTC while retaining the original attachment bytes and identity');
   await run(chat,`document.querySelector('[data-message-id="${image.id}"] .forward').parentElement.click();true`);await until(()=>run(chat,"document.querySelector('#chat-forward-dialog')?.open"));
   await run(chat,`document.querySelector('#chat-forward-dialog [data-conversation="${conversation}"]').click();true`);
   await until(()=>peer.chatStore.history({conversation:sentConversation}).some(m=>m.forwardedFrom?.id===image.id&&m.attachment));

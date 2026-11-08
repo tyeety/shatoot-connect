@@ -13,6 +13,18 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.11 — 2026-11-08
+
+### Fixed
+
+- Allow the sender to edit captions on image/file messages through the existing Edit action and Arrow Up shortcut. The client previously accepted only text messages at save time, despite the editor and encrypted history already supporting file messages, and incorrectly reported an ownership error.
+- Retain the original sender check, message ID, file kind and attachment references. Editing someone else's message remains rejected.
+
+### Validation
+
+- Reproduce the incorrect sender error using the actual chat client against the local history/IPC handler, then verify caption editing succeeds while an incoming-message edit is rejected.
+- RTC chat acceptance edits an image/file caption using Arrow Up and confirms that the receiving peer retains the same attachment and file bytes.
+
 ## 0.35.10 — 2026-11-08
 
 ### Added

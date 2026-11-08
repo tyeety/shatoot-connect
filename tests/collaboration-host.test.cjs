@@ -27,6 +27,11 @@ assert.equal(prompts,0);assert.equal(s.captureAllowed,undefined);assert.equal(s.
   const sent={...text,id:crypto.randomUUID(),sender:s.identity.deviceId,kind:'file',text:'original.txt'};await call('append',{message:sent,outgoing:true});
   const attachment=await handlers.get('collaboration-files')({},session,'attach-sources',{id:sent.id,conversation});
   assert.deepEqual(s.chatStore.files(attachment),[source]);await call('open-attachment',{token:attachment});assert.deepEqual(opened,[source]);await call('reveal-attachment',{token:attachment});assert.deepEqual(revealed,[source]);await assert.rejects(call('reveal-attachment',{token:attachment,index:5}),/unavailable/);
+  const context={window:{},crypto,setTimeout,clearTimeout,setInterval,clearInterval};require('node:vm').runInNewContext(fs.readFileSync(require.resolve('../desktop/ui/collaboration.js'),'utf8'),context);
+  const client=new context.window.CollaborationClient({api:{collaboration:call},self:{deviceId:s.identity.deviceId,name:'Me'}});await client.ready;client.ensurePeer=async()=>{throw Error('Offline fixture');};
+  await client.changeMessage(conversation,sent.id,'Updated attachment caption');
+  const edited=s.chatStore.history({conversation}).find(m=>m.id===sent.id);assert.equal(edited.text,'Updated attachment caption');assert.equal(edited.kind,'file');assert.equal(edited.attachment,attachment);assert.deepEqual(s.chatStore.files(attachment),[source]);
+  await assert.rejects(client.changeMessage(conversation,text.id,'Forged caption'),/Only the sender/);assert.equal(s.chatStore.history({conversation}).find(m=>m.id===text.id).text,'Edited by sender');
   await assert.rejects(handlers.get('collaboration-files')({},session,'attach-sources',{id:text.id,conversation}),/Invalid outgoing/);
   const voiceBytes=Buffer.from([0x1a,0x45,0xdf,0xa3,0x80,0x81,0x82,0x83]),voiceFiles=await handlers.get('collaboration-files')({},session,'voice','data:audio/webm;base64,'+voiceBytes.toString('base64'));
   assert.match(voiceFiles[0].name,/^Voice-[a-f0-9-]+\.webm$/);

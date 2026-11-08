@@ -289,7 +289,7 @@
     async changeMessage(conversation,id,text,removed=false){
       await this.ready;const rows=await this.api.collaboration('history',{conversation,limit:100,search:''});let row=rows.find(m=>m.id===id);
       if(!row)row=await this.api.collaboration('message',{conversation,id});
-      if(!row||row.sender!==this.self.deviceId||row.deleted||(!removed&&row.kind!=='text'))throw new Error('Only the sender can change this message.');
+      if(!row||row.sender!==this.self.deviceId||row.deleted||(!removed&&!['text','file'].includes(row.kind)))throw new Error('Only the sender can change this message.');
       const group=conversation.startsWith('g:')&&this.group(conversation.slice(2)),pending=group?(group.owner===this.self.deviceId?group.members.map(m=>m.deviceId).filter(id=>id!==this.self.deviceId):[group.owner]):[conversation.slice(2)];
       const mutation={id:crypto.randomUUID(),message:id,conversation,sender:this.self.deviceId,kind:'text',removed,text:removed?'':text,revision:(row.revision||0)+1,at:Date.now(),pending};
       await this.api.collaboration('mutate',{mutation,outgoing:true});await this.refresh();for(const id of pending)this.ensurePeer(id).then(s=>this.flush(s)).catch(()=>{});return mutation;
