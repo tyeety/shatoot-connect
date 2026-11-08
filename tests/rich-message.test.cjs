@@ -1,6 +1,17 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
 const md=require('../desktop/ui/rich-message.js').parser(require('markdown-it'));
+
+test('message selection copy works after editing, without overriding native field or composer selection copy',async()=>{
+ const listeners=new Map();let editable=true,inMessage=true;
+ const document={activeElement:{matches:selector=>editable?selector.includes('contenteditable'):true},addEventListener:(name,fn)=>listeners.set(name,fn)};
+ const node={nodeType:1,closest:()=>inMessage?{}:null},selection={isCollapsed:false,anchorNode:node,focusNode:node,toString:()=> 'Selected message'};
+ require('node:vm').runInNewContext(await fs.readFile(path.join(__dirname,'../desktop/ui/feedback.js'),'utf8'),{window:{},document,getSelection:()=>selection});
+ const copy=()=>{const data=new Map(),event={clipboardData:{setData:(type,text)=>data.set(type,text)},preventDefault(){this.prevented=true;}};listeners.get('copy')(event);return {data,event};};
+ const message=copy();assert.equal(message.data.get('text/plain'),'Selected message');assert.equal(message.event.prevented,true);
+ inMessage=false;assert.equal(copy().event.prevented,undefined);
+ editable=false;inMessage=true;assert.equal(copy().event.prevented,undefined);
+});
 test('rich messages preserve nested formatting, tables, lists and local media without active HTML or remote image loads',()=>{
  const html=md.render('**Bold** ++underlined++ ||**hidden** ![private](attachment:0)|| [link](https://example.com)\n\n- first\n- second\n\n| a | b |\n|---|---|\n| 1 | 2 |');
  for(const value of ['<strong>Bold</strong>','<u>underlined</u>','class="spoiler"','data-media-index="0"','<table>','<ul>','href="https://example.com"'])assert.ok(html.includes(value),value);

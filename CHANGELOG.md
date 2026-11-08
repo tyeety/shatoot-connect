@@ -13,12 +13,13 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
-## 0.35.11 — 2026-11-08
+## 0.35.12 — 2026-11-08
 
 ### Fixed
 
 - Allow the sender to edit captions on image/file messages through the existing Edit action and Arrow Up shortcut. The client previously accepted only text messages at save time, despite the editor and encrypted history already supporting file messages, and incorrectly reported an ownership error.
 - Retain the original sender check, message ID, file kind and attachment references. Editing someone else's message remains rejected.
+- Copy a selected message as plain text even if the visual editor still has focus after saving an edit. Native input/textarea copy and selections inside the visual editor keep their normal behavior. This follow-up was caught by the expanded caption-edit test; 0.35.11 was not published.
 
 ### Validation
 
