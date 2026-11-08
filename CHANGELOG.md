@@ -13,6 +13,16 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.17 — 2026-11-08
+
+### Changed
+
+- Automatically load older messages on scrolling near the top, with no manual button. Preserve the reading anchor, serialize repeated requests, and stop when history is exhausted.
+
+### Fixed
+
+- Package the exact Electron distribution already installed by the locked npm dependency, avoiding a redundant runtime download that returned HTTP 504. The installed runtime is still exercised by the UI and packaged-application checks before release.
+
 ## 0.35.16 — 2026-11-08
 
 ### Changed
