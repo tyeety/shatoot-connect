@@ -165,7 +165,11 @@ test('sender edits/deletes persist, queue offline, reject forged authors and pre
 });
 test('encrypted history survives restart, deduplicates delivery, paginates without timestamp gaps and persists the outbox', t => {
   const { store, options, self, peer } = fixture(t);
-  for (let index = 0; index < 125; index++) store.append({ id: crypto.randomUUID(), conversation: `p:${peer}`, sender: self, name: 'Me', kind: 'text', text: `پیام ${index}`, pending: [peer] }, true);
+  const append=index=>store.append({ id: crypto.randomUUID(), conversation: `p:${peer}`, sender: self, name: 'Me', kind: 'text', text: `پیام ${index}`, pending: [peer] }, true);
+  for(let index=0;index<100;index++)append(index);
+  assert.equal(store.historyPage({conversation:`p:${peer}`}).hasOlder,false,'Exactly 100 messages have no older page');
+  for(let index=100;index<125;index++)append(index);
+  const page=store.historyPage({conversation:`p:${peer}`});assert.equal(page.hasOlder,true);assert.equal(store.historyPage({conversation:`p:${peer}`,before:page.messages[0].receivedAt}).hasOlder,false);assert.equal(store.historyPage({conversation:`p:${peer}`,search:'124'}).hasOlder,false);
   assert.equal(store.pending(peer).length, 125); const last = store.history({ conversation: `p:${peer}` }); assert.equal(last.length, 100);
   assert.equal(store.history({ conversation: `p:${peer}`, before: last[0].receivedAt }).length, 25);
   const message = last.at(-1); assert.equal(store.append(message, true).duplicate, true);

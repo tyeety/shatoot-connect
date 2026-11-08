@@ -206,6 +206,11 @@ class ChatStore {
     this.repairMessageTimes();return this.load().messages.filter(m => !m.deleted && m.conversation === conversation && m.receivedAt < before && (!search || m.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).slice(-Math.max(1, Math.min(100, Number(limit) || 100))).map(m => ({ ...m,pending:[...new Set([...m.pending,...(this.data.mutations||[]).filter(c=>c.message===m.id&&c.conversation===conversation).flatMap(c=>c.pending)])],attachment:m.deleted?undefined:this.attachmentIndexes().attachments.get(conversation+'/'+m.id) }));
   }
   pending(peer) { this.repairMessageTimes();return this.load().messages.filter(m => !m.deleted && m.pending.includes(peer)); }
+  historyPage(query={}){
+    const messages=this.history(query),limit=Math.max(1,Math.min(100,Number(query.limit)||100)),before=Math.min(...messages.map(m=>m.receivedAt)),search=(query.search||'').toLocaleLowerCase();
+    const hasOlder=messages.length===limit&&this.load().messages.some(m=>!m.deleted&&m.conversation===query.conversation&&m.receivedAt<before&&(!search||m.text.toLocaleLowerCase().includes(search)));
+    return {messages,hasOlder};
+  }
   schedule(value){
     const data=this.load(),conversation=value?.conversation,key=conversation?.slice(2);
     if(!/^[pg]:[a-f0-9-]{36}$/i.test(conversation||'')||!(conversation.startsWith('p:')?data.contacts[key]:data.groups[key])||typeof value.text!=='string'||!value.text.trim()||value.text.length>8000||!Number.isSafeInteger(value.sendAt)||value.sendAt<=Date.now()||value.sendAt>Date.now()+366*86400000)throw new Error('Choose a future time and enter a message.');

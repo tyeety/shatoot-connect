@@ -13,6 +13,18 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.13 — 2026-11-08
+
+### Fixed
+
+- Report whether a matching older history page actually exists; an exactly full 100-message page no longer implies more history. Respect the conversation, search and arrival cursor when deciding.
+- Replace the full-width older-history button beside the composer with a compact accessible action at the top of the timeline. Show it only near the beginning while reading history, hide it at the latest message, on conversation/search changes and after history is exhausted. Preserve the scroll anchor while loading older messages.
+
+### Validation
+
+- Cover exactly 100 messages, additional older pages and filtered search in history tests. Chat UI acceptance checks short conversations, bottom/top visibility, history exhaustion and stable scroll position.
+- Includes the 0.35.12 attachment-caption ownership and selected-message Copy fixes.
+
 ## 0.35.12 — 2026-11-08
 
 ### Fixed

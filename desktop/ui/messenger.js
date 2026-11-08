@@ -4,6 +4,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   let engine, targetMessage='',selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, submitting=false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer,historyFlight;
   let replying=null,composer;
   let stagingQueue=Promise.resolve(),stagingCount=0;
+  let olderAvailable=false;
   const collectionFilter=window.installCollectionFilter($('chat-conversations'),()=>render());
   let voice,extras,autoSelecting=false,renderedConversation='',historyRequest=0,dayFadeTimer,resizeFrame;
   const pendingNew=new Set();let readThrough=0;
@@ -29,12 +30,14 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   window.renderChatPerson=person;
   const contacts=document.createElement('div');contacts.className='chat-contact-list';$('chat-conversations').before(contacts);contacts.append($('chat-conversations'),$('chat-new-group'));
   window.overlayScroll($('chat-conversations'));window.overlayScroll($('chat-messages'));
+  const olderButton=$('chat-older');olderButton.type='button';olderButton.innerHTML='<span class="mi arrow_forward" aria-hidden="true"></span><span class="sr-only">Load older messages</span>';olderButton.setAttribute('aria-controls','chat-messages');logElement.parentElement.append(olderButton);
+  function updateOlder(){olderButton.hidden=!olderAvailable||following||logElement.scrollTop>60;olderButton.title=olderButton.ariaLabel=tr('Load older messages');}
   window.installPinnedReorder($('chat-conversations'),async order=>{await api.collaboration('reorder-pins',{order:window.mergeVisiblePins(order,[...(engine.catalog.pinOrder||[]),...Object.keys(engine.catalog.pins||{}).filter(id=>!(engine.catalog.pinOrder||[]).includes(id))])});await engine.refresh();});
   const jump=document.createElement('button');jump.id='chat-jump';jump.type='button';jump.className='icon-button';jump.innerHTML='<span class="mi arrow_forward" aria-hidden="true"></span><span class="unread-badge"></span>';jump.hidden=true;logElement.parentElement.append(jump);
   function updateJump(){jump.hidden=!selected||atBottom();jump.title=tr(pendingNew.size?'First unread message':'Scroll to latest');jump.setAttribute('aria-label',jump.title);const badge=jump.querySelector('.unread-badge');badge.hidden=!pendingNew.size;badge.textContent=String(pendingNew.size);}
   function updateDays(){const top=logElement.getBoundingClientRect().top;for(const group of logElement.children){const label=group.querySelector('.chat-day-label');label?.classList.toggle('is-stuck',group.getBoundingClientRect().top<top-1);}}
   function visibleNew(){if(!document.hasFocus()||!pendingNew.size)return;const viewport=logElement.getBoundingClientRect();for(const item of logElement.querySelectorAll('.chat-message'))if(pendingNew.has(item.dataset.messageId)){const r=item.getBoundingClientRect();if(r.top>=viewport.top-1&&r.bottom<=viewport.bottom+1){const row=rows.find(m=>m.id===item.dataset.messageId);readThrough=Math.max(readThrough,row?.receivedAt||0);pendingNew.delete(item.dataset.messageId);}}}
-  function timelineScroll(){following=atBottom()&&!selectingText();if(following){pendingNew.clear();readThrough=Math.max(readThrough,...rows.map(m=>m.receivedAt));}else visibleNew();updateJump();updateDays();logElement.classList.add('timeline-scrolling');clearTimeout(dayFadeTimer);dayFadeTimer=setTimeout(()=>logElement.classList.remove('timeline-scrolling'),1200);reportView().catch(()=>{});}
+  function timelineScroll(){following=atBottom()&&!selectingText();updateOlder();if(following){pendingNew.clear();readThrough=Math.max(readThrough,...rows.map(m=>m.receivedAt));}else visibleNew();updateJump();updateDays();logElement.classList.add('timeline-scrolling');clearTimeout(dayFadeTimer);dayFadeTimer=setTimeout(()=>logElement.classList.remove('timeline-scrolling'),1200);reportView().catch(()=>{});}
   logElement.addEventListener('scroll',timelineScroll,{passive:true});
   jump.onclick=async()=>{try{if(pendingNew.size){if(!rows.some(row=>pendingNew.has(row.id)))await load(false);const first=[...logElement.querySelectorAll('.chat-message')].find(item=>pendingNew.has(item.dataset.messageId));if(first){first.scrollIntoView({block:'start',behavior:'smooth'});return;}}logElement.scrollTo({top:logElement.scrollHeight,behavior:'smooth'});}catch(e){error(e);}};
   new ResizeObserver(()=>{if(resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(following&&!selectingText())logElement.scrollTop=logElement.scrollHeight;updateJump();updateDays();});}).observe(logElement);
@@ -75,7 +78,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     catch(error){if(sequence===connectSequence)throw error;}
     finally{selectingTarget=false;if(sequence===connectSequence){connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;}}
   }
-  async function select(id) {if(id===selected){await load(false);return;}composer?.switch(id); if(id!==selected){voice?.reset();replying=null;renderReply();}if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = [];pendingNew.clear();readThrough=0;following=true; selectionVersion++; $('chat-search').value = ''; render(); const version=selectionVersion;await Promise.all([api.collaboration('conversation-state',{conversation:id,selected:true}),load(false)]);if(version!==selectionVersion)return;engine.catalog.lastSelected=id;await reportView();publish(); }
+  async function select(id) {if(id===selected){await load(false);return;}composer?.switch(id); if(id!==selected){voice?.reset();replying=null;renderReply();}if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = [];olderAvailable=false;updateOlder();pendingNew.clear();readThrough=0;following=true; selectionVersion++; $('chat-search').value = ''; render(); const version=selectionVersion;await Promise.all([api.collaboration('conversation-state',{conversation:id,selected:true}),load(false)]);if(version!==selectionVersion)return;engine.catalog.lastSelected=id;await reportView();publish(); }
   async function navigate(target){
     collectionFilter.clear();await select(target.conversation);if(selected!==target.conversation)return;
     const version=selectionVersion;targetMessage=target.message||'';
@@ -96,10 +99,10 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     flight.promise=readHistory(older).finally(()=>{if(historyFlight===flight)historyFlight=null;});return flight.promise;
   }
   async function readHistory(older = false) {
-    if(!selected)return;const request=++historyRequest,version=selectionVersion,id=selected,search=$('chat-search').value.trim(),earliest=rows.length?Math.min(...rows.map(m=>m.receivedAt)):Number.MAX_SAFE_INTEGER;let before=older?earliest:Number.MAX_SAFE_INTEGER,result=[],page;
-    do{page=await api.collaboration('history',{conversation:id,search,before});if(request!==historyRequest||version!==selectionVersion||id!==selected)return;result.unshift(...page);if(!page.length)break;before=page[0].receivedAt;}while(!older&&rows.length>100&&page.length===100&&before>earliest);
+    if(!selected)return;const request=++historyRequest,version=selectionVersion,id=selected,search=$('chat-search').value.trim(),earliest=rows.length?Math.min(...rows.map(m=>m.receivedAt)):Number.MAX_SAFE_INTEGER;let before=older?earliest:Number.MAX_SAFE_INTEGER,result=[],page,hasOlder=false;
+    do{const snapshot=await api.collaboration('history-page',{conversation:id,search,before});page=snapshot.messages;hasOlder=snapshot.hasOlder;if(request!==historyRequest||version!==selectionVersion||id!==selected)return;result.unshift(...page);if(!page.length)break;before=page[0].receivedAt;}while(!older&&rows.length>100&&hasOlder&&before>earliest);
     if(search!==$('chat-search').value.trim())return;
-    rows=older?[...new Map([...result,...rows].map(row=>[row.id,row])).values()]:result;$('chat-older').hidden=page.length<100;renderMessages(!older);
+    rows=older?[...new Map([...result,...rows].map(row=>[row.id,row])).values()]:result;olderAvailable=hasOlder;renderMessages(!older);
   }
   const replyBar=document.createElement('div');replyBar.id='chat-reply-preview';replyBar.hidden=true;$('chat-compose').before(replyBar);
   function renderReply(){replyBar.hidden=!replying;replyBar.replaceChildren();if(replying){const text=document.createElement('span');text.dir='auto';text.setAttribute('translate','no');text.textContent=replying.reference.text;const author=document.createElement('span');author.className='reply-author';person(author,replying.reference.sender===self.deviceId?self:{...contact(replying.reference.sender),avatar:contact(replying.reference.sender)?.avatar||replying.reference.avatar,deviceId:replying.reference.sender,name:replying.reference.name});replyBar.append(author,text,button('Cancel reply',()=>{replying=null;renderReply();},'close'));}}
@@ -172,7 +175,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     if(stick){log.scrollTop=log.scrollHeight;following=true;}else if(anchor?.isConnected){const delta=anchor.getBoundingClientRect().top-anchorTop;if(Math.abs(delta)>.5)log.scrollTop+=delta;}
     if(atBottom())readThrough=Math.max(readThrough,...rows.map(m=>m.receivedAt));else{const viewport=log.getBoundingClientRect();for(const item of log.querySelectorAll('.chat-message')){const r=item.getBoundingClientRect();if(r.top>=viewport.top-1&&r.bottom<=viewport.bottom+1)readThrough=Math.max(readThrough,rows.find(m=>m.id===item.dataset.messageId)?.receivedAt||0);}}
     queueMicrotask(()=>reportView().catch(()=>{}));
-    updateDays();updateJump();
+    updateDays();updateJump();updateOlder();
   }
   function render(refreshHistory = false) {
     if (!engine) return;
@@ -241,7 +244,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('refresh-discovery').onclick = run(async () => {renderDiscovery(await api.discovery());window.refreshFeedback($('network-list'));});
   api.onDiscovery(renderDiscovery);
   $('chat-connect-form').onsubmit = run(async () => { const address = $('chat-address').value.trim(); await start({ type: address.includes('.') || address.includes(':') ? 'lan' : 'id', address }); });
-  $('chat-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
+  $('chat-search').oninput = () => { olderAvailable=false;updateOlder();clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
   $('chat-older').onclick = run(() => load(true));
   $('chat-compose').onsubmit = run(async () => {
     if(submitting||busy)return;
