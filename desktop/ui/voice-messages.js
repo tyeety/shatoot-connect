@@ -1,5 +1,5 @@
 'use strict';
-window.installVoiceMessages = ({api,conversation,available,send,error}) => {
+window.installVoiceMessages = ({api,conversation,available,send,error,hasDraft=()=>false}) => {
   const tr=text=>window.i18n.translate(text), players=new Map();
   const actions=document.createElement('div');actions.className='voice-actions';
   const record=document.getElementById('chat-send');record.className='icon-button chat-primary-action';
@@ -11,7 +11,7 @@ window.installVoiceMessages = ({api,conversation,available,send,error}) => {
   let recording=null,starting=false,generation=0,sending=false;
   function sync(){
     record.disabled=starting||sending||(!recording&&!available());record.classList.toggle('voice-recording',!!recording);
-    const typing=!!document.getElementById('chat-text').value.trim();
+    const typing=!!document.getElementById('chat-text').value.trim()||hasDraft();
     icon.className=`mi ${recording?'voice_stop':typing?'send':'mic'}`;caption.textContent=tr(recording?'Send voice':typing?'Send':'Record voice');record.title=caption.textContent;record.setAttribute('aria-label',caption.textContent);
     cancel.hidden=!recording&&!starting;cancel.title=tr('Cancel recording');cancel.setAttribute('aria-label',cancel.title);
     clock.hidden=!recording;
@@ -51,7 +51,7 @@ window.installVoiceMessages = ({api,conversation,available,send,error}) => {
     finally{if(revision===generation){starting=false;await api.voiceRecording(false).catch(()=>{});}sync();}
   }
   function activate(){if(recording)stop();else start();}
-  record.onclick=event=>{if(recording||!document.getElementById('chat-text').value.trim()){event.preventDefault();activate();}};cancel.onclick=()=>stop(true);
+  record.onclick=event=>{if(recording||!document.getElementById('chat-text').value.trim()&&!hasDraft()){event.preventDefault();activate();}};cancel.onclick=()=>stop(true);
   document.getElementById('chat-text').addEventListener('input',sync);
   function reset(){stop(true);for(const entry of players.values()){entry.audio.pause();URL.revokeObjectURL(entry.url);}players.clear();}
   function attachment(item,row){

@@ -3,6 +3,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   const $ = id => document.getElementById(id), tr = text => window.i18n.translate(text);
   let engine, targetMessage='',selected = '', selectionVersion = 0, rows = [], searchTimer, busy = false, submitting=false, discovery = { peers: [], interfaces: [], errors: [] }, historyTimer,historyFlight;
   let replying=null,composer;
+  let stagingQueue=Promise.resolve(),stagingCount=0;
   const collectionFilter=window.installCollectionFilter($('chat-conversations'),()=>render());
   let voice,extras,autoSelecting=false,renderedConversation='',historyRequest=0,dayFadeTimer,resizeFrame;
   const pendingNew=new Set();let readThrough=0;
@@ -128,7 +129,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
         voice?.attachment(item,row);
         if(row.kind==='file'&&row.attachment&&!/!\[[^\]]*\]\(attachment:\d+\)/.test(row.text)&&!/^Voice-[a-f0-9-]{36}\.webm$/i.test(row.text)){
           const preview=document.createElement('div');preview.className='attachment-previews';item.append(preview);
-          api.collaboration('attachment-preview',{token:row.attachment}).then(files=>{if(!preview.isConnected)return;if(files.length)text.hidden=true;const keepBottom=following,top=logElement.getBoundingClientRect().top,anchor=[...logElement.querySelectorAll('.chat-message')].find(e=>e.getBoundingClientRect().bottom>=top),anchorTop=anchor?.getBoundingClientRect().top;for(const file of files){const card=document.createElement('button');card.type='button';card.className='attachment-preview';card.title=tr(own?'Open sent files':'Open received files');card.onclick=run(()=>api.collaboration('open-attachment',{token:row.attachment,index:file.index}));if(file.image){const img=document.createElement('img');img.src=file.image;img.alt=file.name;img.loading='lazy';card.append(img);}else{const icon=document.createElement('span');icon.className='attachment-extension';icon.textContent=file.directory?tr('Folder'):file.extension||'FILE';card.append(icon);}const label=document.createElement('span');label.textContent=file.name;const size=document.createElement('small');size.dir='ltr';size.textContent=file.directory?tr('Folder'):file.size<1024?file.size+' B':file.size<1048576?Math.ceil(file.size/1024)+' KB':(file.size/1048576).toFixed(1)+' MB';card.append(label,size);preview.append(card);}if(keepBottom&&following)logElement.scrollTop=logElement.scrollHeight;else if(!following&&anchor?.isConnected){const delta=anchor.getBoundingClientRect().top-anchorTop;if(Math.abs(delta)>.5)logElement.scrollTop+=delta;}updateJump();}).catch(()=>{});
+          api.collaboration('attachment-preview',{token:row.attachment}).then(files=>{if(!preview.isConnected)return;if(files.length&&row.text.trim()===files.map(file=>file.name).join('\n'))text.hidden=true;const keepBottom=following,top=logElement.getBoundingClientRect().top,anchor=[...logElement.querySelectorAll('.chat-message')].find(e=>e.getBoundingClientRect().bottom>=top),anchorTop=anchor?.getBoundingClientRect().top;for(const file of files){const card=document.createElement('button');card.type='button';card.className='attachment-preview';card.title=tr(own?'Open sent files':'Open received files');card.onclick=run(()=>api.collaboration('open-attachment',{token:row.attachment,index:file.index}));if(file.image){const img=document.createElement('img');img.src=file.image;img.alt=file.name;img.loading='lazy';card.append(img);}else{const icon=document.createElement('span');icon.className='attachment-extension';icon.textContent=file.directory?tr('Folder'):file.extension||'FILE';card.append(icon);}const label=document.createElement('span');label.textContent=file.name;const size=document.createElement('small');size.dir='ltr';size.textContent=file.directory?tr('Folder'):file.size<1024?file.size+' B':file.size<1048576?Math.ceil(file.size/1024)+' KB':(file.size/1048576).toFixed(1)+' MB';card.append(label,size);preview.append(card);}if(keepBottom&&following)logElement.scrollTop=logElement.scrollHeight;else if(!following&&anchor?.isConnected){const delta=anchor.getBoundingClientRect().top-anchorTop;if(Math.abs(delta)>.5)logElement.scrollTop+=delta;}updateJump();}).catch(()=>{});
         }
         const actions=document.createElement('div');actions.className='chat-message-actions';
         if(row.attachment){actions.append(button(own?'Open sent files':'Open received files',()=>api.collaboration('open-attachment',{token:row.attachment}),'play_arrow'));actions.append(button('Open containing folder',()=>api.collaboration('reveal-attachment',{token:row.attachment}),'folder'));}
@@ -243,9 +244,9 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('chat-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
   $('chat-older').onclick = run(() => load(true));
   $('chat-compose').onsubmit = run(async () => {
-    if(submitting)return;
+    if(submitting||busy)return;
     const conversation=selected,text=$('chat-text').value,editing=composer.editing;
-    if(!editing&&(voice?.active()||!text.trim())){voice?.activate();return;}
+    if(!editing&&(voice?.active()||!text.trim()&&!composer.files.length)){voice?.activate();return;}
     submitting=true;$('chat-send').disabled=true;
     const filesBefore=JSON.stringify(composer.files);
     try{
@@ -263,15 +264,21 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     // Native text paste preserves selection replacement and Ctrl+Z/redo history.
     if(!image&&text&&!event.clipboardData?.files?.length)return;
     event.preventDefault();
-    if(image){const file=image.getAsFile();if(!file)return;if(file.size>10*1024**2)throw new Error('Clipboard image is too large.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Invalid clipboard image.'));reader.readAsDataURL(file);});if(target===selected)await files('clipboard-image',data);return;}
-    const localFiles=[...(event.clipboardData?.files||[])];if(localFiles.length){await files('drop',localFiles);return;}
-    const data=await api.chatClipboard('read');if(target!==selected)return;if(data.files)await files('clipboard-sources');else if(data.text)insertPaste(data.text);else if(data.image)await files('clipboard-image',data.image);
+    if(event.clipboardData?.files?.length>1){await files('drop',[...event.clipboardData.files],target);return;}
+    if(image){const file=image.getAsFile();if(!file)return;if(file.size>10*1024**2)throw new Error('Clipboard image is too large.');const data=new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Invalid clipboard image.'));reader.readAsDataURL(file);});await files('image',data,target);return;}
+    const localFiles=[...(event.clipboardData?.files||[])];if(localFiles.length){await files('drop',localFiles,target);return;}
+    const data=await api.chatClipboard('read');if(data.files)await files('clipboard',undefined,target);else if(data.text&&target===selected)insertPaste(data.text);else if(data.image)await files('image',data.image,target);
   }catch(e){error(e);}}
   $('chat-text').addEventListener('paste',pasteClipboard);
   $('chat-text').onkeydown = event => {if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-compose').requestSubmit(); } };
-  async function files(operation = 'pick', value) { if (busy) throw new Error('A file transfer is already in progress.'); busy = true; render(); try { await engine.sendFiles(selected, operation, value); } finally { busy = false; render(); } }
-  voice=window.installVoiceMessages({api,conversation:()=>selected,available:()=>!!selected&&!busy&&!submitting,send:(conversation,data)=>engine.sendFiles(conversation,'voice',data),error});
-  composer=window.installMessageComposer({field:$('chat-text'),api,tr,button,pasteClipboard});
+  function files(operation = 'pick', value,target=selected) {
+    if(!target)return Promise.resolve();if(composer.editing)return Promise.reject(Error('Finish editing before adding files.'));
+    const input=Promise.resolve(value);input.catch(()=>{});stagingCount++;busy=true;render();
+    const task=stagingQueue.then(async()=>{const value=await input;const items=operation==='drop'?await api.composerDrop(value):await api.collaboration('composer-stage',{operation,value});composer.addFiles(items,target);voice?.sync();}).finally(()=>{busy=--stagingCount>0;render();});
+    stagingQueue=task.catch(()=>{});return task;
+  }
+  voice=window.installVoiceMessages({api,conversation:()=>selected,available:()=>!!selected&&!busy&&!submitting,hasDraft:()=>!!composer?.files.length||!!composer?.editing,send:(conversation,data)=>engine.sendFiles(conversation,'voice',data),error});
+  composer=window.installMessageComposer({field:$('chat-text'),api,tr,button,pasteClipboard,onChange:()=>voice?.sync()});
   extras=window.installChatExtras({api,engine,self,field:$('chat-text'),selected:()=>selected,button,run,tr,error,reload:()=>load(false)});composer.layout();
   $('chat-send-files').onclick = run(() => files());
   $('chat-send-files').className='icon-button';$('chat-send-files').title=tr('Send files');$('chat-send-files').setAttribute('aria-label',tr('Send files'));

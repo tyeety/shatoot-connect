@@ -13,6 +13,18 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.9 — 2026-11-08
+
+### Changed
+
+- Paste images or copied files into a local attachment draft instead of sending immediately. Show image previews and removable file cards; add further files and a caption before pressing Send. File picking and drag-and-drop use the same draft flow.
+- Keep attachment drafts and captions separate per conversation, including when a picker or clipboard read finishes after switching chats. An attachment-only draft uses the Send action instead of starting voice recording.
+- Show file captions alongside attachment previews. Preserve normal text paste, Markdown inline media, reply references and source-file access after sending.
+
+### Validation
+
+- The RTC chat acceptance test covers image paste without transmission, adding/removing/re-adding another file, switching conversations with a draft, explicit Send with a caption, the received file bytes, and copied-file paste awaiting confirmation.
+
 ## 0.35.8 — 2026-11-07
 
 ### Added

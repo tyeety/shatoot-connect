@@ -90,6 +90,21 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
       return bytes.toString('base64');
     }
     if(op==='inline-media-info'){const files=history.files(value.token);if(!Number.isInteger(value.index)||value.index<0||value.index>=files.length)throw Error('Invalid media.');const file=files[value.index],mime=require('./attachment-protocol.cjs').mime(file);if(!mime)throw Error('Unsupported media.');return {name:path.basename(file),mime};}
+    if(op==='composer-stage'){
+      let paths;
+      if(value.operation==='pick'){const picked=await dialog.showOpenDialog(s.chatWindow||s.win,{properties:['openFile','multiSelections']});paths=picked.canceled?[]:picked.filePaths;}
+      else if(value.operation==='sources')paths=value.value;
+      else if(value.operation==='clipboard')paths=(await clipboardRead(s)).files;
+      else if(value.operation==='image'){
+        const data=value.value;if(typeof data!=='string'||data.length>14*1024**2||!/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(data))throw Error('Invalid clipboard image.');
+        const image=require('electron').nativeImage.createFromDataURL(data);if(image.isEmpty())throw Error('Invalid clipboard image.');const bytes=image.toPNG();if(bytes.length>10*1024**2)throw Error('Clipboard image is too large.');
+        const directory=path.join(app.getPath('userData'),'sent-images');await fs.promises.mkdir(directory,{recursive:true});const file=path.join(directory,`Image-${require('node:crypto').randomUUID()}.png`);await fs.promises.writeFile(file,bytes,{flag:'wx'});paths=[file];
+      }else throw Error('Invalid clipboard operation.');
+      if(!Array.isArray(paths)||paths.length>24||paths.some(file=>typeof file!=='string'||!path.isAbsolute(file)))throw Error('Choose up to 24 media files.');
+      const metadata=await Promise.all(paths.map(async file=>{const stat=await fs.promises.lstat(file);if(stat.isSymbolicLink()||(!stat.isFile()&&!stat.isDirectory()))throw Error('Invalid media.');return {path:file,name:path.basename(file),size:stat.size,directory:stat.isDirectory(),mime:require('./attachment-protocol.cjs').mime(file)};}));
+      s.composerMedia||=new Map();if(s.composerMedia.size>=24)s.composerMedia.delete(s.composerMedia.keys().next().value);const token=require('node:crypto').randomUUID();s.composerMedia.set(token,paths);
+      return metadata.map((file,index)=>({...file,url:`shatoot-media://${token}/${index}`}));
+    }
     if(op==='composer-pick'){const picked=await dialog.showOpenDialog(s.chatWindow||s.win,{properties:['openFile','multiSelections'],filters:[{name:'Media',extensions:['png','jpg','jpeg','gif','webp','avif','mp4','webm','mp3','m4a','ogg','wav']}]});if(picked.canceled)return [];if(picked.filePaths.length>24)throw Error('Choose up to 24 media files.');s.composerMedia||=new Map();if(s.composerMedia.size>=24)s.composerMedia.delete(s.composerMedia.keys().next().value);const token=require('node:crypto').randomUUID();s.composerMedia.set(token,picked.filePaths);return picked.filePaths.map((file,index)=>{const mime=require('./attachment-protocol.cjs').mime(file);if(!mime)throw Error('Unsupported media.');return {path:file,name:path.basename(file),mime,url:`shatoot-media://${token}/${index}`};});}
     if(op==='attachment-preview'){
       const files=history.files(value.token),result=[];s.attachmentPreviews||=new Map();

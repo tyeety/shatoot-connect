@@ -53,3 +53,4 @@
 .mi.info{--mi:url('assets/icons/info_outline.svg')}
 
 .message-quick-actions{display:flex;align-items:center;gap:3px;margin-inline-start:auto;flex-shrink:0}.chat-message-footer .message-quick-actions .icon-button{display:inline-flex;align-items:center;justify-content:center}.chat-message-footer .message-quick-actions .icon-button:hover{background:var(--border)}
+#chat-pending-files{display:flex;gap:8px;overflow:auto;max-height:150px;padding:6px 0}#chat-pending-files[hidden]{display:none}.pending-file{display:flex;align-items:center;gap:7px;flex:0 0 auto;max-width:240px;padding:6px 8px;border:1px solid var(--border);border-radius:9px;background:var(--card)}.pending-file img{width:64px;height:64px;object-fit:contain;border-radius:5px}.pending-file>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;font-size:12px}.pending-file button{flex-shrink:0;width:26px;height:26px;min-height:26px;padding:2px}

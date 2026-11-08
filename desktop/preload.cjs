@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('shatootconnect', {
   closeChat: () => ipcRenderer.invoke('chat-close'),
   chatCall: (operation, args) => ipcRenderer.invoke('chat-call', operation, args),
   chatDrop: (conversation, files) => ipcRenderer.invoke('chat-call', 'sendFiles', [conversation, 'sources', files.map(file => webUtils.getPathForFile(file))]),
+  composerDrop: files => ipcRenderer.invoke('collaboration','composer-stage',{operation:'sources',value:files.map(file=>webUtils.getPathForFile(file))}),
   chatPublish: snapshot => ipcRenderer.send('chat-publish', snapshot),
   onChatSnapshot: callback => ipcRenderer.on('chat-snapshot', (_event, value) => callback(value)),
   onChatCommand: callback => ipcRenderer.on('chat-command', async (_event, value) => { try { ipcRenderer.send('chat-result', { id: value.id, value: await callback(value.operation, value.args) }); } catch(error) { ipcRenderer.send('chat-result', { id: value.id, error: error.message }); } }),

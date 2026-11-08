@@ -2,6 +2,7 @@
 window.i18n = (() => {
   let language = 'en';
   const entries = [
+    ['حذف فایل','Remove file'],['پیش از افزودن فایل، ویرایش پیام را تمام کنید.','Finish editing before adding files.'],
     ['علامت‌گذاری به‌عنوان خوانده‌شده','Mark as read'],['نشانی‌های IP','IP addresses'],['انجام عمل اعلان ممکن نشد.','Could not complete the notification action.'],
     ['تصویر ۱۰۰٪','100% image'],
     ['ویندوز ورودی ریموت را رد کرد. در میزبان، پنجرهٔ Administrator را ببندید یا Shatoot Connect را با دسترسی Administrator اجرا کنید. پیام UAC باید در خود میزبان تأیید شود.','Windows rejected remote input. On the host, close the administrator window or restart Shatoot Connect as administrator. UAC must be handled locally.'],
