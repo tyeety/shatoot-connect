@@ -1,6 +1,6 @@
 {
   "name": "shatoot-connect",
-  "version": "0.35.15",
+  "version": "0.35.16",
   "description": "Windows remote desktop, LAN discovery, peer-to-peer chat, groups and file transfer",
   "main": "desktop/main.cjs",
   "private": true,
@@ -60,6 +60,7 @@
   },
   "build": {
     "electronDownload": {
+      "force": false,
       "checksums": {
         "electron-v44.10.1-win32-x64.zip": "5099bdc11c6a78edff35851491c1f8228a1c2e844e1b376eee219402c42c6011"
       }

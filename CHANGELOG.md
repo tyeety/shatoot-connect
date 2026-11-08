@@ -13,6 +13,16 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.16 — 2026-11-08
+
+### Changed
+
+- Remove the older-message button completely and fetch previous messages automatically near the top, preserving the visible reading position and serializing repeated scroll requests.
+
+### Fixed
+
+- Select the checksum-aware Electron download options explicitly so the pinned official SHA-256 is actually used. Keep archive validation and cache reuse enabled without the failing checksum-text request.
+
 ## 0.35.15 — 2026-11-08
 
 ### Changed
