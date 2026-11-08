@@ -10,7 +10,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   const pendingNew=new Set();let readThrough=0;
   const logElement=$('chat-messages');
   const selectingText=()=>{const selection=window.getSelection();return !!selection&&!selection.isCollapsed&&logElement.contains(selection.anchorNode)&&logElement.contains(selection.focusNode);};
-  document.addEventListener('selectionchange',()=>{following=selectingText()?false:atBottom();});
+  document.addEventListener('selectionchange',()=>{following=selectingText()?false:atBottom();if(!selectingText())loadOlderNearTop();});
   const atBottom=()=>logElement.scrollHeight-logElement.scrollTop-logElement.clientHeight<45;
   let following=true;
   let editingGroup,groupAvatar='',groupBackground='',connecting=false,connectSequence=0,social;let selectingTarget=false;
@@ -30,14 +30,18 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   window.renderChatPerson=person;
   const contacts=document.createElement('div');contacts.className='chat-contact-list';$('chat-conversations').before(contacts);contacts.append($('chat-conversations'),$('chat-new-group'));
   window.overlayScroll($('chat-conversations'));window.overlayScroll($('chat-messages'));
-  const olderButton=$('chat-older');olderButton.type='button';olderButton.innerHTML='<span class="mi arrow_forward" aria-hidden="true"></span><span class="sr-only">Load older messages</span>';olderButton.setAttribute('aria-controls','chat-messages');logElement.parentElement.append(olderButton);
-  function updateOlder(){olderButton.hidden=!olderAvailable||following||logElement.scrollTop>60;olderButton.title=olderButton.ariaLabel=tr('Load older messages');}
+  function loadOlderNearTop(){
+    if(!selected||following||!olderAvailable||logElement.scrollTop>60||selectingText())return;
+    const flight=historyFlight,version=selectionVersion;
+    if(flight?.version===version){if(!flight.olderOnFinish){flight.olderOnFinish=true;flight.promise.then(()=>{if(version===selectionVersion)loadOlderNearTop();},()=>{});}return;}
+    load(true).catch(error);
+  }
   window.installPinnedReorder($('chat-conversations'),async order=>{await api.collaboration('reorder-pins',{order:window.mergeVisiblePins(order,[...(engine.catalog.pinOrder||[]),...Object.keys(engine.catalog.pins||{}).filter(id=>!(engine.catalog.pinOrder||[]).includes(id))])});await engine.refresh();});
   const jump=document.createElement('button');jump.id='chat-jump';jump.type='button';jump.className='icon-button';jump.innerHTML='<span class="mi arrow_forward" aria-hidden="true"></span><span class="unread-badge"></span>';jump.hidden=true;logElement.parentElement.append(jump);
   function updateJump(){jump.hidden=!selected||atBottom();jump.title=tr(pendingNew.size?'First unread message':'Scroll to latest');jump.setAttribute('aria-label',jump.title);const badge=jump.querySelector('.unread-badge');badge.hidden=!pendingNew.size;badge.textContent=String(pendingNew.size);}
   function updateDays(){const top=logElement.getBoundingClientRect().top;for(const group of logElement.children){const label=group.querySelector('.chat-day-label');label?.classList.toggle('is-stuck',group.getBoundingClientRect().top<top-1);}}
   function visibleNew(){if(!document.hasFocus()||!pendingNew.size)return;const viewport=logElement.getBoundingClientRect();for(const item of logElement.querySelectorAll('.chat-message'))if(pendingNew.has(item.dataset.messageId)){const r=item.getBoundingClientRect();if(r.top>=viewport.top-1&&r.bottom<=viewport.bottom+1){const row=rows.find(m=>m.id===item.dataset.messageId);readThrough=Math.max(readThrough,row?.receivedAt||0);pendingNew.delete(item.dataset.messageId);}}}
-  function timelineScroll(){following=atBottom()&&!selectingText();updateOlder();if(following){pendingNew.clear();readThrough=Math.max(readThrough,...rows.map(m=>m.receivedAt));}else visibleNew();updateJump();updateDays();logElement.classList.add('timeline-scrolling');clearTimeout(dayFadeTimer);dayFadeTimer=setTimeout(()=>logElement.classList.remove('timeline-scrolling'),1200);reportView().catch(()=>{});}
+  function timelineScroll(){following=atBottom()&&!selectingText();if(following){pendingNew.clear();readThrough=Math.max(readThrough,...rows.map(m=>m.receivedAt));}else visibleNew();updateJump();updateDays();logElement.classList.add('timeline-scrolling');clearTimeout(dayFadeTimer);dayFadeTimer=setTimeout(()=>logElement.classList.remove('timeline-scrolling'),1200);reportView().catch(()=>{});loadOlderNearTop();}
   logElement.addEventListener('scroll',timelineScroll,{passive:true});
   jump.onclick=async()=>{try{if(pendingNew.size){if(!rows.some(row=>pendingNew.has(row.id)))await load(false);const first=[...logElement.querySelectorAll('.chat-message')].find(item=>pendingNew.has(item.dataset.messageId));if(first){first.scrollIntoView({block:'start',behavior:'smooth'});return;}}logElement.scrollTo({top:logElement.scrollHeight,behavior:'smooth'});}catch(e){error(e);}};
   new ResizeObserver(()=>{if(resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(following&&!selectingText())logElement.scrollTop=logElement.scrollHeight;updateJump();updateDays();});}).observe(logElement);
@@ -78,7 +82,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     catch(error){if(sequence===connectSequence)throw error;}
     finally{selectingTarget=false;if(sequence===connectSequence){connecting=false;cancelConnect.hidden=true;$('chat-connect').disabled=false;$('chat-address').disabled=false;}}
   }
-  async function select(id) {if(id===selected){await load(false);return;}composer?.switch(id); if(id!==selected){voice?.reset();replying=null;renderReply();}if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = [];olderAvailable=false;updateOlder();pendingNew.clear();readThrough=0;following=true; selectionVersion++; $('chat-search').value = ''; render(); const version=selectionVersion;await Promise.all([api.collaboration('conversation-state',{conversation:id,selected:true}),load(false)]);if(version!==selectionVersion)return;engine.catalog.lastSelected=id;await reportView();publish(); }
+  async function select(id) {if(id===selected){await load(false);return;}composer?.switch(id); if(id!==selected){voice?.reset();replying=null;renderReply();}if(id.startsWith('p:')){const route=routeFor(id.slice(2));if(route&&!online(id.slice(2)))engine.connect(route).catch(()=>{});} selected = id; window.chatSelected = id; rows = [];olderAvailable=false;pendingNew.clear();readThrough=0;following=true; selectionVersion++; $('chat-search').value = ''; render(); const version=selectionVersion;await Promise.all([api.collaboration('conversation-state',{conversation:id,selected:true}),load(false)]);if(version!==selectionVersion)return;engine.catalog.lastSelected=id;await reportView();publish(); }
   async function navigate(target){
     collectionFilter.clear();await select(target.conversation);if(selected!==target.conversation)return;
     const version=selectionVersion;targetMessage=target.message||'';
@@ -175,7 +179,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     if(stick){log.scrollTop=log.scrollHeight;following=true;}else if(anchor?.isConnected){const delta=anchor.getBoundingClientRect().top-anchorTop;if(Math.abs(delta)>.5)log.scrollTop+=delta;}
     if(atBottom())readThrough=Math.max(readThrough,...rows.map(m=>m.receivedAt));else{const viewport=log.getBoundingClientRect();for(const item of log.querySelectorAll('.chat-message')){const r=item.getBoundingClientRect();if(r.top>=viewport.top-1&&r.bottom<=viewport.bottom+1)readThrough=Math.max(readThrough,rows.find(m=>m.id===item.dataset.messageId)?.receivedAt||0);}}
     queueMicrotask(()=>reportView().catch(()=>{}));
-    updateDays();updateJump();updateOlder();
+    updateDays();updateJump();
   }
   function render(refreshHistory = false) {
     if (!engine) return;
@@ -244,8 +248,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
   $('refresh-discovery').onclick = run(async () => {renderDiscovery(await api.discovery());window.refreshFeedback($('network-list'));});
   api.onDiscovery(renderDiscovery);
   $('chat-connect-form').onsubmit = run(async () => { const address = $('chat-address').value.trim(); await start({ type: address.includes('.') || address.includes(':') ? 'lan' : 'id', address }); });
-  $('chat-search').oninput = () => { olderAvailable=false;updateOlder();clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
-  $('chat-older').onclick = run(() => load(true));
+  $('chat-search').oninput = () => { olderAvailable=false;clearTimeout(searchTimer); searchTimer = setTimeout(() => { rows = []; selectionVersion++; load(false).catch(error); }, 200); };
   $('chat-compose').onsubmit = run(async () => {
     if(submitting||busy)return;
     const conversation=selected,text=$('chat-text').value,editing=composer.editing;

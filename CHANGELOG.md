@@ -13,6 +13,17 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.14 — 2026-11-08
+
+### Changed
+
+- Remove the older-history button entirely. Scrolling near the beginning of a conversation automatically loads the previous page while preserving the visible message anchor.
+- Keep one history request in flight, defer a top-scroll request until an ongoing refresh completes, and stop when no older matching messages remain. Opening a conversation stays at its latest page; selecting text does not initiate older-page loading.
+
+### Validation
+
+- Real chat UI acceptance scrolls to the top repeatedly without clicking a button, verifies older messages arrive without duplicates or a scroll jump, and checks background refresh preserves the reading position.
+
 ## 0.35.13 — 2026-11-08
 
 ### Fixed
