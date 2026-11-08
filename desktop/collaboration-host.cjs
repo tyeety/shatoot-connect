@@ -39,6 +39,7 @@ function installCollaboration({ systemInfo=async()=>{throw Error('System details
     if(op==='message')return history.history({conversation:value.conversation,limit:100}).find(m=>m.id===value.id)||history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation);
     if(op==='forward-sources'){const row=history.load().messages.find(m=>m.id===value.id&&m.conversation===value.conversation&&!m.deleted);if(!row||row.kind!=='file')throw Error('This message is unavailable.');const token=Object.entries(history.load().attachments).find(([,attachment])=>attachment.message===row.id&&attachment.conversation===row.conversation)?.[0];if(!token)throw Error('This message is unavailable.');const files=history.files(token);if(!files.length)throw Error('This message is unavailable.');return files;}
     if(op==='history')return history.history(value).map(m=>({...m,displayName:decorateComputer({deviceId:m.sender,name:m.name}).displayName||m.name}));
+    if(op==='latest-own-message')return history.load().messages.findLast(m=>m.conversation===value.conversation&&m.sender===s.identity.deviceId&&!m.deleted&&['text','file'].includes(m.kind));
     if(op==='conversation-state')return history.conversationState(value.conversation,value);
     if(op==='reorder-pins')return history.reorderPins(value.order);
     if (op === 'file-policy') return history.filePolicy(value.conversation,value.mode);

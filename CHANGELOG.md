@@ -13,6 +13,17 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.10 — 2026-11-08
+
+### Added
+
+- Press Arrow Up in an empty chat composer to edit the latest non-deleted message sent by this device in that conversation. Look up local history rather than the current search/page, and use the existing inline editor and save/cancel flow.
+- Support the shortcut in both the visual Markdown editor and source mode. Preserve text/file drafts, ordinary cursor navigation, modifier shortcuts and IME composition; discard a pending lookup if the user changes conversation or begins typing.
+
+### Validation
+
+- Real RTC chat acceptance opens the latest own message after an incoming reply, saves the edit on the other peer, checks Markdown-source recall/cancel, and verifies that a nonempty draft is preserved.
+
 ## 0.35.9 — 2026-11-08
 
 ### Changed

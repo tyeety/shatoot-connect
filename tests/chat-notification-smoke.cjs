@@ -123,6 +123,18 @@ module.exports=async({host,createWindow,states,notices,screen,app,log,artifacts}
   await run(chat,`document.querySelector('#chat-forward-dialog [data-conversation="g:${forwardGroup}"]').click();true`);
   await until(()=>owner.chatStore.history({conversation:'g:'+forwardGroup}).some(m=>m.forwardedFrom?.id===receiptMessage));await until(()=>run(chat,"!document.querySelector('#chat-forward-dialog')"));
   log('Live profile status propagated; default avatars, last-message date/time, reply quotes and forwarded text survived real private RTC');
+  const latestOwn=owner.chatStore.load().messages.findLast(m=>m.conversation===conversation&&m.sender===owner.identity.deviceId&&!m.deleted);
+  await run(viewer,`collaboration.send('p:${owner.identity.deviceId}','Incoming after latest own fixture').then(()=>true)`);await until(()=>owner.chatStore.history({conversation}).some(m=>m.text==='Incoming after latest own fixture'));
+  await run(chat,"document.querySelector('#chat-text').value='';document.querySelector('#chat-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#chat-editor .tiptap').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));true");
+  await until(()=>run(chat,`!document.querySelector('.edit-message-banner').hidden&&document.querySelector('#chat-text').value===${JSON.stringify(latestOwn.text)}`));
+  await run(chat,"document.querySelector('#chat-text').value='Arrow-up edited fixture';document.querySelector('#chat-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#chat-compose').requestSubmit();true");
+  await until(()=>peer.chatStore.history({conversation:'p:'+owner.identity.deviceId}).find(m=>m.id===latestOwn.id)?.text==='Arrow-up edited fixture');
+  await run(chat,"document.querySelector('.rich-toolbar .code').parentElement.click();document.querySelector('#chat-text').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));true");
+  await until(()=>run(chat,"!document.querySelector('.edit-message-banner').hidden"));
+  await run(chat,"document.querySelector('#chat-text').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));document.querySelector('#chat-text').value='Keep my draft';document.querySelector('#chat-text').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#chat-text').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));true");
+  if(!await run(chat,"document.querySelector('.edit-message-banner').hidden&&document.querySelector('#chat-text').value==='Keep my draft'"))throw Error('ArrowUp overwrote a nonempty draft');
+  await run(chat,"document.querySelector('.rich-toolbar .code').parentElement.click();true");
+  log('ArrowUp recalls the latest own message after incoming replies, saves the edit across RTC, supports Markdown source and preserves nonempty drafts');
   await run(chat,"document.querySelector('#chat-text').value='';document.querySelector('#chat-text').dispatchEvent(new Event('input'));document.querySelector('#chat-text').focus();true");await chat.webContents.insertText('abCD');for(let n=0;n<2;n++){chat.webContents.sendInputEvent({type:'keyDown',keyCode:'Left'});chat.webContents.sendInputEvent({type:'keyUp',keyCode:'Left'});}await pause(100);await run(chat,"document.querySelector('#chat-emoji').click();true");
   await until(()=>run(chat,"document.querySelector('#chat-emoji-dialog')?.open&&document.querySelectorAll('.emoji-category').length===10"));
   fs.writeFileSync(path.join(artifacts,'chat-emoji-picker.png'),(await chat.webContents.capturePage()).toPNG());

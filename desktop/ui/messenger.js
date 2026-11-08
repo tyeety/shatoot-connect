@@ -278,7 +278,7 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     stagingQueue=task.catch(()=>{});return task;
   }
   voice=window.installVoiceMessages({api,conversation:()=>selected,available:()=>!!selected&&!busy&&!submitting,hasDraft:()=>!!composer?.files.length||!!composer?.editing,send:(conversation,data)=>engine.sendFiles(conversation,'voice',data),error});
-  composer=window.installMessageComposer({field:$('chat-text'),api,tr,button,pasteClipboard,onChange:()=>voice?.sync()});
+  composer=window.installMessageComposer({field:$('chat-text'),api,tr,button,pasteClipboard,onChange:()=>voice?.sync(),onEditLatest:editLatest});
   extras=window.installChatExtras({api,engine,self,field:$('chat-text'),selected:()=>selected,button,run,tr,error,reload:()=>load(false)});composer.layout();
   $('chat-send-files').onclick = run(() => files());
   $('chat-send-files').className='icon-button';$('chat-send-files').title=tr('Send files');$('chat-send-files').setAttribute('aria-label',tr('Send files'));
@@ -323,6 +323,13 @@ window.installMessenger = ({ api, self, internet, ensureInternet, remote, detach
     return new Promise(resolve=>{let accepted=false;confirm.onclick=()=>{accepted=true;dialog.close();};cancel.onclick=()=>dialog.close();dialog.addEventListener('close',()=>{dialog.remove();resolve(accepted);},{once:true});dialog.showModal();cancel.focus();});
   }
   function editMessage(row){composer.edit(row);}
+  let recalling=false;
+  function editLatest(){
+    if(recalling||!selected||busy||submitting||voice?.active()||engine.catalog.blocked?.[selected.slice(2)])return false;
+    const conversation=selected,version=selectionVersion;recalling=true;
+    api.collaboration('latest-own-message',{conversation}).then(row=>{if(row&&selected===conversation&&selectionVersion===version&&!busy&&!submitting&&!voice?.active()&&!composer.editing&&!composer.files.length&&!$('chat-text').value.length)editMessage(row);}).catch(error).finally(()=>{recalling=false;});
+    return true;
+  }
   if(!detached)setInterval(()=>engine.reconnectKnown().catch(()=>{}),5000);
   if(!detached){setInterval(()=>engine.dispatchDue().catch(error),1000);engine.ready.then(()=>engine.dispatchDue()).catch(error);}
   engine.ready.then(async()=>{render();await reportView();if(!detached)engine.reconnectKnown().catch(()=>{});}).catch(error); api.discovery().then(renderDiscovery).catch(error);
