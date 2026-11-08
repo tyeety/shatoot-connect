@@ -1,6 +1,6 @@
 {
   "name": "shatoot-connect",
-  "version": "0.35.14",
+  "version": "0.35.15",
   "description": "Windows remote desktop, LAN discovery, peer-to-peer chat, groups and file transfer",
   "main": "desktop/main.cjs",
   "private": true,
@@ -59,6 +59,11 @@
     "mediabunny": "1.65.0"
   },
   "build": {
+    "electronDownload": {
+      "checksums": {
+        "electron-v44.10.1-win32-x64.zip": "5099bdc11c6a78edff35851491c1f8228a1c2e844e1b376eee219402c42c6011"
+      }
+    },
     "appId": "com.shatootsoft.connect",
     "productName": "Shatoot Connect",
     "asar": true,

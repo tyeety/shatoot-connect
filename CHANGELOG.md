@@ -13,6 +13,16 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.15 — 2026-11-08
+
+### Changed
+
+- Include automatic older-message loading from 0.35.14: scroll near the beginning to fetch history with no manual button and no jump in the reading position.
+
+### Fixed
+
+- Pin the Windows Electron archive SHA-256 published by the upstream GitHub release. Packaging still verifies the runtime archive, but no longer depends on the separate checksum-text download that returned HTTP 504 and blocked 0.35.14 installers.
+
 ## 0.35.14 — 2026-11-08
 
 ### Changed
