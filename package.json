@@ -1,6 +1,6 @@
 {
   "name": "shatoot-connect",
-  "version": "0.35.17",
+  "version": "0.35.18",
   "description": "Windows remote desktop, LAN discovery, peer-to-peer chat, groups and file transfer",
   "main": "desktop/main.cjs",
   "private": true,
@@ -23,7 +23,7 @@
     "test:crash-recorder": "electron . --smoke-test --crash-recorder-smoke",
     "check:release": "node build/release-notes.cjs",
     "build:native": "dotnet publish native/ShatootConnect.Input.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native/publish",
-    "dist": "npm run build:native && electron-builder --win nsis portable --x64",
+    "dist": "node node_modules/electron/install.js && npm run build:native && electron-builder --win nsis portable --x64",
     "test:updater": "powershell -NoProfile -ExecutionPolicy Bypass -File build/test-updater.ps1",
     "test:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File build/test-installer.ps1",
     "test:packaged": "node build/test-packaged.cjs",

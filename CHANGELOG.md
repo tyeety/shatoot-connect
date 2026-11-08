@@ -13,6 +13,16 @@ extracts the matching section and rejects missing or incomplete release notes.
 
 ### Fixed
 
+## 0.35.18 — 2026-11-08
+
+### Changed
+
+- Remove the older-history button entirely. Scroll near the top to load older messages automatically without moving the reading position or creating duplicate requests.
+
+### Fixed
+
+- Explicitly prepare the locked Electron runtime with its supplied installer and checksums before packaging. Electron 44 does not install its runtime automatically during npm ci; package that verified runtime without a second checksum-file download.
+
 ## 0.35.17 — 2026-11-08
 
 ### Changed
